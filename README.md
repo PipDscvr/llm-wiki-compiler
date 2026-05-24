@@ -22,11 +22,12 @@ export ANTHROPIC_API_KEY=sk-...
 # export LLMWIKI_PROVIDER=openai
 # export OPENAI_API_KEY=sk-...
 
-llmwiki ingest https://some-article.com
-llmwiki compile
+llmwiki quickstart ./notes.md
 llmwiki query "what is X?"
 llmwiki view --open
 ```
+
+`llmwiki quickstart ./notes.md` ingests one supported source, compiles the wiki, and opens the local viewer when pages are ready. Use `--no-open` to stop after compile, `--review` to queue candidates instead of writing pages, or `--json` for an agent-friendly envelope. If you're inside an existing project and unsure what to do next, run `llmwiki next`.
 
 
 <br>
@@ -247,6 +248,7 @@ Pages include source attribution in frontmatter. Paragraphs are annotated with `
 |---------|-------------|
 | `llmwiki ingest <url\|file>` | Fetch a URL or copy a local file into `sources/` |
 | `llmwiki ingest-session <path>` | Import a Claude/Codex/Cursor session export (single file or whole directory) into `sources/` |
+| `llmwiki quickstart <source>` | Ingest a source and compile a wiki in one step; supports `--review`, `--no-open`, `--provider`, `--lang`, and `--json` |
 | `llmwiki compile` | Incremental compile: extract concepts, generate wiki pages |
 | `llmwiki compile --review` | Write candidate pages to `.llmwiki/candidates/` instead of `wiki/` so you can review before they land |
 | `llmwiki compile --lang <code>` | Generate wiki content in the given language (e.g. `Chinese`, `ja`, `zh-CN`); also works on `query` |
@@ -260,6 +262,7 @@ Pages include source attribution in frontmatter. Paragraphs are annotated with `
 | `llmwiki query "question" --save` | Answer and save the result as a wiki page |
 | `llmwiki export [--target <name>]` | Export the wiki to portable formats — `llms.txt`, `llms-full.txt`, JSON, JSON-LD, GraphML, Marp slides |
 | `llmwiki view [--open]` | Start a read-only local web viewer for browsing, searching, and inspecting the compiled wiki |
+| `llmwiki next [--json]` | Show the recommended next action for this project (read-only); `--json` emits a stable envelope for agents |
 | `llmwiki lint` | Check wiki quality (broken links, orphans, empty pages, low confidence, contradictions, etc.) |
 | `llmwiki watch` | Auto-recompile when `sources/` changes |
 | `llmwiki serve [--root <dir>]` | Start an MCP server exposing wiki tools to AI agents |
@@ -385,10 +388,8 @@ Try it on any article or document:
 
 ```bash
 mkdir my-wiki && cd my-wiki
-llmwiki ingest https://en.wikipedia.org/wiki/Andrej_Karpathy
-llmwiki compile
+llmwiki quickstart https://en.wikipedia.org/wiki/Andrej_Karpathy
 llmwiki query "What terms did Andrej coin?"
-llmwiki view --open
 ```
 
 See `examples/basic/` in the repo for pre-generated output you can browse without an API key.
