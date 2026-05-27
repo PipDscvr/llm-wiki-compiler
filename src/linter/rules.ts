@@ -16,6 +16,7 @@ import {
   parseProvenanceMetadata,
   safeReadFile,
   slugify,
+  splitCitationMarker,
 } from "../utils/markdown.js";
 import {
   CONCEPTS_DIR,
@@ -88,7 +89,7 @@ async function readMarkdownFiles(
 /**
  * Collect all wiki pages from both concepts/ and queries/ directories.
  */
-async function collectAllPages(
+export async function collectAllPages(
   root: string,
 ): Promise<Array<{ filePath: string; content: string }>> {
   const conceptPages = await readMarkdownFiles(path.join(root, CONCEPTS_DIR));
@@ -346,7 +347,7 @@ function countUncitedProseParagraphs(body: string): number {
 }
 
 /** Regex matching the `:start-end` span suffix on a citation entry. */
-const COLON_SPAN_PATTERN = /^[^:#]+:(\d+)(?:-(\d+))?$/;
+const COLON_SPAN_PATTERN = /^[^:#]+:(\d+)(?:[,-]\s*(\d+))?$/;
 
 /** Regex matching the `#Lstart-Lend` span suffix on a citation entry. */
 const HASH_SPAN_PATTERN = /^[^:#]+#L(\d+)(?:-L(\d+))?$/;
@@ -507,7 +508,7 @@ async function collectBrokenForMarker(
   lineCountCache: Map<string, number>,
   out: LintResult[],
 ): Promise<void> {
-  for (const part of captured.split(",")) {
+  for (const part of splitCitationMarker(captured)) {
     const trimmed = part.trim();
     if (trimmed.length === 0) continue;
     const filename = stripSpanSuffix(trimmed);
@@ -573,7 +574,7 @@ export async function checkMalformedClaimCitations(root: string): Promise<LintRe
 export function checkPageMalformedCitations(content: string, filePath: string): LintResult[] {
   const results: LintResult[] = [];
   for (const { captured, line } of findMatchesInContent(content, CITATION_PATTERN)) {
-    for (const part of captured.split(",")) {
+    for (const part of splitCitationMarker(captured)) {
       if (!isMalformedCitationEntry(part)) continue;
       results.push({
         rule: "malformed-claim-citation",

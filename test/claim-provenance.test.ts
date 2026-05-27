@@ -58,6 +58,53 @@ describe("extractClaimCitations parser", () => {
       { file: "b.md", lines: { start: 1, end: 3 } },
     ]);
   });
+
+  it("treats comma-separated line numbers as two individual line spans on the same file", () => {
+    const citations = extractClaimCitations("A claim. ^[source.md:1, 12]");
+    expect(citations).toHaveLength(1);
+    expect(citations[0].raw).toBe("source.md:1, 12");
+    expect(citations[0].spans).toEqual([
+      { file: "source.md", lines: { start: 1, end: 1 } },
+      { file: "source.md", lines: { start: 12, end: 12 } },
+    ]);
+  });
+
+  it("splits a digit-leading filename after a letter-leading one", () => {
+    const citations = extractClaimCitations("A claim. ^[source.md, 2024-notes.md]");
+    expect(citations).toHaveLength(1);
+    expect(citations[0].spans).toEqual([
+      { file: "source.md" },
+      { file: "2024-notes.md" },
+    ]);
+  });
+
+  it("splits a digit-leading filename before a letter-leading one", () => {
+    const citations = extractClaimCitations("A claim. ^[2024-notes.md, source.md]");
+    expect(citations).toHaveLength(1);
+    expect(citations[0].spans).toEqual([
+      { file: "2024-notes.md" },
+      { file: "source.md" },
+    ]);
+  });
+
+  it("handles two digit-leading filenames", () => {
+    const citations = extractClaimCitations("A claim. ^[99problems.md, 1.md]");
+    expect(citations).toHaveLength(1);
+    expect(citations[0].spans).toEqual([
+      { file: "99problems.md" },
+      { file: "1.md" },
+    ]);
+  });
+
+  it("still preserves comma-line form when followed by digit-leading filename", () => {
+    const citations = extractClaimCitations("A claim. ^[source.md:1, 12, 2024-notes.md]");
+    expect(citations).toHaveLength(1);
+    expect(citations[0].spans).toEqual([
+      { file: "source.md", lines: { start: 1, end: 1 } },
+      { file: "source.md", lines: { start: 12, end: 12 } },
+      { file: "2024-notes.md" },
+    ]);
+  });
 });
 
 describe("extractCitations backwards compatibility", () => {
@@ -74,6 +121,10 @@ describe("extractCitations backwards compatibility", () => {
     const body = "P1. ^[a.md]\n\nP2. ^[b.md:5-7, a.md]";
     const result = extractCitations(body);
     expect(result.sort()).toEqual(["a.md", "b.md"]);
+  });
+
+  it("does not emit a bogus file entry for comma-separated line numbers", () => {
+    expect(extractCitations("A claim. ^[source.md:1, 12]")).toEqual(["source.md"]);
   });
 });
 
@@ -96,6 +147,14 @@ describe("inspectProvenance", () => {
   it("records paragraph-only citations as empty range list", () => {
     const map = inspectProvenance("Para. ^[a.md]");
     expect(map.get("a.md")).toEqual([]);
+  });
+
+  it("records comma-separated line numbers as two individual ranges on the same file", () => {
+    const map = inspectProvenance("Claim. ^[source.md:1, 12]");
+    expect(map.get("source.md")).toEqual([
+      { start: 1, end: 1 },
+      { start: 12, end: 12 },
+    ]);
   });
 });
 
@@ -135,6 +194,11 @@ describe("isMalformedCitationEntry", () => {
 
   it("rejects line 0 in hash form", () => {
     expect(isMalformedCitationEntry("file.md#L0-L3")).toBe(true);
+  });
+
+  it("accepts comma-separated line numbers as a valid span form", () => {
+    expect(isMalformedCitationEntry("file.md:8,12")).toBe(false);
+    expect(isMalformedCitationEntry("file.md:1, 5")).toBe(false);
   });
 });
 

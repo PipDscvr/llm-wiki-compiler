@@ -19,7 +19,14 @@ import type {
 const CITATION_MARKER_PATTERN = /\^\[([^\]]+)\]/g;
 
 /** Regex matching the optional `:start-end` or `#Lstart-Lend` span suffix on a citation entry. */
-const SPAN_SUFFIX_PATTERN = /^(?<file>[^:#]+)(?:(?::(?<colonStart>\d+)(?:-(?<colonEnd>\d+))?)|(?:#L(?<hashStart>\d+)(?:-L(?<hashEnd>\d+))?))?$/;
+const SPAN_SUFFIX_PATTERN = /^(?<file>[^:#]+)(?:(?::(?<colonStart>\d+)(?:[,-]\s*(?<colonEnd>\d+))?)|(?:#L(?<hashStart>\d+)(?:-L(?<hashEnd>\d+))?))?$/;
+
+/**
+ * Regex matching a colon-form entry with two or more comma-separated line numbers,
+ * e.g. `source.md:1, 12` or `source.md:3,7,42`. Captured `lines` is the raw
+ * digit-and-comma string; each token expands into its own single-line SourceSpan.
+ */
+const COLON_MULTILINE_PATTERN = /^(?<file>[^:#]+):(?<lines>\d+(?:,\s*\d+)+)$/;
 
 /** The minimum valid line number in a source span (lines are 1-indexed). */
 const MIN_LINE_NUMBER = 1;
@@ -153,15 +160,55 @@ export function extractClaimCitations(body: string): ClaimCitation[] {
   return citations;
 }
 
-/** Parse the inside of `^[...]` into one or more SourceSpan entries. */
+/**
+ * Split a raw citation marker interior (the content between `^[` and `]`) into
+ * individual source-entry strings, without separating comma-separated line
+ * numbers like the `12` in `source.md:1, 12`.
+ *
+ * The rule: split on every comma EXCEPT those followed by a purely-digit token
+ * (which must be a line-number continuation). This correctly handles
+ * digit-leading filenames such as `2024-notes.md`, `99problems.md`, and `1.md`.
+ */
+export function splitCitationMarker(inner: string): string[] {
+  return inner.split(/,(?!\s*\d+\s*(?:,|$))/);
+}
+
+/**
+ * Parse the inside of `^[...]` into one or more SourceSpan entries.
+ * Delegates splitting to {@link splitCitationMarker} so `source.md:1, 12`
+ * stays as one entry while digit-leading filenames like `2024-notes.md` are
+ * correctly recognised as separate entries.
+ */
 function parseCitationEntries(inner: string): SourceSpan[] {
   const spans: SourceSpan[] = [];
-  for (const part of inner.split(",")) {
+  for (const part of splitCitationMarker(inner)) {
     const trimmed = part.trim();
     if (trimmed.length === 0) continue;
-    const span = parseSpanEntry(trimmed);
-    // Skip entries with invalid line ranges — the linter flags them separately.
-    if (span !== undefined) spans.push(span);
+    spans.push(...parseSpanEntries(trimmed));
+  }
+  return spans;
+}
+
+/**
+ * Dispatch a single trimmed citation entry to the right span parser.
+ * Comma-separated line numbers (e.g. `file.md:1, 12`) expand into one
+ * SourceSpan per line; everything else delegates to parseSpanEntry.
+ */
+function parseSpanEntries(entry: string): SourceSpan[] {
+  const multi = COLON_MULTILINE_PATTERN.exec(entry);
+  if (multi?.groups) return parseCommaLines(multi.groups.file, multi.groups.lines);
+  const single = parseSpanEntry(entry);
+  return single !== undefined ? [single] : [];
+}
+
+/** Expand a comma-separated line-number string into individual single-line spans. */
+function parseCommaLines(file: string, linesStr: string): SourceSpan[] {
+  const spans: SourceSpan[] = [];
+  for (const token of linesStr.split(/,\s*/)) {
+    const lineNum = Number(token);
+    if (isValidLineRange(lineNum, lineNum)) {
+      spans.push({ file, lines: { start: lineNum, end: lineNum } });
+    }
   }
   return spans;
 }
