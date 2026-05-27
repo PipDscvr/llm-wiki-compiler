@@ -1,6 +1,6 @@
 {
   "name": "llm-wiki-compiler",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "A knowledge compiler CLI — raw sources in, interlinked wiki out",
   "type": "module",
   "bin": {
@@ -70,7 +70,7 @@
     "@types/markdown-it": "^14.1.2",
     "@types/sanitize-html": "^2.16.1",
     "@types/turndown": "^5.0.0",
-    "fallow": "2.77.0",
+    "fallow": "2.82.0",
     "husky": "^9.1.7",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",
