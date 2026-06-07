@@ -36,7 +36,7 @@ import type { ExportPage } from "./types.js";
 export const EXPORT_SCHEMA_VERSION = 1;
 
 /** Top-level shape of the JSON export file. */
-interface JsonExportDocument {
+export interface JsonExportDocument {
   /**
    * Contract version for downstream consumers. Start at 1; increment only on
    * breaking envelope changes so consumers can pin a supported range.
@@ -49,13 +49,35 @@ interface JsonExportDocument {
   pages: ExportPage[];
 }
 
-/** Options accepted by {@link buildJsonExport}. */
+/** Options accepted by {@link buildJsonExportDocument}. */
 export interface BuildJsonExportOptions {
   /**
    * Optional project identifier. Validated against the bridge contract
    * regex; throws if invalid so a malformed value never reaches disk.
    */
   projectId?: string;
+}
+
+/**
+ * Build the JSON export document object from a list of export pages.
+ * @param pages - Sorted array of export pages.
+ * @param options - Optional bridge envelope fields (e.g. `projectId`).
+ * @returns The structured JsonExportDocument object (not serialized).
+ */
+export function buildJsonExportDocument(
+  pages: ExportPage[],
+  options: BuildJsonExportOptions = {},
+): JsonExportDocument {
+  const doc: JsonExportDocument = {
+    schemaVersion: EXPORT_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    pageCount: pages.length,
+    pages,
+  };
+  if (options.projectId !== undefined) {
+    doc.projectId = validateProjectId(options.projectId);
+  }
+  return doc;
 }
 
 /**
@@ -68,14 +90,5 @@ export function buildJsonExport(
   pages: ExportPage[],
   options: BuildJsonExportOptions = {},
 ): string {
-  const doc: JsonExportDocument = {
-    schemaVersion: EXPORT_SCHEMA_VERSION,
-    exportedAt: new Date().toISOString(),
-    pageCount: pages.length,
-    pages,
-  };
-  if (options.projectId !== undefined) {
-    doc.projectId = validateProjectId(options.projectId);
-  }
-  return JSON.stringify(doc, null, 2);
+  return JSON.stringify(buildJsonExportDocument(pages, options), null, 2);
 }

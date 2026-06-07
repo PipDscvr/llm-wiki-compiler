@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync } from "fs";
 import { rm } from "fs/promises";
 import path from "path";
-import { collectStatus } from "../src/mcp/status.js";
+import { collectStatus } from "../src/status/collect.js";
 import { buildViewerSnapshot } from "../src/viewer/snapshot.js";
 import { makeTempRoot } from "./fixtures/temp-root.js";
 import { writePage } from "./fixtures/write-page.js";

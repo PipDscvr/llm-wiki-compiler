@@ -11,7 +11,7 @@ import { existsSync } from "fs";
 import { rm } from "fs/promises";
 import path from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { collectStatus, MAX_STATUS_LIST } from "../src/mcp/status.js";
+import { collectStatus, MAX_STATUS_LIST } from "../src/status/collect.js";
 import { makeTempRoot } from "./fixtures/temp-root.js";
 import { writePage } from "./fixtures/write-page.js";
 import {

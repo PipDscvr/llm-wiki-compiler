@@ -1,5 +1,5 @@
 /**
- * Read-only project-status collector for the MCP `wiki_status` tool.
+ * Read-only project-status collector shared by the MCP `wiki_status` tool and the in-process SDK.
  *
  * Derives stale/orphaned page classification from the freshness module so
  * agents get source-level accuracy rather than frontmatter-only orphans.
