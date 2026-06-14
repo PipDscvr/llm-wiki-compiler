@@ -5,6 +5,7 @@
     "scripts/copy-viewer-assets.mjs"
   ],
   "ignorePatterns": [
+    "docs/**",
     "src/viewer/assets/index.html",
     "src/viewer/assets/viewer.css"
   ],

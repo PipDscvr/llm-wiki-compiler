@@ -1,0 +1,245 @@
+---
+title: "LLM Provider Setup and Configuration Guide for llmwiki"
+sidebarTitle: "Providers"
+description: "Configure llmwiki to use Anthropic, OpenAI-compatible endpoints, Ollama, GitHub Copilot, or the Claude Agent SDK provider for local login."
+---
+
+llmwiki is provider-portable. Whether you have an Anthropic API key, a GitHub Copilot subscription, a locally-running Ollama server, or just a Claude Code login, you can point llmwiki at the right backend with a handful of environment variables — no config files required for most setups. Choose the provider that matches your existing credentials and infrastructure.
+
+## Configuration precedence
+
+When you use the Anthropic provider (the default), llmwiki resolves credentials in this order:
+
+1. Shell environment variables or a `.env` file in your project directory
+2. Claude Code settings fallback — `~/.claude/settings.json` → `env` block
+3. Built-in provider defaults (where applicable)
+
+This means that if you already have Claude Code configured on your machine, you can run `llmwiki compile` without exporting a single variable.
+
+## Providers
+
+<Tabs>
+  <Tab title="Anthropic (Default)">
+
+The Anthropic provider uses the official `@anthropic-ai/sdk` to call Claude directly. It is the default when `LLMWIKI_PROVIDER` is unset.
+
+**Authentication**
+
+Set either `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` — either one satisfies authentication. You do not need both.
+
+| Variable | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | Standard Anthropic API key |
+| `ANTHROPIC_AUTH_TOKEN` | Alternative auth token (accepted by Anthropic-compatible gateways) |
+| `ANTHROPIC_BASE_URL` | Optional — custom endpoint for proxies or alternate Claude gateways |
+
+`ANTHROPIC_BASE_URL` accepts any valid HTTP or HTTPS URL. Claude-style path endpoints such as `https://api.example.com/coding/` are supported; trailing slashes are normalized automatically.
+
+**Example**
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+export ANTHROPIC_BASE_URL=https://proxy.example.com  # optional
+llmwiki compile
+```
+
+**Zero-export usage with Claude Code**
+
+If `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, and `ANTHROPIC_BASE_URL` are not set in your shell or `.env`, llmwiki automatically reads Anthropic-compatible values from the `env` block in `~/.claude/settings.json`. That covers:
+
+- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_AUTH_TOKEN`
+- `ANTHROPIC_BASE_URL`
+- `ANTHROPIC_MODEL`
+
+If Claude Code is already configured on your machine, this works with no additional setup:
+
+```bash
+llmwiki compile
+```
+
+<Note>
+  The Anthropic provider delegates embeddings to the [Voyage API](https://www.voyageai.com/). Set `VOYAGE_API_KEY` to enable semantic search with `llmwiki query`. Without it, query falls back to lexical ranking.
+</Note>
+
+  </Tab>
+  <Tab title="Claude Agent SDK">
+
+The `claude-agent` provider routes calls through the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-typescript) instead of the raw Messages API. It authenticates using your **local Claude Code login** (OAuth/subscription) — no `ANTHROPIC_API_KEY` is required. If you can run `claude` in your terminal, this provider works.
+
+**Setup**
+
+```bash
+export LLMWIKI_PROVIDER=claude-agent
+export LLMWIKI_MODEL=claude-sonnet-4-6  # optional; this is the default
+llmwiki compile
+```
+
+**Embeddings**
+
+The Claude Agent SDK has no embeddings endpoint. Set `VOYAGE_API_KEY` to enable semantic search in `llmwiki query`; without it, query falls back to lexical ranking.
+
+```bash
+export VOYAGE_API_KEY=pa-...
+```
+
+**Debug tracing**
+
+Use `LLMWIKI_DEBUG` to see what the SDK is doing during a compile:
+
+| Value | Effect |
+|---|---|
+| `1` | Concise one-line trace per SDK message (`[claude-agent] system:init`, `… assistant`, `… result:success`) plus any `claude` subprocess errors |
+| `verbose` | Concise trace **plus** the SDK's full verbose logging |
+
+```bash
+LLMWIKI_DEBUG=1 LLMWIKI_PROVIDER=claude-agent llmwiki compile
+```
+
+<Warning>
+  This provider drives your Claude Code / Agent SDK session programmatically to compile wikis. That is not automatically appropriate for every account type, plan, or environment. Before using it, review Anthropic's current [Claude Code](https://www.anthropic.com/legal/consumer-terms) and [Agent SDK](https://docs.anthropic.com/en/api/agent-sdk/overview) terms and usage policies, and make sure your intended use complies with them.
+</Warning>
+
+  </Tab>
+  <Tab title="OpenAI-Compatible">
+
+Use the `openai` provider for any OpenAI-compatible server, including cloud OpenAI, local `llama-server`, vLLM, and other compatible backends.
+
+**Variables**
+
+| Variable | Required | Description |
+|---|---|---|
+| `LLMWIKI_PROVIDER` | Yes | Set to `openai` |
+| `OPENAI_API_KEY` | Yes | Your API key. For local servers that ignore auth, any dummy value works (e.g. `sk-local`) |
+| `OPENAI_BASE_URL` | For local/custom | Base URL for chat and tool calls. **Include `/v1`** |
+| `LLMWIKI_MODEL` | No | Model name override |
+| `LLMWIKI_EMBEDDING_MODEL` | No | Embedding model override |
+| `OPENAI_EMBEDDINGS_BASE_URL` | No | Separate endpoint for embeddings. When unset, embeddings use the same client and base URL as chat |
+
+**Split endpoint example** (separate servers for generation and embeddings)
+
+```bash
+export LLMWIKI_PROVIDER=openai
+export LLMWIKI_MODEL=qwen3.6-35b
+export LLMWIKI_EMBEDDING_MODEL=text-embedding-model
+export OPENAI_API_KEY=sk-local
+export OPENAI_BASE_URL=http://localhost:8080/v1
+export OPENAI_EMBEDDINGS_BASE_URL=http://localhost:8081/v1
+llmwiki compile
+```
+
+**Request timeout**
+
+The OpenAI SDK defaults to a 10-minute per-request timeout. For slower local models that can take longer to produce a full page, override it:
+
+```bash
+export LLMWIKI_REQUEST_TIMEOUT_MS=1800000  # 30 minutes in ms
+```
+
+See [Environment Variables](/configuration/environment-variables) for full timeout reference.
+
+  </Tab>
+  <Tab title="Ollama">
+
+The `ollama` provider uses Ollama's OpenAI-compatible endpoint. It defaults to a 30-minute per-request timeout (instead of the 10-minute OpenAI default) to accommodate local models on modest hardware.
+
+**Variables**
+
+| Variable | Required | Description |
+|---|---|---|
+| `LLMWIKI_PROVIDER` | Yes | Set to `ollama` |
+| `OLLAMA_HOST` | Yes | Ollama host URL for chat. **Include `/v1`** |
+| `LLMWIKI_MODEL` | No | Model name override |
+| `LLMWIKI_EMBEDDING_MODEL` | No | Embedding model override |
+| `OLLAMA_EMBEDDINGS_HOST` | No | Separate Ollama host for embeddings. When unset, embeddings use `OLLAMA_HOST` |
+| `OLLAMA_TIMEOUT_MS` | No | Per-request timeout override for Ollama. Wins over `LLMWIKI_REQUEST_TIMEOUT_MS` when both are set |
+
+**Example** with llama3.1 and nomic-embed-text
+
+```bash
+export LLMWIKI_PROVIDER=ollama
+export LLMWIKI_MODEL=llama3.1
+export LLMWIKI_EMBEDDING_MODEL=nomic-embed-text
+export OLLAMA_HOST=http://localhost:11434/v1
+# Optional: separate host for embeddings
+export OLLAMA_EMBEDDINGS_HOST=http://localhost:11435/v1
+llmwiki compile
+```
+
+<Note>
+  Ollama's default timeout is 30 minutes. If your hardware is especially slow, raise `OLLAMA_TIMEOUT_MS` (e.g. `7200000` for 2 hours).
+</Note>
+
+  </Tab>
+  <Tab title="GitHub Copilot">
+
+The `copilot` provider uses the GitHub Copilot API (`https://api.githubcopilot.com`), which exposes an OpenAI-compatible chat endpoint available to Copilot subscribers.
+
+**Prerequisites**
+
+Classic PATs are not supported. You need a GitHub **OAuth token** with the `copilot` scope. Refresh your `gh` CLI token first:
+
+```bash
+gh auth refresh --scopes copilot
+```
+
+**Setup**
+
+```bash
+export LLMWIKI_PROVIDER=copilot
+export GITHUB_TOKEN=$(gh auth token)   # OAuth token required; PATs will not work
+export LLMWIKI_MODEL=gpt-4o            # optional; gpt-4o is the default
+llmwiki compile
+```
+
+**Available models**
+
+Model names use dots, not dashes. Availability depends on your Copilot plan:
+
+- `gpt-4o` (default)
+- `gpt-4o-mini`
+- `claude-sonnet-4.5`
+- `claude-sonnet-4.6`
+- `claude-opus-4.5`
+- `gemini-2.5-pro`
+
+**Embeddings**
+
+The GitHub Copilot API does not expose an embeddings endpoint. Semantic search (`llmwiki query` with chunked retrieval) falls back to full-index selection without embeddings. If you need embedding-dependent workflows, switch to the `openai` provider and supply `OPENAI_API_KEY`.
+
+<Warning>
+  `GITHUB_TOKEN` must be a GitHub OAuth token obtained via `gh auth token` after running `gh auth refresh --scopes copilot`. Classic personal access tokens (PATs) are rejected by the Copilot API and will not work.
+</Warning>
+
+  </Tab>
+</Tabs>
+
+## Per-concept prompt budget
+
+When many sources contribute to the same compiled concept, llmwiki enforces a character cap on the combined source content sent to the LLM so no single concept blows past the model's context window. Each contributing source gets a fair share when truncation kicks in.
+
+Set `LLMWIKI_PROMPT_BUDGET_CHARS` to control the cap. The default is `200000` (~50k tokens), which fits modern context windows with headroom. Raise it for larger-context models; lower it for small-context local models.
+
+```bash
+export LLMWIKI_PROMPT_BUDGET_CHARS=100000
+```
+
+A truncation warning prints to stderr when the cap fires, naming the concept that hit the budget.
+
+## Output language
+
+Generated wiki content defaults to whatever language the model produces from the source material — typically English. You can override this two ways:
+
+- `LLMWIKI_OUTPUT_LANG` — applies to every prompt the compile and query pipelines make. For example: `zh-CN`, `Chinese`, `ja`, `Japanese`.
+- `--lang <code>` on `llmwiki compile` or `llmwiki query` — same effect, scoped to one invocation. Wins over the env var.
+
+```bash
+export LLMWIKI_OUTPUT_LANG=zh-CN
+llmwiki compile
+# or per-invocation:
+llmwiki compile --lang Japanese
+```
+
+---
+
+For a complete listing of every environment variable llmwiki reads, see the [Environment Variables reference](/configuration/environment-variables).

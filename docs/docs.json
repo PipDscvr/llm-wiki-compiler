@@ -1,0 +1,83 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "llmwiki",
+  "theme": "luma",
+  "colors": {
+    "primary": "#5B6AD0",
+    "light": "#EEF0FF",
+    "dark": "#1A1D3A"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/atomicstrata/llm-wiki-compiler"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation",
+              "guides/open-knowledge-format"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/karpathy-pattern",
+              "concepts/how-it-works",
+              "concepts/wiki-model",
+              "concepts/page-types",
+              "concepts/citations"
+            ]
+          },
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "cli/ingest",
+              "cli/compile",
+              "cli/query",
+              "cli/view",
+              "cli/lint-eval",
+              "cli/export",
+              "cli/import",
+              "cli/review",
+              "cli/serve"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/providers",
+              "configuration/environment-variables",
+              "configuration/review-policy",
+              "configuration/schema"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/mcp-agent-integration",
+              "guides/sdk",
+              "guides/atomic-memory-bridge",
+              "guides/ci-quality-gates"
+            ]
+          },
+          {
+            "group": "Troubleshooting",
+            "pages": [
+              "troubleshooting/faq",
+              "troubleshooting/stale-pages"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

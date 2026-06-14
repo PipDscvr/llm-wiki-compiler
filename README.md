@@ -1,568 +1,101 @@
 # llmwiki
 
-Compile raw sources into an interlinked markdown wiki.
+<div align="center">
+  <div style="border: 2px solid #4F46E5; border-radius: 18px; padding: 20px 24px; margin: 18px 0; background: #EEF2FF; color: #111827; max-width: 900px;">
+    <h2 style="color: #312E81;">Breaking News: llmwiki 0.10.0 supports Open Knowledge Format</h2>
+    <p style="color: #1F2937;">
+      llmwiki is now an <strong>Open Knowledge Format (OKF)</strong> producer and consumer,
+      aligning compiled agent knowledge with Google Cloud's emerging standard for portable knowledge sharing.
+    </p>
+    <p style="color: #1F2937;">
+      Export compiled wikis with <code>llmwiki export --target okf</code>,
+      import external bundles with <code>llmwiki import --okf</code>,
+      and stage untrusted knowledge through review before it becomes live agent context.
+    </p>
+  </div>
+</div>
 
-Inspired by Karpathy's [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) pattern: instead of re-discovering knowledge at query time, compile it once into a persistent, browsable artifact that compounds over time.
+Compile raw sources into an interlinked, citation-traceable markdown wiki that agents and humans can browse, query, lint, export, and reuse.
+
+llmwiki implements the [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) pattern: instead of re-discovering knowledge from raw files at query time, compile it once into durable pages that accumulate structure, provenance, review state, and retrieval metadata over time.
 
 ![llmwiki demo](docs/images/demo.gif)
 
+## When to use this repo
+
+Use llmwiki when you need a persistent knowledge base from raw material:
+
+- Compile papers, notes, READMEs, transcripts, PDFs, images, or web pages into typed wiki pages.
+- Give agents a stable, citation-aware context pack instead of a pile of loose files.
+- Keep generated knowledge auditable with source citations, review queues, freshness checks, and quality gates.
+- Browse the result locally, query it from the CLI, expose it over MCP, or embed it through the SDK.
+- Exchange compiled knowledge with other tools using Open Knowledge Format (OKF), JSON, JSON-LD, GraphML, Marp, and `llms.txt`.
+
+Do not use llmwiki as a general static-site generator, a heavy ontology database, or a replacement for ad-hoc search over fast-changing raw logs. It is strongest when source knowledge is worth compiling, reviewing, and reusing.
+
 ## What you get
 
-- **Compiled wiki, not chunks.** A two-phase LLM pipeline turns raw sources into typed pages (`concept`, `entity`, `comparison`, `overview`) with paragraph- and claim-level citations back to source line ranges.
-- **Hybrid retrieval.** Semantic chunk embeddings (incremental, content-hash-aware) narrow hundreds of pages to a small top-K; BM25 reranking and wikilink-graph expansion build the final evidence pack.
-- **Local web viewer.** `llmwiki view` opens a read-only browser UI with sidebar navigation, search, a force-directed graph, and provenance/citation chips per page.
-- **Eval harness.** `llmwiki eval` measures health score (0–100), citation coverage and precision, optional LLM-as-judge support scoring, regression deltas, and CI-gateable thresholds.
-- **Review policy.** A `.llmwiki/config.json` policy holds risky generated pages (low confidence, contradicted, schema- or provenance-violating) for review instead of writing them live — each held candidate records *why*, and `compile`/`refresh` honor the policy fail-closed.
-- **Source freshness.** `llmwiki lint` flags pages whose sources changed (`stale`) or were deleted (`orphaned`) since the last compile — surfaced across the viewer, MCP, context packs, the JSON export, and `llmwiki next` — and `llmwiki refresh --stale` repairs them with a targeted recompile.
-- **MCP server.** `llmwiki serve` exposes the full pipeline to Claude Desktop, Cursor, Claude Code, and any MCP-compatible agent — including `get_context_pack` for budgeted, citation-aware evidence packs.
-- **In-process SDK.** `createWiki({ root })` drives the whole pipeline programmatically — ingest, compile, query, status/freshness, context packs, export, eval — for embedding llmwiki in your own tooling without shelling out.
-- **Activity journal.** Every ingest, compile, and query appends a timestamped, machine-parseable entry to `log.md` — a human- and agent-readable audit trail of how the wiki was built, carrying page wikilinks and counts.
-- **Bridge to runtime memory.** `llmwiki export --target json --project-id <id>` produces a typed envelope that [`@atomicmemory/llmwiki`](https://github.com/atomicstrata/atomicmemory/tree/main/packages/llmwiki) imports as one verbatim Atomic Memory record per page, preserving all advisory metadata.
-- **Provider-portable.** Anthropic, Claude Agent SDK (local Claude Code login, no API key), OpenAI-compatible (incl. local llama.cpp / vLLM), Ollama, GitHub Copilot.
+- **Compiled wiki, not chunks.** A two-phase LLM pipeline extracts concepts, then generates typed pages: `concept`, `entity`, `comparison`, and `overview`.
+- **Citation-traceable output.** Paragraphs and claims cite source files and line ranges, and `llmwiki lint` validates the links.
+- **Hybrid retrieval.** Semantic chunk search, BM25 reranking, and wikilink graph expansion build compact evidence packs for queries and agents.
+- **Local viewer.** `llmwiki view` opens a read-only browser UI with search, page metadata, graph exploration, source-freshness badges, and citation chips.
+- **Review policy.** Generated pages can be auto-held for review when confidence, contradiction, schema, or provenance rules trip.
+- **Freshness repair.** `llmwiki lint` and `llmwiki next` surface stale/orphaned pages; `llmwiki refresh --stale` repairs changed knowledge without compiling unrelated new sources.
+- **Eval harness.** `llmwiki eval` reports health score, citation coverage/precision, corpus stats, regression deltas, and optional judge-model citation support.
+- **MCP server.** `llmwiki serve` exposes ingest, compile, query, lint, read, status, eval, and context-pack tools to MCP-compatible agents.
+- **SDK.** `createWiki({ root })` drives ingest, compile, query, context, status, export, and eval from TypeScript without shelling out.
+- **Open Knowledge Format exchange.** Export and import OKF bundles for portable, markdown-native knowledge exchange. External OKF imports are staged through the review queue by default; trusted bundles can be written live explicitly.
+- **Other portable exports.** Export JSON, JSON-LD, GraphML, Marp slides, and `llms.txt` for downstream systems.
+- **Provider portable.** Anthropic, Claude Agent SDK local login, OpenAI-compatible servers, Ollama, GitHub Copilot, and local OpenAI-compatible runtimes.
 
-## Who this is for
+## Karpathy's LLM Wiki pattern
 
-- **AI researchers and engineers** building durable knowledge from papers, docs, and notes
-- **Technical writers** compiling scattered sources into a structured, interlinked reference
-- **Open-source maintainers** turning READMEs, ADRs, and design docs into a navigable knowledge base
-- **Anyone with too many bookmarks** who wants a wiki instead of a graveyard of tabs
+Andrej Karpathy described the LLM Wiki pattern as a way to turn raw material into compiled knowledge that future agents can reuse. llmwiki is a concrete compiler for that pattern.
+
+The key shift is moving work from query time to compile time. Traditional RAG repeatedly retrieves raw chunks and asks the model to reconstruct relationships for each question. llmwiki first turns sources into typed, interlinked pages with citations, metadata, and review state. Queries, context packs, exports, and MCP tools then operate over that compiled artifact.
+
+That makes llmwiki useful when knowledge should compound: concepts shared across sources become one page, saved answers become future context, stale pages can be detected and repaired, and agents can consume a stable evidence pack instead of re-reading the same raw files from scratch.
+
+See [`docs/concepts/karpathy-pattern.mdx`](docs/concepts/karpathy-pattern.mdx) for the deeper explanation.
+
+## Agent decision guide
+
+If an agent is scanning this README, these are the high-signal entry points:
+
+| Goal | Use |
+|---|---|
+| Create a wiki from one source and inspect it | `llmwiki quickstart <source>` |
+| Add more files or URLs | `llmwiki ingest <url-or-file>` |
+| Compile or recompile changed sources | `llmwiki compile` |
+| Hold generated pages for human approval | `llmwiki compile --review` or review policy config |
+| Ask grounded questions | `llmwiki query "question"` |
+| Save an answer back into the wiki | `llmwiki query "question" --save` |
+| Build an evidence pack for another agent | `llmwiki context "<task>" --json` or MCP `get_context_pack` |
+| Inspect the compiled knowledge base | `llmwiki view --open` |
+| Check broken links, citations, confidence, freshness, and quality | `llmwiki lint` and `llmwiki eval` |
+| Repair stale compiled pages | `llmwiki refresh --stale --dry-run`, then `llmwiki refresh --stale` |
+| Drive llmwiki from an agent | `llmwiki serve --root <project>` |
+| Drive llmwiki from TypeScript | `createWiki({ root })` |
+| Export for another system | `llmwiki export --target <format>` |
+| Export an Open Knowledge Format bundle | `llmwiki export --target okf --out <dir>` |
+| Import an Open Knowledge Format bundle | `llmwiki import --okf <dir> --dry-run`, then review/approve |
 
 ## Quick start
 
 ```bash
 npm install -g llm-wiki-compiler
+
 export ANTHROPIC_API_KEY=sk-...
-# Or use ANTHROPIC_AUTH_TOKEN if your Anthropic-compatible gateway expects it.
-# Or use a different provider:
+# or choose another provider:
 # export LLMWIKI_PROVIDER=openai
 # export OPENAI_API_KEY=sk-...
 
 llmwiki quickstart ./notes.md
-llmwiki query "what is X?"
+llmwiki query "what are the key ideas?"
 llmwiki view --open
 ```
 
-`llmwiki quickstart ./notes.md` ingests one supported source, compiles the wiki, and opens the local viewer when pages are ready. Use `--no-open` to stop after compile, `--review` to queue candidates instead of writing pages, or `--json` for an agent-friendly envelope. If you're inside an existing project and unsure what to do next, run `llmwiki next`.
-
-
-<br>
-
----
-
-<br>
-
-
-<details>
-<summary><span style="font-size: 1.4em;"><strong>Configuration — click to expand</strong></span></summary>
-
-
-llmwiki configures providers via environment variables. The default provider is Anthropic.
-
-Configuration precedence for Anthropic values:
-
-1. Shell env / local `.env`
-2. Claude Code settings fallback (`~/.claude/settings.json` → `env` block)
-3. Built-in provider defaults (where applicable)
-
-- `LLMWIKI_PROVIDER`: The provider to use (e.g., anthropic, openai).
-- `LLMWIKI_MODEL`: The model name to override the provider default.
-
-### Anthropic (Default)
-
-- `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`: Required. Either one can satisfy Anthropic authentication.
-- `ANTHROPIC_BASE_URL`: Optional. Custom endpoint for proxies. Valid HTTP(S) URLs are accepted, including Claude-style path endpoints such as `https://api.kimi.com/coding/`.
-
-Example using an Anthropic or cc-switch custom proxy:
-
-```bash
-export LLMWIKI_PROVIDER=anthropic
-export ANTHROPIC_API_KEY=sk-...
-export ANTHROPIC_BASE_URL=https://proxy.example.com
-```
-
-If those values are not set in shell env or `.env`, llmwiki will try Anthropic-compatible values from `~/.claude/settings.json` (`env` block) for:
-
-- `ANTHROPIC_API_KEY`
-- `ANTHROPIC_AUTH_TOKEN`
-- `ANTHROPIC_BASE_URL`
-- `ANTHROPIC_MODEL`
-
-Example with zero exports (Claude Code already configured):
-
-```bash
-llmwiki compile
-```
-
-### Claude Agent SDK (local Claude Code login)
-
-The `claude-agent` provider routes calls through the
-[Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-typescript)
-instead of the raw Messages API. It authenticates with your **local Claude Code
-login** (OAuth/subscription), so **no `ANTHROPIC_API_KEY` is required** — if you
-can run `claude` in your terminal, this provider works.
-
-> **Terms of use.** This provider drives your Claude Code / Agent SDK session
-> programmatically to compile wikis. That is not automatically appropriate for
-> every account type, plan, or environment. Before using it, review Anthropic's
-> current [Claude Code](https://www.anthropic.com/legal/consumer-terms) and
-> [Agent SDK](https://docs.anthropic.com/en/api/agent-sdk/overview) terms and
-> usage policies, and make sure your intended use complies with them.
-
-```bash
-export LLMWIKI_PROVIDER=claude-agent
-export LLMWIKI_MODEL=claude-sonnet-4-6  # optional; this is the default
-llmwiki compile
-```
-
-Notes:
-
-- Generation (`compile`) and structured extraction work off the local login with
-  no extra credentials.
-- Semantic search (`llmwiki query`) still needs embeddings, which Claude does not
-  provide. Set `VOYAGE_API_KEY` to enable them (same as the `anthropic`
-  provider); otherwise `query` falls back to lexical ranking.
-- To see what the SDK is doing, set `LLMWIKI_DEBUG=1` for a concise one-line trace
-  per SDK message (`[claude-agent] system:init`, `… assistant`, `… result:success`)
-  plus any `claude` subprocess errors. Use `LLMWIKI_DEBUG=verbose` to additionally
-  enable the SDK's full verbose logging.
-
-  ```bash
-  LLMWIKI_DEBUG=1 LLMWIKI_PROVIDER=claude-agent llmwiki compile
-  ```
-
-### OpenAI-Compatible Local Servers
-
-Use the OpenAI provider for local OpenAI-compatible servers such as
-`llama-server`. `OPENAI_BASE_URL` is used for chat/tool calls, and
-`OPENAI_EMBEDDINGS_BASE_URL` is optional. Set it only when embeddings are
-served from a different endpoint; when unset, embeddings use the same client
-and base URL as chat. Include `/v1` in custom URLs.
-
-Split endpoint example:
-
-```bash
-export LLMWIKI_PROVIDER=openai
-export LLMWIKI_MODEL=qwen3.6-35b
-export LLMWIKI_EMBEDDING_MODEL=text-embedding-model
-export OPENAI_API_KEY=sk-local
-export OPENAI_BASE_URL=http://host_url:port/v1
-export OPENAI_EMBEDDINGS_BASE_URL=http://host_url:port/v1
-```
-
-`OPENAI_API_KEY` is still required by the CLI and OpenAI SDK. For local
-servers that do not check authentication, any dummy value is sufficient.
-
-### Ollama
-
-Ollama uses its OpenAI-compatible endpoint. Set `OLLAMA_HOST` for chat and
-optionally set `OLLAMA_EMBEDDINGS_HOST` only when embeddings are served from a
-different endpoint. When unset, embeddings use `OLLAMA_HOST`. Include `/v1` in
-custom URLs.
-
-```bash
-export LLMWIKI_PROVIDER=ollama
-export LLMWIKI_MODEL=llama3.1
-export LLMWIKI_EMBEDDING_MODEL=nomic-embed-text
-export OLLAMA_HOST=http://ollama_host:11434/v1
-export OLLAMA_EMBEDDINGS_HOST=http://ollama_host:11435/v1
-```
-
-### GitHub Copilot
-
-Uses the GitHub Copilot API (`https://api.githubcopilot.com`), an
-OpenAI-compatible endpoint available to Copilot subscribers. Requires a GitHub
-OAuth token with the `copilot` scope — **classic PATs are not supported**.
-
-First, ensure your `gh` CLI token has the required scope:
-
-```bash
-gh auth refresh --scopes copilot
-```
-
-Then run:
-
-```bash
-export LLMWIKI_PROVIDER=copilot
-export GITHUB_TOKEN=$(gh auth token)  # OAuth token required; PATs will not work
-export LLMWIKI_MODEL=gpt-4o           # optional; gpt-4o is the default
-```
-
-Available models (names use dots, not dashes): `gpt-4o`, `gpt-4o-mini`,
-`claude-sonnet-4.5`, `claude-sonnet-4.6`, `claude-opus-4.5`, `gemini-2.5-pro`,
-and others — availability depends on your Copilot plan.
-
-**Embeddings:** The GitHub Copilot API does not expose an embeddings endpoint.
-Semantic search (used by `llmwiki query` with chunked retrieval) will fall back
-to full-index selection without embeddings. For embedding-dependent workflows,
-switch to the `openai` provider and provide `OPENAI_API_KEY`.
-
-### Request timeouts
-
-The OpenAI SDK defaults to a 10-minute per-request timeout, which can cut off long compile-time completions on slower local models. Override per provider:
-
-- `LLMWIKI_REQUEST_TIMEOUT_MS` — provider-agnostic timeout in milliseconds. Applies to both the `openai` and `ollama` backends.
-- `OLLAMA_TIMEOUT_MS` — Ollama-specific override. Wins over `LLMWIKI_REQUEST_TIMEOUT_MS` when both are set.
-
-Defaults: 10 minutes for `openai`, 30 minutes for `ollama` (local models commonly need more).
-
-### Output language
-
-Generated wiki content defaults to whatever language the model produces from the source material — typically English. Override with either:
-
-- `LLMWIKI_OUTPUT_LANG` — e.g. `zh-CN`, `Chinese`, `ja`, `Japanese`. Applies to every prompt the compile and query pipelines make.
-- `--lang <code>` on `llmwiki compile` and `llmwiki query` — same effect, scoped to one invocation. Wins over the env var.
-
-Unset preserves prior behaviour byte-for-byte.
-
-### Per-concept prompt budget
-
-When many sources contribute to the same compiled concept, `compile` enforces a per-concept character cap on the combined source content sent to the LLM so popular shared concepts don't blow past the model's context window. Each contributing source gets a fair share when truncation kicks in.
-
-- `LLMWIKI_PROMPT_BUDGET_CHARS` — character ceiling for the combined per-concept prompt. Defaults to `200000` (~50k tokens), which fits modern context windows with headroom. Raise it for larger-context models, lower it for local small-context models.
-
-A truncation warning prints to stderr when the cap fires so you know which concept hit the budget.
-
-</details>
-
-
-<br>
-
----
-
-<br>
-
-
-## Why compile, not just retrieve?
-
-llmwiki uses embeddings — chunk-level, incremental, with BM25 reranking. But the embedding layer sits **below** the compiled wiki, not in front of it.
-
-**RAG retrieves chunks at query time.** Every question re-discovers the same relationships from scratch. The wiki structure, citation graph, and merged-concept disambiguation never accumulate; they get re-invented per query.
-
-**llmwiki compiles your sources into a wiki first.** Concepts get their own typed pages. Concepts shared across multiple sources are merged into one page instead of competing as duplicate chunks. Pages link to each other via `[[wikilinks]]`. When you ask a question with `--save`, the answer becomes a new page, and future queries use it as context.
-
-Then semantic retrieval, BM25 reranking, and graph expansion run over the compiled artifact — narrowing hundreds of pages to a tight, citation-traceable evidence pack.
-
-```
-RAG:     query → search chunks → answer → forget
-llmwiki: sources → compile → wiki → embed → query → save → richer wiki → better answers
-```
-
-llmwiki is complementary to traditional RAG: use RAG for ad-hoc retrieval over noisy or fast-changing corpora; use llmwiki when you want a persistent, structured, citation-traceable artifact that compounds.
-
-## How it works
-
-```
-sources/  →  hash check  →  LLM concept extraction  →  page generation  →  [[wikilink]] resolve
-              │                                                             ↓
-              │                                        chunk embeddings  ←  wiki/  →  index.md
-              │                                               ↓
-              │                             semantic search + BM25 rerank + graph expansion
-              │                                               ↓
-              │                                    llmwiki query / context / MCP
-              ↓
-   stale / orphaned pages  →  llmwiki refresh --stale  →  recompile changed owners, clean up orphans
-```
-
-**Two-phase compile.** Phase 1 extracts all concepts from every source; Phase 2 generates pages. Splitting the phases eliminates order-dependence, catches extraction failures before anything is written, merges concepts shared across multiple sources into a single page, and marks pages whose sources were all deleted as `orphaned` rather than silently dropping them.
-
-**Incremental everywhere.** Hash-based change detection on sources, content-hash-aware embedding updates, and cached citation judgements mean only changed work runs through the LLM. Recompiling after editing one source touches just the pages that source contributed to.
-
-**Source freshness and repair.** Every page records the sources — and their content hashes — that produced it. On any later command, llmwiki compares those recorded hashes against `sources/` on disk: a page whose sources changed since the last compile is `stale`, and a page whose sources were all deleted is `orphaned`. `llmwiki lint`, `llmwiki status`, the viewer, the JSON export, and the MCP tools surface this without recompiling anything. `llmwiki refresh --stale` then repairs it — recompiling only the changed sources that own stale pages and cleaning up orphaned ones, while deliberately leaving unrelated new sources for a full `llmwiki compile`. `--dry-run` previews the plan with no LLM calls.
-
-**Hybrid retrieval.** `.llmwiki/embeddings.json` v2 carries page- and chunk-level vectors. `llmwiki query` and `llmwiki context` narrow hundreds of pages down to a chunk-level top-K via cosine similarity, then rerank with BM25 and expand along the wikilink graph for the final evidence pack.
-
-**Citation-traceable.** Paragraphs carry `^[source.md]` markers; specific claims pin to `^[source.md:42-58]` line ranges. `llmwiki lint` validates that every citation resolves to a real file and line range; `llmwiki eval` measures citation precision and (optionally) LLM-judged claim support.
-
-**Compounding queries.** `llmwiki query --save` writes the answer as a wiki page and immediately rebuilds the index. Saved answers show up in future queries as context.
-
-### What it produces
-
-A raw source like a Wikipedia article on knowledge compilation becomes a structured wiki page:
-
-```yaml
----
-title: Knowledge Compilation
-summary: Techniques for converting knowledge representations into forms that support efficient reasoning.
-kind: concept
-sources:
-  - knowledge-compilation.md
-createdAt: "2026-04-05T12:00:00Z"
-updatedAt: "2026-04-05T12:00:00Z"
----
-```
-
-```markdown
-Knowledge compilation refers to a family of techniques for pre-processing
-a knowledge base into a target language that supports efficient queries.
-
-Related concepts: [[Propositional Logic]], [[Model Counting]]
-```
-
-Pages include source attribution in frontmatter. Paragraphs are annotated with `^[filename.md]` markers pointing back to the source file that contributed the content; specific claims can use line ranges like `^[filename.md:42-58]` or `^[filename.md#L42-L58]`.
-
-
-<br>
-
----
-
-<br>
-
-
-<details>
-<summary><span style="font-size: 1.4em;"><strong>CLI and wiki model — click to expand</strong></span></summary>
-
-
-## Commands
-
-| Command | What it does |
-|---------|-------------|
-| `llmwiki ingest <url\|file>` | Fetch a URL or copy a local file into `sources/` |
-| `llmwiki ingest-session <path>` | Import a Claude/Codex/Cursor session export (single file or whole directory) into `sources/` |
-| `llmwiki quickstart <source>` | Ingest a source and compile a wiki in one step; supports `--review`, `--no-open`, `--provider`, `--lang`, and `--json` |
-| `llmwiki compile` | Incremental compile: extract concepts, generate wiki pages |
-| `llmwiki compile --review` | Write candidate pages to `.llmwiki/candidates/` instead of `wiki/` so you can review before they land |
-| `llmwiki compile --lang <code>` | Generate wiki content in the given language (e.g. `Chinese`, `ja`, `zh-CN`); also works on `query` |
-| `llmwiki refresh --stale [--dry-run]` | Repair stale/orphaned pages: recompile the sources that own stale pages and clean up deleted owners, skipping unrelated new sources. `--dry-run` previews the plan with no LLM calls or writes |
-| `llmwiki review list` | List pending candidate pages |
-| `llmwiki review show <id>` | Print a candidate's title, summary, and body |
-| `llmwiki review approve <id>` | Promote a candidate into `wiki/` and refresh index/MOC/embeddings |
-| `llmwiki review reject <id>` | Archive a candidate without touching `wiki/` |
-| `llmwiki rules extract` | Extract machine-actionable rule candidates from changed sources into `.llmwiki/rule-candidates/` |
-| `llmwiki rules list` | List pending rule candidates |
-| `llmwiki rules approve <id>` / `reject <id>` | Approve or reject a rule candidate |
-| `llmwiki rules export` | Emit approved rule candidates as a JSON array for a downstream rule importer |
-| `llmwiki schema init` | Write a starter `.llmwiki/schema.json` file |
-| `llmwiki schema show` | Print the resolved schema for the current project |
-| `llmwiki query "question"` | Ask questions against your compiled wiki |
-| `llmwiki query "question" --save` | Answer and save the result as a wiki page |
-| `llmwiki export [--target <name>] [--project-id <id>]` | Export the wiki to portable formats — `llms.txt`, `llms-full.txt`, JSON, JSON-LD, GraphML, Marp slides. `--project-id` pins a stable identifier inside the JSON envelope so downstream importers (e.g. [`@atomicmemory/llmwiki`](https://github.com/atomicstrata/atomicmemory/tree/main/packages/llmwiki)) can derive deterministic external IDs |
-| `llmwiki view [--open]` | Start a read-only local web viewer for browsing, searching, and inspecting the compiled wiki |
-| `llmwiki next [--json]` | Show the recommended next action for this project (read-only); `--json` emits a stable envelope for agents |
-| `llmwiki context "<prompt>" [--json]` | Build an agent-ready evidence pack (primary pages, citations, neighbors, suggested actions) — same v1 envelope as MCP `get_context_pack` |
-| `llmwiki lint` | Check wiki quality (broken links, orphans, empty pages, low confidence, contradictions, stale pages whose sources changed, etc.) |
-| `llmwiki eval [--suite fast\|full]` | Measure wiki quality: health score (0–100), citation coverage, corpus stats. `--suite full` adds LLM-as-judge citation support scoring |
-| `llmwiki eval cache show` | Print score distribution and top-cited pages from the citation judgement cache |
-| `llmwiki eval cache clear` | Remove the citation judgement cache |
-| `llmwiki eval report` | Print the most recent eval report |
-| `llmwiki eval history [--n N]` | Show a trend table of past eval runs from `history.jsonl` |
-| `llmwiki eval judgements [--score 0\|1\|2] [--page slug]` | Inspect individual citation judgements with optional score or page filters |
-| `llmwiki watch` | Auto-recompile when `sources/` changes |
-| `llmwiki serve [--root <dir>]` | Start an MCP server exposing wiki tools to AI agents |
-
-`llmwiki context --include-sources` and MCP `get_context_pack` with `includeSources: true` are opt-in because they can return raw snippets from files under `sources/`. Path confinement prevents reads outside `sources/`, but only enable source windows for agents you trust with the ingested source text.
-
-## Output
-
-```
-log.md              append-only activity journal (ingests, compiles, queries)
-wiki/
-  concepts/         one .md file per concept, with YAML frontmatter
-  queries/          saved query answers, included in index and retrieval
-  index.md          auto-generated table of contents
-.llmwiki/
-  schema.json       optional page-kind and cross-link policy
-  candidates/       pending review candidates from `compile --review`
-  candidates/archive/  rejected candidates kept for audit
-```
-
-Obsidian-compatible. `[[wikilinks]]` resolve to concept titles — or to any page that declares the term in its `aliases` frontmatter, so links survive renames and synonyms.
-
-`log.md` records what happened and when. Each entry is a heading with a fixed
-prefix — `## [YYYY-MM-DDThh:mm:ssZ] operation | description` (an ISO 8601 UTC
-timestamp) — followed by a short bullet body carrying page wikilinks and counts:
-
-```markdown
-## [2026-06-05T09:14:02Z] ingest | Attention Is All You Need
-- Source: https://arxiv.org/abs/1706.03762
-- Saved: sources/attention-is-all-you-need.md
-- Chars: 38,214
-
-## [2026-06-05T09:15:30Z] compile | 1 source(s) → 6 page(s)
-- Sources: attention-is-all-you-need.md
-- Created: [[self-attention]], [[multi-head-attention]], [[transformer]]
-- Updated: [[positional-encoding]]
-
-## [2026-06-05T09:16:11Z] query | What is multi-head attention?
-- Pages: [[multi-head-attention]], [[self-attention]]
-```
-
-Only headings start with `## [`, so the gist's recipe still works even with the
-bodies: `grep "^## \[" log.md | tail -5` shows the five most recent operations.
-Where `index.md` organizes content for discovery, `log.md` tracks temporal
-progression.
-
-## Local web viewer
-
-Run `llmwiki view` from a project root to browse the compiled wiki in a local browser without Obsidian. The viewer is read-only: it renders `wiki/`, exposes sidebar navigation, search, page metadata, health counts, and provenance/citation chips, but does not mutate sources or generated pages.
-
-```bash
-llmwiki view          # prints Viewer ready at http://127.0.0.1:<port>
-llmwiki view --open   # also opens the URL in your default browser
-```
-
-The server is private by default. It binds to `127.0.0.1` unless you explicitly provide both `--host <host>` and `--allow-lan`; wildcard hosts are rejected. Viewer responses use a strict local-asset CSP and path-confinement checks so the UI can safely render local markdown content.
-
-## Review queue
-
-By default, `compile` writes pages directly to `wiki/`. Add `--review` to write candidate JSON records to `.llmwiki/candidates/` instead, so you can inspect each generated page before it lands.
-
-```bash
-llmwiki compile --review     # produces candidates, leaves wiki/ untouched
-llmwiki review list          # see what's pending
-llmwiki review show <id>     # inspect a single candidate
-llmwiki review approve <id>  # write into wiki/ + refresh index/MOC/embeddings
-llmwiki review reject <id>   # archive to .llmwiki/candidates/archive/
-```
-
-A few things to know:
-
-- **Approve and reject acquire `.llmwiki/lock`** so they serialize cleanly against each other and against any concurrent `compile`.
-- **Source state tracks live concepts.** A source records only the concepts actually written to `wiki/`; approving a held candidate adds just that concept (siblings are approved independently, each recording its own), and rejecting one suppresses it until the source changes. Held candidates for an unchanged source aren't re-extracted on the next compile.
-- **Deletion bookkeeping is deferred.** `compile --review` does not orphan-mark deleted sources; the next non-review `compile` does that. The `--review` help text advertises this.
-- MCP `wiki_status` exposes `pendingCandidates` so agents can see the queue depth.
-
-### Review policy
-
-`--review` is all-or-nothing. A project can instead declare a **review policy** in `.llmwiki/config.json` so a normal `compile` automatically **holds risky pages** for review while writing the rest live:
-
-```json
-{
-  "version": 1,
-  "review": {
-    "hold": ["low-confidence", "contradicted", "schema-violating", "provenance-violating"],
-    "lowConfidenceThreshold": 0.5
-  }
-}
-```
-
-A page is held as a candidate (the live `wiki/` page is left untouched) if it trips **any** enabled mode — union semantics:
-
-- `low-confidence` — page `confidence` below `lowConfidenceThreshold` (default 0.5). A page with **no** confidence is held by default; set `"treatMissingConfidenceAs": "ok"` to let it pass.
-- `contradicted` — the page declares `contradictedBy` entries.
-- `schema-violating` — the page fails a schema cross-link rule.
-- `provenance-violating` — the page has broken or malformed citations.
-- `all` / `off` — hold every page / nothing (each standalone). An absent config, a missing `review` key, or `"hold": []` all mean **off** — today's direct-write behavior.
-
-Each held candidate records **why**: `review list` and `review show` print the reason codes, and `compile` reports the split (`Wrote 8 page(s), held 2 for review — run \`llmwiki review list\``). `refresh --stale` honors the same policy. Configuration is **fail-closed** — an unknown mode or a corrupt config aborts the compile rather than silently disabling review. (`query --save` is not policy-gated in this version.)
-
-## Page metadata
-
-Compiled pages can carry epistemic metadata in frontmatter so consumers know how trustworthy each page is. All fields are optional and existing pages without them continue to work.
-
-```yaml
----
-title: Knowledge Compilation
-summary: Techniques for converting knowledge representations...
-sources:
-  - knowledge-compilation.md
-confidence: 0.82           # 0–1, LLM-reported confidence in the synthesized page
-provenanceState: merged    # extracted | merged | inferred | ambiguous
-contradictedBy:
-  - slug: probabilistic-reasoning
----
-```
-
-When multiple sources merge into one slug, metadata is reconciled: `min` confidence, `provenanceState = 'merged'`, union of `contradictedBy` (deduped by slug).
-
-`llmwiki lint` adds three rules that surface this metadata:
-
-- `low-confidence` — flags pages with `confidence` below a threshold
-- `contradicted-page` — flags pages with non-empty `contradictedBy`
-- `excess-inferred-paragraphs` — flags pages whose body has too many uncited prose paragraphs (counted directly from the rendered text — the body is the single source of truth, no frontmatter field involved)
-
-## Claim-level provenance
-
-Paragraph citations continue to use the original source-marker form:
-
-```markdown
-This paragraph is grounded in the source. ^[source.md]
-```
-
-For claims that need tighter verification, pages can pin a statement to a line range in the ingested source:
-
-```markdown
-The system uses a two-phase compile pipeline. ^[architecture-notes.md:42-58]
-The same range can also use GitHub-style anchors. ^[architecture-notes.md#L42-L58]
-```
-
-`llmwiki lint` validates both forms. It reports missing source files, malformed claim citations, impossible ranges like line `0` or `8-3`, and ranges that extend past the end of the source file.
-
-## Schema layer
-
-Projects can optionally define `.llmwiki/schema.json` to shape the wiki beyond flat concept pages. Existing projects do not need a schema file; missing or invalid `kind` values fall back to `concept`.
-
-```bash
-llmwiki schema init
-llmwiki schema show
-```
-
-The schema supports four page kinds:
-
-- `concept` — standalone idea or pattern
-- `entity` — specific person, product, organization, or named artifact
-- `comparison` — side-by-side analysis across concepts or entities
-- `overview` — map page that connects several concepts in a domain
-
-Schema rules can set per-kind `minWikilinks` and optional `seedPages`. Compile can materialize seed pages such as overviews, lint enforces page-kind-specific cross-link minimums, and review candidates surface schema violations before approval.
-
-## Eval / quality measurement
-
-`llmwiki eval` gives the wiki a quantitative health score and tracks citation quality over time, making it possible to detect regressions after a recompile.
-
-```bash
-llmwiki eval                   # fast suite: health score, citation coverage, corpus stats
-llmwiki eval --suite full      # + LLM-as-judge citation support scoring (requires API)
-llmwiki eval report            # re-print the most recent report
-llmwiki eval history           # trend table across past runs
-llmwiki eval history --n 10    # limit to last 10 entries
-llmwiki eval judgements        # all cached citation judgements
-llmwiki eval judgements --score 0          # only unsupported citations
-llmwiki eval judgements --page some-slug   # filter to one page
-llmwiki eval cache show        # score distribution + top-cited pages
-llmwiki eval cache clear       # wipe the citation judgement cache
-```
-
-**What it measures:**
-
-- **Health score (0–100)** aggregates all lint rules. Errors (broken citations, broken wikilinks, duplicate concepts) cost more than warnings.
-- **Citation coverage** — fraction of prose paragraphs that carry a `^[...]` marker, plus citation precision (fraction of citations pointing to existing source files).
-- **Citation support (full suite)** — samples up to N `(claim, source span)` pairs, asks a judge model to score each 0–2 (unsupported → fully supported), and caches results so subsequent runs only re-judge new pairs.
-- **Source utilization & citation depth** — the fraction of a page's valid sources that are actually cited (`source_utilization_rate`), and the share of citations pinned to specific line ranges rather than whole files (`claim_level_citation_rate`). Source warnings flag sources excluded from compilation (e.g. out-of-tree symlinks), gateable via `source_warnings_max`.
-- **Corpus stats** — page count, source count, total wiki characters, embedding counts, appended to `history.jsonl` for trend tracking.
-- **Regression deltas** — current report is diffed against the previous entry in history.
-
-**CI thresholds:** add `.llmwiki/eval/thresholds.yaml` to configure minimum acceptable scores:
-
-```yaml
-health_score: 85
-citation_coverage_percent: 70
-citation_precision_percent: 90
-citation_support_mean: 1.4   # only checked when --suite full
-source_utilization_rate: 0.9 # min fraction of valid sources cited by a page
-source_warnings_max: 0       # max excluded sources (out-of-tree symlinks, etc.)
-claim_level_citation_rate: 0.5 # min fraction of citations with line ranges
-```
-
-Threshold violations are listed in the report. Exit code is non-zero when any threshold is breached, suitable for CI gating.
-
-**Artifacts** written under `.llmwiki/eval/`:
-
-```
-.llmwiki/eval/
-  history.jsonl          one JSON line per eval run
-  citation-cache.jsonl   one JSON line per citation judgement
-  thresholds.yaml        optional CI threshold config
-```
-
-</details>
-
-
-<br>
-
----
-
-<br>
-
+`quickstart` ingests one source, compiles pages, and opens the viewer. Inside an existing project, run `llmwiki next` when you want the safest next action.
 
 ## Demo
 
@@ -574,272 +107,191 @@ llmwiki quickstart https://en.wikipedia.org/wiki/Andrej_Karpathy
 llmwiki query "What terms did Andrej coin?"
 ```
 
-See `examples/basic/` in the repo for pre-generated output you can browse without an API key.
+The [`examples/basic/`](examples/basic/) directory includes a small pre-generated wiki you can inspect without an API key.
 
+## Core commands
 
-<br>
+| Command | What it does |
+|---|---|
+| `llmwiki ingest <url-or-file>` | Fetch a URL or copy a local file into `sources/`. |
+| `llmwiki ingest-session <path>` | Import exported Claude, Codex, or Cursor sessions into `sources/`. |
+| `llmwiki quickstart <source>` | Ingest, compile, and optionally open the viewer in one step. |
+| `llmwiki compile` | Incrementally extract concepts and generate wiki pages. |
+| `llmwiki refresh --stale [--dry-run]` | Recompile changed owners of stale pages and clean selected orphaned ownership. |
+| `llmwiki review list/show/approve/reject` | Inspect and manage held candidates. |
+| `llmwiki query "question" [--save]` | Ask questions against the compiled wiki, optionally saving the answer. |
+| `llmwiki context "<prompt>" --json` | Build a citation-aware evidence pack for agents. |
+| `llmwiki view [--open]` | Start the read-only local browser viewer. |
+| `llmwiki lint` | Validate wiki structure, citations, links, metadata, and freshness. |
+| `llmwiki eval [--suite fast\|full]` | Measure wiki quality and optional citation support. |
+| `llmwiki export --target <format>` | Export the wiki to portable formats, including Open Knowledge Format (`okf`). |
+| `llmwiki import --okf <dir> [--dry-run] [--trusted]` | Import an Open Knowledge Format bundle, staged for review by default. |
+| `llmwiki serve --root <dir>` | Start the MCP server. |
 
----
+Full command docs live in [`docs/cli/`](docs/cli/).
 
-<br>
+## Open Knowledge Format
 
-
-<details>
-<summary><span style="font-size: 1.4em;"><strong>MCP Server — click to expand</strong></span></summary>
-
-
-## MCP Server
-
-llmwiki ships an MCP (Model Context Protocol) server so AI agents (Claude Desktop, Cursor, Claude Code, etc.) can drive the full pipeline directly: ingest sources, compile, query, search, lint, and read pages — without scraping CLI output.
-
-Where [llm-wiki-kit](https://github.com/iamsashank09/llm-wiki-kit) gives agents raw CRUD against wiki pages, llmwiki exposes the **automated pipelines**: agents get intelligent compilation, incremental change detection, and semantic query routing built in.
-
-### Setup
-
-Start the server (stdio transport, no API key required at startup):
+llmwiki is an Open Knowledge Format (OKF) producer and consumer. OKF is a Google Cloud initiative for sharing compiled knowledge as portable markdown files with structured frontmatter.
 
 ```bash
-llmwiki serve --root /path/to/your/wiki-project
+llmwiki export --target okf --out ./dist/okf
+llmwiki import --okf ./dist/okf --dry-run
+llmwiki import --okf ./dist/okf
 ```
 
-### Claude Desktop / Cursor configuration
+OKF import is intentionally review-first: untrusted bundles become review candidates, not live wiki pages. The importer preserves foreign OKF metadata, stores llmwiki provenance under `x-llmwiki`, and re-exports imported pages honestly after local edits.
 
-Add to your client's MCP config (e.g. `claude_desktop_config.json`):
+See [`docs/guides/open-knowledge-format.mdx`](docs/guides/open-knowledge-format.mdx), [`docs/cli/export.mdx`](docs/cli/export.mdx), and [`docs/cli/import.mdx`](docs/cli/import.mdx).
 
-```json
-{
-  "mcpServers": {
-    "llmwiki": {
-      "command": "npx",
-      "args": ["llm-wiki-compiler", "serve", "--root", "/path/to/wiki-project"],
-      "env": {
-        "ANTHROPIC_API_KEY": "sk-ant-..."
-      }
-    }
-  }
-}
+## What llmwiki creates
+
+A project has raw inputs in `sources/`, compiled markdown in `wiki/`, and compiler state under `.llmwiki/`:
+
+```text
+sources/
+  raw source files
+wiki/
+  concepts/      compiled pages
+  queries/       saved answers
+  index.md       generated TOC
+.llmwiki/
+  config.json    review policy
+  schema.json    page-kind/cross-link policy
+  state.json     source hashes and ownership
+  candidates/    held review candidates
+  eval/          quality history and thresholds
+log.md           activity journal
 ```
 
-Tools that need an LLM (`compile_wiki`, `query_wiki`, `search_pages`) check for a configured provider on each call. Read-only tools (`read_page`, `lint_wiki`, `wiki_status`) and `ingest_source` work without any credentials. `get_context_pack` is read-only and provider credentials are optional — when present, semantic retrieval is used; otherwise the tool falls back to lexical ranking and surfaces an `embedding-store-missing` or `query-embedding-unavailable` warning.
+Compiled pages are plain markdown with YAML frontmatter, plus enough metadata for agents to reason about citations, freshness, confidence, contradictions, and review state. See [`docs/concepts/wiki-model.mdx`](docs/concepts/wiki-model.mdx).
 
-### Tools
+## Agent integration
 
-| Tool | What it does |
-|------|--------------|
-| `ingest_source` | Fetch a URL or local file into `sources/`. |
-| `compile_wiki` | Run the incremental compile pipeline; returns counts, slugs, errors. |
-| `query_wiki` | Two-step grounded answer with optional `--save`. |
-| `search_pages` | Return full content of pages relevant to a question. |
-| `read_page` | Read a single page by slug (concepts/ then queries/). |
-| `lint_wiki` | Run quality checks; returns structured diagnostics. |
-| `wiki_status` | Page/source counts, stale and orphaned pages, a `stateStatus` field, and pending changes (read-only). |
-| `get_context_pack` | Build an agent-ready evidence pack (primary pages, semantic chunks, graph neighbors, citations, per-page freshness, warnings, suggested actions) — same v1 JSON envelope as `llmwiki context --json`. `get_context_pack` **packages evidence**; `query_wiki` **generates answers**. |
-| `run_eval` | Score wiki quality (the fast suite needs no API key; the full suite LLM-judges a sample of citations); read-only. |
+### MCP
 
-### Resources
+Run:
 
-| URI | Returns |
-|-----|---------|
-| `llmwiki://index` | Full `wiki/index.md` content. |
-| `llmwiki://concept/{slug}` | A single concept page (frontmatter + body). |
-| `llmwiki://query/{slug}` | A single saved query page. |
-| `llmwiki://sources` | List of ingested source files with metadata. |
-| `llmwiki://state` | Compilation state (per-source hashes, last compile times). |
-| `llmwiki://eval/report` | The most recent eval report. |
-| `llmwiki://eval/history` | Trend of past eval runs. |
+```bash
+llmwiki serve --root /path/to/wiki-project
+```
 
-</details>
+MCP clients can ingest sources, compile, query, search pages, read pages, lint, run eval, inspect status, and request context packs. Read-only tools work without provider credentials; LLM-backed tools validate provider credentials at call time.
 
+See [`docs/guides/mcp-agent-integration.mdx`](docs/guides/mcp-agent-integration.mdx).
 
-<br>
-
----
-
-<br>
-
-
-<details>
-<summary><span style="font-size: 1.4em;"><strong>SDK — programmatic API — click to expand</strong></span></summary>
-
-
-## SDK — `createWiki()`
-
-Drive llmwiki in-process instead of shelling out to the CLI. `createWiki({ root })` returns a `Wiki` facade bound to a project directory. Every method runs silently (no console output) and is concurrency-safe — quiet mode is scoped per async call, not via a global flag. `createWiki` is exported from the package entry, so `import { createWiki } from "llm-wiki-compiler"` works for any installed version.
+### SDK
 
 ```ts
 import { createWiki } from "llm-wiki-compiler";
 
-const wiki = createWiki({ root: "./my-wiki" });
-
-await wiki.ingestText({ title: "Notes", text: "Raw text to compile…" });
-await wiki.compile();                        // needs LLM credentials
-const { answer } = await wiki.query("What did I note about X?");
-const status = await wiki.status();          // no credentials needed
+const wiki = createWiki({ root: "/path/to/wiki-project" });
+await wiki.ingest({ source: "./notes.md" });
+await wiki.compile();
+const answer = await wiki.query({ question: "What changed?" });
 ```
 
-### Methods
+See [`docs/guides/sdk.mdx`](docs/guides/sdk.mdx).
 
-| Method | What it does | LLM creds |
-|--------|--------------|:---------:|
-| `ingest({ source })` | Fetch a URL or read a local file into `sources/`. **Trusted input only** — a server-side fetch + local-file-read primitive (SSRF risk); use `ingestText` for untrusted content. | No |
-| `ingestText({ title, text })` | Ingest raw text — the safe path for untrusted content (no fetch, no file read). | No |
-| `compile(options?)` | Compile pending sources into wiki pages. `options.review` queues candidates instead of writing. **Sends source content to the provider.** | Yes |
-| `search(question)` | Retrieve and hydrate the most relevant page records. | Yes |
-| `query(question, options?)` | Grounded answer; `options.save` persists it as a page, `options.debug` returns retrieval detail. | Yes |
-| `getPage(ref)` / `listPages(options?)` | Read one page / list pages with filters and cursor pagination. | No |
-| `listSources(options?)` / `getSource(id)` / `deleteSource(id)` | List, read, or delete ingested sources. `id` is the `IngestResult.filename` (e.g. `"note.md"`); `deleteSource` reconciles the compiled page on the next `compile()`. | No |
-| `status()` | Read-only status snapshot — counts, freshness, pending changes. | No |
-| `lint()` | Run all lint rules; severity-counted summary. | No |
-| `getContextPack({ prompt, budget?, depth?, topPages?, topChunks? })` | Build a v1 context pack — same envelope as MCP `get_context_pack`. Semantic retrieval when embeddings exist, lexical fallback otherwise. | No |
-| `exportJson(options?)` | Structured JSON export document (same shape as `llmwiki export --target json`). | No |
-| `runEval({ mode, record? })` | Eval harness. `mode: "fast"` is credential-free; `"full"` LLM-judges a sample of citations. | full only |
+## Configuration
 
-**Notes.** Methods that need a provider throw `ProviderUnavailableError` when no credentials are configured; the rest run credential-free. Output is suppressed and there is no progress callback in v1 (`compile`/`runEval` on a large corpus can run for minutes with no feedback). `status()`, `lint()`, and `exportJson()` each hash the full source corpus per call (no cross-call cache) — avoid calling them in a hot loop. All result types (`CompileResult`, `QueryResult`, `WikiStatus`, `ContextPack`, …) are exported from the package for typed consumption.
+Minimum requirement: Node.js 24 or newer.
 
-</details>
+The default provider is Anthropic:
 
+```bash
+export ANTHROPIC_API_KEY=sk-...
+```
 
-<br>
+Provider selection is environment-driven:
 
----
+| Provider | Typical setup |
+|---|---|
+| Anthropic | `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` |
+| Claude Agent SDK | Local Claude Code login, `LLMWIKI_PROVIDER=claude-agent` |
+| OpenAI-compatible | `LLMWIKI_PROVIDER=openai`, `OPENAI_API_KEY`, optional `OPENAI_BASE_URL` |
+| Ollama | `LLMWIKI_PROVIDER=ollama`, `OLLAMA_HOST` |
+| GitHub Copilot | `LLMWIKI_PROVIDER=copilot`, `GITHUB_TOKEN=$(gh auth token)` |
 
-<br>
+See [`docs/configuration/providers.mdx`](docs/configuration/providers.mdx) and [`docs/configuration/environment-variables.mdx`](docs/configuration/environment-variables.mdx).
 
+## Quality and safety model
 
-## Companion: Atomic Memory
+llmwiki is designed for auditable generated knowledge:
 
-llmwiki and [Atomic Memory](https://github.com/atomicstrata/atomicmemory) are complementary layers of open context infrastructure, both maintained by [Atomic Strata](https://github.com/atomicstrata):
+- **Review before write.** Use `compile --review` or `.llmwiki/config.json` review policy to hold risky pages as candidates.
+- **Fail-closed config.** Invalid review-policy config aborts compile instead of silently disabling review.
+- **Source confinement.** Source snippets and import/export paths are confined to the project.
+- **Freshness is explicit.** Pages can be fresh, stale, orphaned, or unverified; stale pages are flagged and repairable.
+- **Imported compiled knowledge is staged by default.** External bundles go through the review queue unless explicitly trusted.
+- **CI gates are supported.** `llmwiki lint` and `llmwiki eval` can enforce quality thresholds.
 
-- **llmwiki** gives you a persistent **knowledge base** — durable markdown compiled from your sources, inspectable on disk.
-- **Atomic Memory** gives your agents persistent **working memory** — runtime context that's searchable, correctable, scoped, and inspectable over time.
-
-Use them independently or together. Each remains valuable on its own — llmwiki as a notebook, RAG index, CI-checked knowledge base, or domain pack source; Atomic Memory as a runtime memory layer for any agent or app.
-
-The [`@atomicmemory/llmwiki`](https://github.com/atomicstrata/atomicmemory/tree/main/packages/llmwiki) bridge ingests `llmwiki export --target json --project-id <id>` envelopes as one verbatim Atomic Memory record per wiki page, preserving all advisory metadata (kind, citations, confidence, provenance state, contradictions, aliases, freshness) under `memory.metadata.llmwiki.*`. See the [bridge cookbook](https://github.com/atomicstrata/atomicmemory/blob/main/packages/llmwiki/docs/cookbook.md) for the full compile → export → import → package workflow.
+See [`docs/configuration/review-policy.mdx`](docs/configuration/review-policy.mdx), [`docs/troubleshooting/stale-pages.mdx`](docs/troubleshooting/stale-pages.mdx), and [`docs/guides/ci-quality-gates.mdx`](docs/guides/ci-quality-gates.mdx).
 
 ## Scale and what works
 
-Still early software, but the scale story has matured well past the "few dozen sources" era.
+llmwiki is still early software, but it is no longer a toy pipeline for a handful of notes.
 
-- **Semantic chunk retrieval** (`.llmwiki/embeddings.json` v2) narrows hundreds of pages down to a small top-K before LLM selection, with BM25 reranking and graph-neighborhood expansion layered on top.
-- **Incremental everything.** Hash-based source-change detection, content-hash-aware embedding updates, cached citation judgements. Re-running on an unchanged corpus is a few seconds.
-- **Lexical fallback.** Index-based routing kicks in automatically when no embedding store is present or the active provider has no embedding credentials, surfacing a stable warning code rather than hard-failing.
+- **Incremental compilation** means unchanged sources do not flow back through the LLM.
+- **Chunk-level embeddings** narrow large wikis before BM25 reranking and graph expansion.
+- **Content-hash-aware embedding updates** avoid recomputing vectors for unchanged pages and chunks.
+- **Cached citation judgements** make repeated `eval --suite full` runs cheaper.
+- **Lexical fallback** keeps query/context workflows usable when the active provider has no embedding endpoint.
+- **Prompt budgeting and ingest truncation metadata** make large sources explicit instead of silently pretending they fit.
 
-**Honest about truncation.** Sources that exceed the character limit are truncated on ingest with `truncated: true` and the original character count recorded in frontmatter, so downstream consumers know they're working with partial content. A per-concept prompt budget prevents popular shared concepts from crashing compile.
+The current sweet spot is a durable project or domain wiki: research folders, codebase docs, team handbooks, standards, design notes, decision logs, or curated source packs. The less ideal fit is a high-churn firehose where raw search is enough and compiled structure would go stale faster than it can be reviewed.
 
-**Where it's still early.** No source-freshness watchdog yet (re-ingest detects content changes, but doesn't proactively re-check URLs). No team / multi-writer conflict resolution. The viewer is read-only by design — write operations go through the CLI or MCP.
+## Documentation
 
-## Karpathy's LLM Wiki pattern vs this compiler
+The full docs site source is in [`docs/`](docs/):
 
-Karpathy described an abstract pattern for turning raw data into compiled knowledge. Here's how llmwiki maps to it today:
+- Start here: [`docs/introduction.mdx`](docs/introduction.mdx)
+- Quickstart: [`docs/quickstart.mdx`](docs/quickstart.mdx)
+- Installation: [`docs/installation.mdx`](docs/installation.mdx)
+- Karpathy's LLM Wiki pattern: [`docs/concepts/karpathy-pattern.mdx`](docs/concepts/karpathy-pattern.mdx)
+- How the compiler works: [`docs/concepts/how-it-works.mdx`](docs/concepts/how-it-works.mdx)
+- Wiki model: [`docs/concepts/wiki-model.mdx`](docs/concepts/wiki-model.mdx)
+- CLI reference: [`docs/cli/`](docs/cli/)
+- Open Knowledge Format: [`docs/guides/open-knowledge-format.mdx`](docs/guides/open-knowledge-format.mdx)
+- MCP integration: [`docs/guides/mcp-agent-integration.mdx`](docs/guides/mcp-agent-integration.mdx)
+- SDK: [`docs/guides/sdk.mdx`](docs/guides/sdk.mdx)
+- Atomic Memory bridge: [`docs/guides/atomic-memory-bridge.mdx`](docs/guides/atomic-memory-bridge.mdx)
 
-| Karpathy's concept | llmwiki | Status |
-|---|---|---|
-| Data ingest | `llmwiki ingest`, `ingest-session` (Claude/Codex/Cursor) | Implemented |
-| Compile wiki | `llmwiki compile` (two-phase, incremental) | Implemented |
-| Q&A | `llmwiki query` (semantic + BM25 + graph expansion) | Implemented |
-| Output filing (save answers back) | `llmwiki query --save` | Implemented |
-| Auto-recompile | `llmwiki watch` | Implemented |
-| Linting / health-check pass | `llmwiki lint` + `llmwiki eval` (CI-gateable) | Implemented |
-| Agent integration | `llmwiki serve` MCP server with `get_context_pack` | Implemented |
-| Multimodal ingest | Images, PDFs, transcripts via `llmwiki ingest` | Implemented |
-| Marp slides | `llmwiki export --target marp` | Implemented |
-| Bridge to runtime memory | `llmwiki export --target json --project-id` → [`@atomicmemory/llmwiki`](https://github.com/atomicstrata/atomicmemory/tree/main/packages/llmwiki) | Implemented |
-| Fine-tuning | — | Not yet implemented |
+Preview the docs locally with Node 24:
 
-## Roadmap
+```bash
+cd docs
+volta run --node 24 npx mint dev --port 3001
+```
 
-Available on main, will ship in 0.9.1:
+## Current release
 
-- ✅ Review policy — a `.llmwiki/config.json` policy holds risky generated pages (low confidence, contradicted, schema- or provenance-violating) for review instead of writing them live; each held candidate records why it was held, `review list`/`show` explain the holds, `compile` reports the split, and `refresh --stale` honors the same policy. Configuration is fail-closed — a malformed config aborts the compile rather than silently disabling review.
+Version `0.10.0` includes review policy, source-freshness repair, Open Knowledge Format import/export/re-export support, the Claude Agent SDK provider, and the Mintlify docs site. See [`CHANGELOG.md`](CHANGELOG.md) for release history.
 
-Shipped in 0.9.0:
+## Companion: Atomic Memory
 
-- ✅ Source freshness — `llmwiki lint` flags pages whose sources changed (`stale`) or were all deleted (`orphaned`) since compile, surfaced across MCP (`wiki_status`, `get_context_pack`), context packs, the viewer (badges, a per-axis filter, health counts, a corrupt-state banner), the JSON export, and `llmwiki next`
-- ✅ `llmwiki refresh --stale` — repairs stale/orphaned pages with a targeted recompile of their changed owning sources (and deleted-owner cleanup), skipping unrelated new sources; `--dry-run` previews with no LLM calls or writes
-- ✅ JSON export bridge contract — `llmwiki export --target json --project-id <id>` adds per-page `path`, `kind`, advisory confidence/provenance, flattened citations, aliases, and freshness so downstream importers (e.g. [`@atomicmemory/llmwiki`](https://github.com/atomicstrata/atomicmemory/tree/main/packages/llmwiki)) can ingest pages as durable memory records
-- ✅ In-process SDK — `createWiki()` exposes the compiler in-process, with source-backed write APIs for programmatic callers
-- ✅ Eval over MCP + richer metrics — `run_eval` tool and read-only `llmwiki://eval/report`/`llmwiki://eval/history` resources, plus source-utilization and citation-depth metrics with a `source_warnings_max` CI gate
-- ✅ Rule-candidate extraction — extract reusable rule candidates from sources with review/approve and a JSON export pipeline
-- ✅ Claude Agent provider — authenticates through a local Claude Code login (bundled plan tokens, no separate API key)
-- ✅ Alias-aware wikilinks — the viewer resolves a `[[term]]` link to any page that declares `term` in its `aliases` frontmatter, not just an exact slug match
+llmwiki and [Atomic Memory](https://github.com/atomicstrata/atomicmemory) are complementary open context infrastructure:
 
-Shipped in 0.8.0:
+- **llmwiki** compiles source material into durable, inspectable knowledge.
+- **Atomic Memory** gives agents runtime memory that is searchable, scoped, correctable, and inspectable.
 
-- ✅ Guided project flow — `llmwiki next` recommends the next useful command, and `llmwiki quickstart <source>` ingests, compiles, and opens the viewer in one step
-- ✅ Graph/context layer — `llmwiki context` and MCP `get_context_pack` produce token-budgeted evidence packs with primary pages, graph neighbors, citations, optional source windows, warnings, and suggested actions
-- ✅ Viewer graph route — `llmwiki view` includes a force-directed `#/graph` route for exploring page relationships
-- ✅ Evaluation harness — `llmwiki eval` measures health score, citation coverage/precision, corpus stats, regression deltas, optional LLM-as-judge citation support, and CI thresholds
+Use them independently or together. The [`@atomicmemory/llmwiki`](https://github.com/atomicstrata/atomicmemory/tree/main/packages/llmwiki) bridge imports `llmwiki export --target json --project-id <id>` as durable memory records.
 
-Shipped in 0.7.0:
+## Contributing
 
-- ✅ Read-only local web viewer — `llmwiki view` with sidebar navigation, markdown rendering, search, metadata, health counts, and provenance/citation chips
-- ✅ GitHub Copilot provider — `LLMWIKI_PROVIDER=copilot` with `GITHUB_TOKEN=$(gh auth token)` for Copilot chat/tool calls
-- ✅ Cached lint health summary — `llmwiki lint` writes `.llmwiki/last-lint.json` so viewer health can show the latest lint counts without re-running lint
+Good first contributions are usually docs, provider setup improvements, importer/exporter polish, eval fixtures, or focused CLI ergonomics. Larger feature work should start with an issue or design discussion.
 
-Shipped in 0.6.0:
+Before committing code changes, run:
 
-- ✅ Export bundle (`llms.txt`, JSON, JSON-LD, GraphML, Marp slides)
-- ✅ Session-history adapters — `llmwiki ingest-session` for Claude, Codex, and Cursor exports
-- ✅ Configurable output language — `--lang <code>` and `LLMWIKI_OUTPUT_LANG`
-- ✅ Defensive per-concept prompt budget so popular shared concepts don't crash compile
+```bash
+npx tsc --noEmit
+npm run build
+npm test
+npm run fallow:ci
+```
 
-Shipped in 0.5.0:
-
-- ✅ Multimodal ingest (images, PDFs, transcripts)
-- ✅ Chunked retrieval with reranking and `--debug` output
-- ⚠️ Minimum Node version raised to 24 (was 18)
-
-Shipped in 0.4.0:
-
-- ✅ Claim-level provenance with source ranges
-- ✅ First-class schema layer with typed page kinds (`concept`, `entity`, `comparison`, `overview`)
-
-Shipped in 0.3.0:
-
-- ✅ Candidate review queue (approve compile output before pages are written)
-- ✅ Confidence and contradiction metadata on compiled pages
-
-Shipped in 0.2.0:
-
-- ✅ Better provenance (paragraph-level source attribution)
-- ✅ Linting pass for wiki quality checks
-- ✅ Multi-provider support (OpenAI, Ollama, MiniMax)
-- ✅ Larger-corpus query strategy (semantic search, embeddings)
-- ✅ Deeper Obsidian integration (tags, aliases, Map of Content)
-- ✅ MCP server for agent integration
-
-Next up:
-
-- **Task and decision ledger** — turn session ingest into durable agent memory: goals, decisions, open questions, outcomes, and next-agent handoffs.
-- **Rollback, audit, and source lifecycle** — undo/reverse ingest, compile diff reports, stale-claim checks, freshness reports, and a durable operation log.
-- **Domain templates** — schema/prompt packs for research, codebase docs, team handbooks, decision logs, and standards/regulations.
-- **Eval extensions** — retrieval recall suites, update-drift benchmarks, and comparisons against serious retrieval baselines.
-
-Later / open to discussion:
-
-- Recurring source refresh jobs — re-ingest URLs on a schedule, diff against the prior snapshot, re-compile only what changed
-- MCP prompt resources — curated agent prompts such as "review the wiki", "propose new sources", and "draft a comparison page"
-- Codex OAuth provider — ChatGPT subscription auth as a dedicated provider, with clear token refresh and embedding-limit behavior
-- Team-chat connectors for Slack/Discord/Teams-style institutional memory
-
-If you like ambitious problems: **task/decision ledger**, **rollback/audit tooling**, and **eval extensions** are the meatiest next contributions. Open an issue to claim one or kick off a design discussion.
-
-Explicitly not planned (good ideas, just not for this repo): full static-site generator, desktop or mobile apps, fine-tuning, a formal ontology engine, heavy graph database infrastructure.
-
-## Requirements
-
-Node.js >= 24, plus provider credentials (for Anthropic: `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`).
-
-## About
-
-llmwiki is maintained by [Atomic Strata](https://github.com/atomicstrata), the team behind [Atomic Memory](https://github.com/atomicstrata/atomicmemory). Atomic Strata builds open context infrastructure: durable compiled knowledge with llmwiki, runtime memory with Atomic Memory.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 
 MIT
-
-
-## Disclaimer
-
-No LLMs were harmed in the making of this repo.

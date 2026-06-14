@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-06-14
+
+Adds a review-policy gate for generated knowledge, a full Open Knowledge Format (OKF) export/import round-trip, and a Mintlify documentation site.
+
+### Added
+
+- **Review policy** — `.llmwiki/config.json` can now hold risky generated pages for review during normal `compile` and `refresh --stale` runs. Policies can hold low-confidence, contradicted, schema-violating, provenance-violating, or all pages. Held candidates record structured reasons, and `review list` / `review show` surface those reasons for reviewers.
+- **Open Knowledge Format export** — `llmwiki export --target okf [--out <dir>]` writes an OKF-style bundle with `index.md`, per-page `concepts/` and `queries/` docs, copied cited references, and a date-grouped `log.md`. OKF export is opt-in because it writes a directory bundle rather than a single file.
+- **Open Knowledge Format import** — `llmwiki import --okf <dir> [--dry-run] [--trusted]` reads OKF bundles. The default path stages imported pages as review candidates; `--dry-run` previews the plan without writes; `--trusted` writes valid pages directly into `wiki/` for bundles you already trust.
+- **OKF re-export honesty** — imported foreign OKF pages preserve raw foreign `type` values and producer-specific frontmatter while refreshing llmwiki's own `x-llmwiki` metadata. Re-export derives standard fields such as title, description, tags, and timestamp from the current page so local edits are reflected.
+- **Mintlify documentation site** — product documentation now lives under `docs/`, with dedicated pages for getting started, CLI commands, core concepts, configuration, guides, and troubleshooting.
+
+### Changed
+
+- OKF import marks imported pages with durable imported provenance, including an `okf:<bundle>` source token, original OKF path, and original OKF frontmatter snapshot.
+- The review queue now supports imported candidates in addition to forced and policy-held candidates.
+
+### Fixed
+
+- The committed `node_modules` symlink was removed from the repository, so fresh clones and worktrees can use a normal `npm ci` install without inheriting a missing parent-level dependency tree.
+
+### Contributors
+
+No external contributors in this release.
+
 ## [0.9.0] - 2026-06-08
 
 Adds an end-to-end source-freshness loop — detect stale pages, surface them everywhere, and repair them with a targeted recompile — plus an in-process SDK with source-backed write APIs, a JSON export bridge contract for downstream importers, richer eval metrics, rule-candidate extraction, and a local-login Claude Agent provider.

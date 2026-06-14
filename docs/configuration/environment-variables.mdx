@@ -1,0 +1,128 @@
+---
+title: "llmwiki Environment Variables: Full Reference Guide"
+sidebarTitle: "Environment Variables"
+description: "Complete reference for all llmwiki environment variables: provider selection, API keys, model overrides, timeouts, output language, and debug flags."
+---
+
+llmwiki reads configuration from environment variables and an optional `.env` file placed in your project directory (alongside `sources/` and `wiki/`). Variables set in your shell take precedence over those in `.env`, which in turn take precedence over the Claude Code settings fallback (`~/.claude/settings.json` → `env` block) and built-in defaults.
+
+You don't need to set everything — only the variables relevant to your chosen provider are required. Most projects need only two or three exports before running `llmwiki compile`.
+
+---
+
+## Provider selection
+
+| Variable | Default | Description |
+|---|---|---|
+| `LLMWIKI_PROVIDER` | `anthropic` | Provider to use. One of: `anthropic`, `openai`, `ollama`, `copilot`, `claude-agent` |
+| `LLMWIKI_MODEL` | Provider default | Model name to use. Overrides the provider's built-in default model |
+| `LLMWIKI_EMBEDDING_MODEL` | Provider default | Embedding model to use. Relevant for `openai` and `ollama` providers |
+
+---
+
+## Anthropic
+
+| Variable | Required | Description |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | One of the two | Standard Anthropic API key |
+| `ANTHROPIC_AUTH_TOKEN` | One of the two | Alternative auth token accepted by Anthropic-compatible gateways |
+| `ANTHROPIC_BASE_URL` | No | Custom base URL for proxies or alternate Claude endpoints. Accepts HTTP(S) URLs including Claude-style path endpoints |
+
+Either `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` satisfies authentication — you do not need both. If neither is set in your environment or `.env`, llmwiki attempts to read these values from `~/.claude/settings.json`.
+
+---
+
+## OpenAI
+
+| Variable | Required | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | Yes (for `openai` provider) | API key. For local servers that ignore auth, any value works (e.g. `sk-local`) |
+| `OPENAI_BASE_URL` | For custom or local endpoints | Base URL for chat and tool calls. **Must include `/v1`** |
+| `OPENAI_EMBEDDINGS_BASE_URL` | No | Separate base URL for embeddings requests. When unset, embeddings use the same client and base URL as chat |
+
+---
+
+## Ollama
+
+| Variable | Required | Description |
+|---|---|---|
+| `OLLAMA_HOST` | Yes (for `ollama` provider) | Ollama host URL for chat and tool calls. **Must include `/v1`** |
+| `OLLAMA_EMBEDDINGS_HOST` | No | Separate Ollama host URL for embeddings. When unset, embeddings use `OLLAMA_HOST` |
+
+---
+
+## GitHub Copilot
+
+| Variable | Required | Description |
+|---|---|---|
+| `GITHUB_TOKEN` | Yes (for `copilot` provider) | GitHub OAuth token with the `copilot` scope. Obtain with `gh auth token` after running `gh auth refresh --scopes copilot`. Classic PATs are not supported |
+
+---
+
+## Voyage (embeddings)
+
+| Variable | Required | Description |
+|---|---|---|
+| `VOYAGE_API_KEY` | For semantic search | Voyage API key used by the `anthropic` and `claude-agent` providers for embeddings. Without it, `llmwiki query` falls back to lexical ranking |
+
+---
+
+## Timeouts
+
+| Variable | When unset | Description |
+|---|---|---|
+| `LLMWIKI_REQUEST_TIMEOUT_MS` | Provider built-in default (10 min for `openai`, 30 min for `ollama`) | Per-request timeout override in milliseconds. Applies to both the `openai` and `ollama` backends. When unset, each provider falls back to its own built-in default |
+| `OLLAMA_TIMEOUT_MS` | 30-minute `ollama` built-in default | Ollama-specific timeout override in milliseconds. Wins over `LLMWIKI_REQUEST_TIMEOUT_MS` when both are set |
+
+Timeout resolution for Ollama: explicit constructor option → `OLLAMA_TIMEOUT_MS` → `LLMWIKI_REQUEST_TIMEOUT_MS` → built-in 30-minute default.
+
+Non-numeric, zero, or negative values are silently ignored and the next source in the chain is used.
+
+---
+
+## Output
+
+| Variable | Default | Description |
+|---|---|---|
+| `LLMWIKI_OUTPUT_LANG` | *(model default, typically English)* | Language for generated wiki content. Applies to every prompt in the compile and query pipelines. Examples: `zh-CN`, `Chinese`, `ja`, `Japanese`. The `--lang` CLI flag on `llmwiki compile` and `llmwiki query` overrides this for a single invocation |
+| `LLMWIKI_PROMPT_BUDGET_CHARS` | `200000` | Character ceiling for combined per-concept source content sent to the LLM. Raise for larger-context models; lower for small-context local models. A stderr warning prints when the cap fires |
+
+---
+
+## Debug
+
+| Variable | Values | Description |
+|---|---|---|
+| `LLMWIKI_DEBUG` | `1` or `verbose` | Debug tracing for the `claude-agent` provider only. `1` prints a concise one-line trace per SDK message plus subprocess errors. `verbose` additionally enables the Agent SDK's full verbose logging |
+
+---
+
+## Example `.env` file
+
+Place this file in your project root (the same directory that contains `sources/` and `wiki/`):
+
+```bash
+# .env — llmwiki project configuration
+
+# Provider
+LLMWIKI_PROVIDER=anthropic
+
+# Anthropic credentials
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Optional: proxy endpoint
+# ANTHROPIC_BASE_URL=https://proxy.example.com
+
+# Optional: embeddings for semantic search (anthropic and claude-agent providers)
+# VOYAGE_API_KEY=pa-...
+
+# Optional: output language
+# LLMWIKI_OUTPUT_LANG=zh-CN
+
+# Optional: raise prompt budget for large-context models
+# LLMWIKI_PROMPT_BUDGET_CHARS=400000
+```
+
+<Note>
+  The `.env` file is read from your project root at startup. It is a convenience for projects where you don't want to export variables in your shell every session. Shell environment variables always take precedence over `.env` values, so you can override any `.env` setting with a one-off `export` without editing the file.
+</Note>

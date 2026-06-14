@@ -1,0 +1,101 @@
+---
+title: "llmwiki view — Browse Your Wiki in a Local Web Viewer"
+sidebarTitle: "View"
+description: "llmwiki view starts a private local web server for browsing, searching, and inspecting your compiled wiki with provenance chips and a graph view."
+---
+
+After compiling your wiki, `llmwiki view` gives you a private local web interface for browsing, searching, and inspecting what was generated. The viewer renders your compiled Markdown pages with their frontmatter metadata, shows citation and provenance chips for each claim, provides a full-text search across all pages, and includes a force-directed graph at `#/graph` for exploring how concepts link to each other. Everything runs locally — no data leaves your machine.
+
+## Starting the viewer
+
+```bash
+# Start the viewer and print the URL
+llmwiki view
+
+# Start the viewer and automatically open it in your default browser
+llmwiki view --open
+```
+
+When the server is ready, the CLI prints:
+
+```
+Viewer ready at http://127.0.0.1:54321
+```
+
+Press `Ctrl+C` to stop the server.
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `--open` | Automatically open the viewer URL in your default browser after the server starts. |
+| `--port <port>` | Listen on a specific port instead of a randomly assigned one. Accepts any integer from 0 to 65535. |
+| `--host <host>` | Bind to a specific network interface IP (e.g. `192.168.1.10`). **Must be used together with `--allow-lan`.** See the security note below. |
+| `--allow-lan` | Permit binding beyond the loopback interface. **Must be used together with `--host <host>`.** |
+
+## What the viewer includes
+
+**Sidebar navigation.** All compiled pages are listed in the sidebar, grouped by kind (`concept`, `entity`, `comparison`, `overview`) and sorted alphabetically. Click any page to navigate to it instantly.
+
+**Full-text search.** The search bar queries page titles and summaries across your entire compiled wiki. Results appear inline as you type.
+
+**Markdown rendering.** Pages are rendered with full Markdown formatting, including headers, code blocks, tables, and `[[wikilink]]` resolution. Wikilinks are clickable and resolve to any page that matches either the linked title or an entry in the page's `aliases` frontmatter.
+
+**Page metadata.** Each page shows its frontmatter fields — kind, contributing sources, confidence score, provenance state, creation and update timestamps — in a collapsible metadata panel.
+
+**Health counts.** The sidebar header shows the current count of `STALE`, `ORPHANED`, `CONTRADICTED`, and `ARCHIVED` pages from the most recent lint run, giving you an at-a-glance freshness signal without leaving the viewer.
+
+**Freshness badges.** Pages whose underlying sources have changed since the last compile are labelled `STALE`. Pages whose sources were all deleted are labelled `ORPHANED`. Pages that declare contradictions in their frontmatter are labelled `CONTRADICTED`. Archived candidates show an `ARCHIVED` badge.
+
+**Provenance and citation chips.** Each paragraph's `^[source.md]` citation renders as a clickable chip. On loopback (`127.0.0.1`), citation chips include an editor link that opens the source file at the relevant line range directly in your default editor. Specific claim citations (`^[source.md:42-58]`) pin to the exact line range.
+
+**Force-directed graph.** Navigate to `#/graph` to see a live, interactive force-directed graph of all your wiki pages and the `[[wikilink]]` edges between them. Hover over a node to highlight its connections; click to navigate to that page.
+
+## Security model
+
+The viewer is **read-only by design** — it renders compiled wiki pages but cannot write to `sources/`, `wiki/`, or `.llmwiki/`. All write operations go through the CLI or the MCP server.
+
+By default, the server binds exclusively to `127.0.0.1` (loopback), so it is only accessible from your local machine. Viewer responses use a strict local-asset Content Security Policy that prevents the UI from loading resources from external origins.
+
+### LAN mode
+
+To make the viewer accessible to other devices on your local network, you must provide **both** `--host` and `--allow-lan` together:
+
+```bash
+llmwiki view --host 192.168.1.10 --allow-lan --open
+```
+
+Supplying only one of the two flags is a hard error:
+
+```
+Privacy gate: --host and --allow-lan must be supplied together. Use both to
+bind beyond loopback, or neither to keep the viewer on 127.0.0.1.
+```
+
+Wildcard hosts (`0.0.0.0`, `::`, `*`) are rejected regardless of `--allow-lan`. Use a specific interface IP instead.
+
+<Warning>
+LAN mode exposes your compiled wiki — including all page content, citations, and source references — to every device that can reach the specified IP on your network. Only enable LAN mode for devices and agents you trust with the contents of your wiki. If you need to share a wiki externally, export it with `llmwiki export` instead and serve the static output through a controlled channel.
+</Warning>
+
+## Example workflow
+
+```bash
+# Compile your wiki first
+llmwiki compile
+
+# Start the viewer and open the browser
+llmwiki view --open
+
+# In a second terminal, check freshness
+llmwiki lint
+
+# Repair stale pages
+llmwiki refresh --stale
+
+# Reload the viewer — it serves the latest compiled state on each page load
+```
+
+<Note>
+The viewer is read-only. If you want to add sources, compile new pages, approve review candidates, or run queries, use the CLI commands or the MCP server. The viewer reflects the current state of `wiki/` on disk; there is no "save" or "edit" function inside the browser UI.
+</Note>
