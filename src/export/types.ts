@@ -153,10 +153,29 @@ export type ExportTarget =
   | "json"
   | "json-ld"
   | "graphml"
-  | "marp";
+  | "marp"
+  | "okf";
 
 /** All recognised export target names — used for validation. */
 export const EXPORT_TARGETS: readonly ExportTarget[] = [
+  "llms-txt",
+  "llms-full-txt",
+  "json",
+  "json-ld",
+  "graphml",
+  "marp",
+  "okf",
+];
+
+/**
+ * Targets produced by a plain `llmwiki export` (no `--target`).
+ *
+ * Deliberately the six single-file formats only — OKF is excluded because it
+ * writes a whole directory bundle, which would be surprising as a default.
+ * OKF stays reachable explicitly via `--target okf` (it remains in
+ * {@link EXPORT_TARGETS} so that flag still validates).
+ */
+export const DEFAULT_EXPORT_TARGETS: readonly ExportTarget[] = [
   "llms-txt",
   "llms-full-txt",
   "json",
