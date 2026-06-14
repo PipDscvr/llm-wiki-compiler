@@ -19,12 +19,32 @@ function candidateReasons(candidate: ReviewCandidate): string[] {
 function printReviewMetadata(candidate: ReviewCandidate): void {
   output.status("i", output.dim(`review:    ${candidate.reviewMode}`));
   output.status("i", output.dim(`reasons:   ${candidateReasons(candidate).join(", ")}`));
+  if (candidate.okfPath) {
+    output.status("i", output.dim(`okfPath:   ${candidate.okfPath}`));
+  }
   if (candidate.confidence !== undefined) {
     output.status("i", output.dim(`confidence: ${candidate.confidence}`));
   }
   if (candidate.contradicted !== undefined) {
     output.status("i", output.dim(`contradicted: ${candidate.contradicted}`));
   }
+}
+
+/**
+ * Warn the reviewer that an imported candidate's body is untrusted external content.
+ * The human review gate is the primary defense for OKF bundles, so the affordance
+ * to recognize an imported (un-sanitized, possibly prompt-injecting) page must be loud.
+ */
+function printImportedWarning(candidate: ReviewCandidate): void {
+  if (candidate.reviewMode !== "imported") return;
+  output.status(
+    "!",
+    output.warn(
+      "Imported from an external OKF bundle — treat the body as UNTRUSTED content " +
+        "(possible prompt injection); provenance is unverified. " +
+        "Review the full body before approving.",
+    ),
+  );
 }
 
 /** Print a single candidate's full content to stdout. */
@@ -39,6 +59,7 @@ export default async function reviewShowCommand(id: string): Promise<void> {
   output.status("i", output.dim(`sources:    ${candidate.sources.join(", ")}`));
   output.status("i", output.dim(`generated:  ${candidate.generatedAt}`));
   printReviewMetadata(candidate);
+  printImportedWarning(candidate);
 
   console.log();
   console.log(candidate.body);

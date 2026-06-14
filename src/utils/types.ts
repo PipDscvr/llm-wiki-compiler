@@ -12,8 +12,15 @@ import type { HeldReason, HeldReasonCode, ReviewMode } from "../review/policy.js
  * - `merged`: synthesised from multiple sources during compilation.
  * - `inferred`: produced by the model from context, not directly cited.
  * - `ambiguous`: sources disagree or evidence is conflicting.
+ * - `imported`: brought in from an external OKF bundle (durable origin marker
+ *   that survives review approval; never produced by local compilation).
  */
-export type ProvenanceState = "extracted" | "merged" | "inferred" | "ambiguous";
+export type ProvenanceState =
+  | "extracted"
+  | "merged"
+  | "inferred"
+  | "ambiguous"
+  | "imported";
 
 /**
  * Reference to another concept that contradicts the current one.
@@ -179,6 +186,13 @@ export interface ReviewCandidate {
   reviewMode: ReviewMode;
   /** Structured reasons the candidate is awaiting review. */
   heldReasons: HeldReason[];
+  /**
+   * Wiki subdir the approved page is written to; defaults to concepts.
+   * OKF query docs set `queries` to round-trip back into the right subdir.
+   */
+  targetDirectory?: "concepts" | "queries";
+  /** Original OKF bundle-relative path, for imported candidates. */
+  okfPath?: string;
   /** Confidence parsed from the generated page frontmatter, for review display. */
   confidence?: number;
   /** True when the generated page frontmatter declares contradictions. */
