@@ -37,27 +37,82 @@ export function safeRefName(file: string): string {
   return `${stem}-${hash}${ext}`;
 }
 
-/** ExportPage -> OKF frontmatter. `type` is always non-empty (defaults to "concept"). */
-export function mapPageToOkfFrontmatter(page: ExportPage): OkfFrontmatter {
+/**
+ * Optional x-llmwiki fields, each paired with how to read its value off a page.
+ * Table-driven so {@link buildXLlmwiki} stays a single flat copy loop (no branch
+ * per field) — a non-empty value is copied, everything else is dropped.
+ */
+const OPTIONAL_XLLMWIKI_FIELDS: ReadonlyArray<readonly [keyof XLlmwiki, (p: ExportPage) => unknown]> = [
+  ["sources", (p) => p.sources],
+  ["confidence", (p) => p.advisoryConfidence],
+  ["provenanceState", (p) => p.provenanceState],
+  ["contradictedBy", (p) => p.contradictedBy],
+  ["freshnessStatus", (p) => p.freshnessStatus],
+  ["aliases", (p) => p.aliases],
+  ["citations", (p) => p.citations],
+];
+
+/** True for values worth copying onto x-llmwiki: defined, and non-empty when array. */
+function isPresent(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  return Array.isArray(value) ? value.length > 0 : true;
+}
+
+/** Build the refreshed x-llmwiki provenance block for a page (contentHash recomputed from the current body). */
+function buildXLlmwiki(page: ExportPage): XLlmwiki {
   const x: XLlmwiki = {
     schemaVersion: "0.1",
     contentHash: hashCanonicalBody(page.body),
     pageDirectory: page.pageDirectory,
   };
-  if (page.sources?.length) x.sources = page.sources;
-  if (page.advisoryConfidence !== undefined) x.confidence = page.advisoryConfidence;
-  if (page.provenanceState) x.provenanceState = page.provenanceState;
-  if (page.contradictedBy?.length) x.contradictedBy = page.contradictedBy;
-  if (page.freshnessStatus) x.freshnessStatus = page.freshnessStatus;
-  if (page.aliases?.length) x.aliases = page.aliases;
-  if (page.citations?.length) x.citations = page.citations;
+  for (const [field, read] of OPTIONAL_XLLMWIKI_FIELDS) {
+    const value = read(page);
+    if (isPresent(value)) (x as unknown as Record<string, unknown>)[field] = value;
+  }
+  return x;
+}
 
-  const fm: OkfFrontmatter = { type: page.kind ?? "concept", "x-llmwiki": x };
+// Keys derived fresh from the CURRENT page (or llmwiki-owned), so they are stripped from
+// the captured foreign snapshot before its unknown producer keys are carried through. Note
+// `okfPath` lives on the x-okf block, not here; re-export deliberately omits x-okf entirely.
+const RECONSTRUCT_STRIP = ["type", "title", "description", "tags", "timestamp", "x-llmwiki", "x-okf"];
+
+/** Overlay the OKF standard fields from the CURRENT page so local edits are always reflected. */
+function applyStandardFields(fm: Record<string, unknown>, page: ExportPage): void {
   if (page.title) fm.title = page.title;
   if (page.summary) fm.description = page.summary;
   if (page.tags?.length) fm.tags = page.tags;
   if (page.updatedAt) fm.timestamp = page.updatedAt;
-  return fm;
+}
+
+/**
+ * Re-export an imported page: keep the raw foreign `type` and any unknown producer
+ * keys from the captured snapshot, but derive the OKF standard fields (title,
+ * description, tags, timestamp) from the CURRENT page so local edits are reflected,
+ * and refresh x-llmwiki. (Preserve foreign keys, not stale standard frontmatter.)
+ *
+ * Re-export places every doc at `<pageDirectory>/<slug>.md`: the llmwiki slug is the
+ * identity the OKF link rewriter + index TOC understand. The original bundle path is
+ * preserved durably under `x-okf.okfPath` for diagnosis; faithful reconstruction of
+ * nested original paths is intentionally deferred (it needs a non-slug link/index model).
+ */
+function reconstructForeignFrontmatter(page: ExportPage, x: XLlmwiki): OkfFrontmatter {
+  const of = page.xOkf!.originalFrontmatter;
+  const rawType = typeof of.type === "string" && of.type.trim() ? of.type : (page.xOkf!.type ?? "concept");
+  const extras: Record<string, unknown> = { ...of };
+  for (const k of RECONSTRUCT_STRIP) delete extras[k];
+  const fm: Record<string, unknown> = { ...extras, type: rawType, "x-llmwiki": x };
+  applyStandardFields(fm, page);
+  return fm as unknown as OkfFrontmatter;
+}
+
+/** ExportPage -> OKF frontmatter. `type` is always non-empty (defaults to "concept"). */
+export function mapPageToOkfFrontmatter(page: ExportPage): OkfFrontmatter {
+  const x = buildXLlmwiki(page);
+  if (page.xOkf) return reconstructForeignFrontmatter(page, x);
+  const fm: Record<string, unknown> = { type: page.kind ?? "concept", "x-llmwiki": x };
+  applyStandardFields(fm, page);
+  return fm as unknown as OkfFrontmatter;
 }
 
 const WIKILINK = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
