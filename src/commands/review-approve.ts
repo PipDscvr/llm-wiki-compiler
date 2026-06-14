@@ -18,15 +18,12 @@ import {
   atomicWrite,
   validateWikiPage,
 } from "../utils/markdown.js";
-import {
-  deleteCandidate,
-  listCandidates,
-} from "../compiler/candidates.js";
+import { deleteCandidate } from "../compiler/candidates.js";
 import { generateIndex } from "../compiler/indexgen.js";
 import { generateMOC } from "../compiler/obsidian.js";
 import { resolveLinks } from "../compiler/resolver.js";
 import { updateEmbeddings } from "../utils/embeddings.js";
-import { updateSourceState } from "../utils/state.js";
+import { readState, updateSourceState } from "../utils/state.js";
 import { CONCEPTS_DIR } from "../utils/constants.js";
 import * as output from "../utils/output.js";
 import type { ReviewCandidate } from "../utils/types.js";
@@ -65,18 +62,17 @@ async function approveUnderLock(root: string, id: string): Promise<void> {
 }
 
 /**
- * Flush the source-state snapshot stored on the candidate into
- * `.llmwiki/state.json` so the contributing source files are marked
- * compiled. Without this, approved candidates would re-appear on the next
- * `compile` run because the source still looks "new" or "changed" to the
- * change detector.
+ * Add the approved concept slug to each contributing source's live-concepts
+ * list in state.json.
  *
- * When a single source produced multiple candidates (e.g. an extraction
- * yielded several concepts), persisting state on the first approval would
- * mark the source as fully compiled and silently strand the remaining
- * pending candidates — the next `compile --review` would skip the source
- * entirely. To avoid that, we only persist a source's state when no OTHER
- * pending candidate still references that source filename.
+ * State records only LIVE concepts: held/rejected concepts are never in state,
+ * and approval adds exactly the approved slug. This prevents a rejected sibling
+ * from leaking into state when its source's first held candidate is approved.
+ *
+ * Each approval immediately union-adds its own slug via addApprovedSlugToSourceState
+ * (which reads current state, appends, and deduplicates). No deferral is needed:
+ * the old "wait for last sibling" guard was a leftover from the snapshot-write model
+ * and caused earlier-approved slugs to be silently dropped.
  */
 async function persistCandidateSourceStates(
   root: string,
@@ -84,29 +80,31 @@ async function persistCandidateSourceStates(
 ): Promise<void> {
   const states = candidate.sourceStates;
   if (!states) return;
-  const otherSources = await collectOtherCandidateSources(root, candidate.id);
-  for (const [sourceFile, entry] of Object.entries(states)) {
-    if (otherSources.has(sourceFile)) continue;
-    await updateSourceState(root, sourceFile, entry);
+  for (const [sourceFile, candidateEntry] of Object.entries(states)) {
+    await addApprovedSlugToSourceState(root, sourceFile, candidate.slug, candidateEntry.hash);
   }
 }
 
 /**
- * Build the set of source filenames referenced by every pending candidate
- * other than the one currently being approved. Used to defer source-state
- * persistence until the LAST candidate from a given source is reviewed.
+ * Merge the approved slug into a source's existing live-concepts list.
+ * Reads the current state entry so any already-live concepts are preserved,
+ * then appends the approved slug (deduplicating in case it is already present).
  */
-async function collectOtherCandidateSources(
+async function addApprovedSlugToSourceState(
   root: string,
-  approvingId: string,
-): Promise<Set<string>> {
-  const pending = await listCandidates(root);
-  const sources = new Set<string>();
-  for (const candidate of pending) {
-    if (candidate.id === approvingId) continue;
-    for (const source of candidate.sources) sources.add(source);
-  }
-  return sources;
+  sourceFile: string,
+  approvedSlug: string,
+  sourceHash: string,
+): Promise<void> {
+  const currentState = await readState(root);
+  const existing = currentState.sources[sourceFile];
+  const concepts = existing?.concepts ?? [];
+  const merged = Array.from(new Set([...concepts, approvedSlug]));
+  await updateSourceState(root, sourceFile, {
+    hash: sourceHash,
+    concepts: merged,
+    compiledAt: new Date().toISOString(),
+  });
 }
 
 /** Refresh interlinks, index, MOC, and embeddings after writing a candidate. */
