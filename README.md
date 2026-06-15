@@ -1,19 +1,12 @@
 # llmwiki
 
-<div align="center">
-  <div style="border: 2px solid #4F46E5; border-radius: 18px; padding: 20px 24px; margin: 18px 0; background: #EEF2FF; color: #111827; max-width: 900px;">
-    <h2 style="color: #312E81;">Breaking News: llmwiki 0.10.0 supports Open Knowledge Format</h2>
-    <p style="color: #1F2937;">
-      llmwiki is now an <strong>Open Knowledge Format (OKF)</strong> producer and consumer,
-      aligning compiled agent knowledge with Google Cloud's emerging standard for portable knowledge sharing.
-    </p>
-    <p style="color: #1F2937;">
-      Export compiled wikis with <code>llmwiki export --target okf</code>,
-      import external bundles with <code>llmwiki import --okf</code>,
-      and stage untrusted knowledge through review before it becomes live agent context.
-    </p>
-  </div>
-</div>
+![Breaking News: llmwiki 0.10.0 supports Open Knowledge Format](docs/images/okf-readme-banner.svg)
+
+**Breaking News:** llmwiki is now an **Open Knowledge Format (OKF)** producer and consumer, aligning compiled agent knowledge with Google Cloud's emerging standard for portable knowledge sharing. Export compiled wikis with `llmwiki export --target okf`, import external bundles with `llmwiki import --okf`, and stage untrusted knowledge through review before it becomes live agent context.
+
+---
+
+## What llmwiki does
 
 Compile raw sources into an interlinked, citation-traceable markdown wiki that agents and humans can browse, query, lint, export, and reuse.
 
