@@ -91,10 +91,9 @@ function applyStandardFields(fm: Record<string, unknown>, page: ExportPage): voi
  * description, tags, timestamp) from the CURRENT page so local edits are reflected,
  * and refresh x-llmwiki. (Preserve foreign keys, not stale standard frontmatter.)
  *
- * Re-export places every doc at `<pageDirectory>/<slug>.md`: the llmwiki slug is the
- * identity the OKF link rewriter + index TOC understand. The original bundle path is
- * preserved durably under `x-okf.okfPath` for diagnosis; faithful reconstruction of
- * nested original paths is intentionally deferred (it needs a non-slug link/index model).
+ * Re-export's output PATH for a foreign doc is decided by `resolveOutputPaths` (restoring
+ * `x-okf.okfPath` when safe); this function governs only the frontmatter reconstruction
+ * (raw foreign type/keys + refreshed x-llmwiki).
  */
 function reconstructForeignFrontmatter(page: ExportPage, x: XLlmwiki): OkfFrontmatter {
   const of = page.xOkf!.originalFrontmatter;
@@ -116,7 +115,8 @@ export function mapPageToOkfFrontmatter(page: ExportPage): OkfFrontmatter {
 }
 
 const WIKILINK = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
-const OKF_LINK = /\[([^\]]+)\]\(\/(concepts|queries)\/([^)]+?)\.md\)/g;
+// any bundle-relative markdown link to a `.md` doc: captures display text + path (no leading slash, no .md)
+const OKF_LINK = /\[([^\]]+)\]\(\/([^)]+?)\.md\)/g;
 const FENCE = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g; // capturing → fenced blocks at odd split indices
 // Only fenced blocks are protected; single-backtick inline code (e.g. `[[x]]`)
 // is NOT — a wikilink inside inline code will still be rewritten. Acceptable for v0.1.
@@ -132,16 +132,24 @@ export function wikilinksToOkf(body: string, resolve: LinkResolver): string {
             const slug = slugify(rawSlug);
             const target = resolve(slug);
             if (!target) return match;
-            return `[${disp ?? target.title}](/${target.dir}/${slug}.md)`;
+            return `[${disp ?? target.title}](/${target.path})`;
           }),
     )
     .join("");
 }
 
-/** Reverse: OKF link -> [[slug]] when text == target title, else [[slug|text]]. */
-export function okfLinksToWikilinks(body: string, titleOf: (slug: string) => string | null): string {
-  return body.replace(OKF_LINK, (_m, text: string, _dir: string, slug: string) => {
-    const title = titleOf(slug);
-    return title !== null && text === title ? `[[${slug}]]` : `[[${slug}|${text}]]`;
+/**
+ * Reverse: OKF link -> [[slug]] when `resolveLink(path)` maps the link's path to a known
+ * bundle doc; an unknown/external path is left verbatim. `[[slug]]` when text === title,
+ * else `[[slug|text]]`.
+ */
+export function okfLinksToWikilinks(
+  body: string,
+  resolveLink: (linkPath: string) => { slug: string; title: string } | null,
+): string {
+  return body.replace(OKF_LINK, (match, text: string, linkPath: string) => {
+    const r = resolveLink(linkPath);
+    if (!r) return match;
+    return r.title === text ? `[[${r.slug}]]` : `[[${r.slug}|${text}]]`;
   });
 }
