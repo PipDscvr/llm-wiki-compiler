@@ -25,8 +25,11 @@ import path from "path";
 import os from "os";
 import { afterEach, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { registerWikiTools } from "../../src/mcp/tools.js";
 import { registerWikiResources } from "../../src/mcp/resources.js";
+import { CLI } from "./run-cli.js";
 
 /** Live container for the current test's temp root path. */
 export interface McpRootHandle {
@@ -56,7 +59,36 @@ export function useMcpRoot(prefix: string): McpRootHandle {
   return handle;
 }
 
-/** Build a fresh McpServer with all wiki tools and resources registered. */
+/** A connected SDK Client + its transport, spawned over real stdio. */
+export interface McpClientHandle {
+  client: Client;
+  transport: StdioClientTransport;
+}
+
+/**
+ * Spawn `llmwiki serve --root <root>` over stdio and connect an SDK Client
+ * through the full JSON-RPC stack. Shared by every MCP stdio integration test.
+ */
+export async function connectMcpClient(root: string): Promise<McpClientHandle> {
+  const transport = new StdioClientTransport({
+    command: "node",
+    args: [CLI, "serve", "--root", root],
+    stderr: "ignore",
+  });
+  const client = new Client({ name: "test-client", version: "0.0.0" });
+  await client.connect(transport);
+  return { client, transport };
+}
+
+/**
+ * Build a fresh McpServer with the wiki tools and resources registered.
+ *
+ * Intentionally registers ONLY the wiki tools/resources, NOT the OKF tools
+ * (export_okf/import_okf): in-process OKF coverage drives `registerOkfTools`
+ * directly with a fake server, and OKF stdio coverage uses the real `serve`
+ * binary via `connectMcpClient`. A future reader reaching for `buildServer`
+ * to call an OKF tool would get "tool not found" — by design.
+ */
 export function buildServer(root: string): McpServer {
   const server = new McpServer({ name: "llmwiki-test", version: "0.0.0" });
   registerWikiTools(server, root);
