@@ -1,5 +1,5 @@
 /**
- * Commander actions for `llmwiki profile` subcommands — all READ-ONLY.
+ * Commander actions for `llmwiki profile` inspection and starter authoring.
  *
  * - `profile show` prints the active profile's id, digest, and the file it was
  *   loaded from (or that it is the built-in default).
@@ -25,12 +25,43 @@ import { validateProfile } from "../profile/validate.js";
 import { isDefaultProfile } from "../profile/default.js";
 import { diffProfiles, DISPOSITIONS, type ProfileDiffReport } from "../profile/diff.js";
 import type { ProfilePack } from "../profile/types.js";
+import { installStarterProfile, ProfileScaffoldError } from "../profile/scaffold.js";
+import { PROFILE_FILE } from "../utils/constants.js";
 
 /** Options accepted by `profile diff`. */
 export interface ProfileDiffOptions {
   candidate?: string;
   from?: string;
   to?: string;
+}
+
+/** Options accepted by `profile init`. */
+export interface ProfileInitOptions {
+  entity: string;
+}
+
+/** Author a deterministic minimal profile in an empty project. */
+export async function profileInit(profileId: string, options: ProfileInitOptions): Promise<number> {
+  try {
+    const result = await installStarterProfile(process.cwd(), profileId, options.entity);
+    console.log(`Created profile '${result.profileId}'`);
+    console.log(`wrote ${PROFILE_FILE}`);
+    console.log(`created ${result.directory}/`);
+    console.log("next: llmwiki profile validate");
+    return 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const suffix = error instanceof ProfileScaffoldError
+      ? outcomeSuffix(error.outcome)
+      : " No profile was installed.";
+    throw new Error(`${message}${suffix}`);
+  }
+}
+
+/** Describe an install outcome without inferring state from error prose. */
+function outcomeSuffix(outcome: ProfileScaffoldError["outcome"]): string {
+  if (outcome === "not-installed") return " No profile was installed.";
+  return "";
 }
 
 /** Print the active profile's id, digest, and source. Read-only. */
