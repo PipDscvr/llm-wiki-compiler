@@ -36,6 +36,7 @@
  */
 
 import { loadProfile } from "../profile/load.js";
+import { actionLabelForPresentation } from "../profile/presentation-trust.js";
 import { effectivePermission, canSatisfyHumanGate, CAPABILITY_ORDER } from "./authority.js";
 import { loadLocalGrant, localEnablesHumanGate } from "./local-config.js";
 import { validateActionInputs } from "./action-input.js";
@@ -311,8 +312,9 @@ export async function runAction(
   humanGateIo: HumanGateIo = nonInteractiveHumanGateIo(),
 ): Promise<ActionRunResult> {
   const { profile } = await loadProfile(root);
-  const def = lookupAction(profile, actionId);
-  const normalized = validateActionInputs(def, inputs);
+  const declared = lookupAction(profile, actionId);
+  const def = { ...declared, label: actionLabelForPresentation(profile, declared.label) };
+  const normalized = validateActionInputs(declared, inputs);
   const effective = effectivePermission(def.permissions[surface], await loadLocalGrant(root, surface), surface);
   await enforceAuthority(root, def, effective, surface);
   const result = await dispatchOperation(root, def, normalized, humanGateIo, surface);
