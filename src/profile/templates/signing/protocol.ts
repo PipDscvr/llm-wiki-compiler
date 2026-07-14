@@ -216,13 +216,23 @@ function slug(value: unknown, label: string): string {
 
 function digest(value: unknown): string {
   const text = textField(value, "digest");
-  if (!/^sha256:[0-9a-f]{64}$/.test(text)) throw new Error("digest must be prefixed lowercase SHA-256 hex");
+  sha256DigestHex(text);
   return text;
+}
+
+/** Return the path-safe hex component of one canonical SHA-256 digest. */
+export function sha256DigestHex(value: string): string {
+  const match = /^sha256:([0-9a-f]{64})$/.exec(value);
+  if (!match) throw new Error("digest must be prefixed lowercase SHA-256 hex");
+  return match[1];
 }
 
 function base64(value: unknown, label: string): string {
   const text = textField(value, label);
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(text)) throw new Error(`${label} must be base64`);
+  if (Buffer.from(text, "base64").toString("base64") !== text) {
+    throw new Error(`${label} must be canonical base64`);
+  }
   return text;
 }
 
