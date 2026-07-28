@@ -48,7 +48,7 @@ const SAMPLE_PROVENANCE_VIOLATION: LintResult = {
   rule: "malformed-claim-citation",
   severity: "error",
   file: "wiki/concepts/sample.md",
-  message: "Malformed claim citation ^[file.md:abc] — expected file.md, file.md:N-N, or file.md#LN-LN",
+  message: "Malformed claim citation ^[file.md:abc] — expected file.md, file.md:N-N, file.md:N,N-M,…, or file.md#LN-LN",
 };
 
 describe("checkPageMalformedCitations — pure body lint", () => {
@@ -66,6 +66,18 @@ describe("checkPageMalformedCitations — pure body lint", () => {
     const body =
       "Para one. ^[source.md]\n\nPara two. ^[other.md:1-3]\n\nPara three. ^[third.md#L10-L20]";
     expect(checkPageMalformedCitations(body, "wiki/concepts/test.md")).toEqual([]);
+  });
+
+  it("accepts comma-separated line lists the normalizer emits", () => {
+    const body = "Para one. ^[file.md:12,15,20]";
+    expect(checkPageMalformedCitations(body, "wiki/concepts/test.md")).toEqual([]);
+  });
+
+  it("still flags comma lists containing line 0", () => {
+    const body = "Para one. ^[file.md:0,5]";
+    const findings = checkPageMalformedCitations(body, "wiki/concepts/test.md");
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe("malformed-claim-citation");
   });
 });
 
