@@ -67,7 +67,7 @@ export function migrateEmbeddingStore(
 ): MigrationResult {
   const dims = storeDimensions(parsedOld);
   if (shouldRebuild(parsedOld, activeModel)) {
-    return rebuild(parsedOld, eligibleLivePages, activeModel);
+    return rebuild(eligibleLivePages, activeModel);
   }
   const slugToPageIds = indexBySlug(eligibleLivePages);
   const liveByPageId = new Map(eligibleLivePages.map((p) => [p.pageId, p]));
@@ -88,7 +88,7 @@ export function migrateEmbeddingStore(
  * new model has a different length; embeddings-write.ts recomputes the real
  * dimension from the first vector the re-embed pass actually produces.
  */
-function rebuild(parsedOld: ParsedStore | null, pages: EligibleLivePage[], model: string): MigrationResult {
+function rebuild(pages: EligibleLivePage[], model: string): MigrationResult {
   return {
     store: { version: 3, model, dimensions: 0, entries: [], chunks: [] },
     reembedPageIds: pages.map((p) => p.pageId),
