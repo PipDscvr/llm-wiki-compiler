@@ -16,7 +16,8 @@ You don't need to set everything - only the variables relevant to your chosen pr
 |---|---|---|
 | `LLMWIKI_PROVIDER` | `anthropic` | Provider to use. One of: `anthropic`, `openai`, `ollama`, `copilot`, `claude-agent` |
 | `LLMWIKI_MODEL` | Provider default | Model name to use. Overrides the provider's built-in default model |
-| `LLMWIKI_EMBEDDING_MODEL` | Provider default | Embedding model to use. Relevant for `openai` and `ollama` providers |
+| `LLMWIKI_EMBEDDING_PROVIDER` | Active chat provider | Backend serving embeddings, independent of `LLMWIKI_PROVIDER`. One of `anthropic`, `claude-agent`, `openai`, `ollama` |
+| `LLMWIKI_EMBEDDING_MODEL` | Provider default | Embedding model to use. Applies when the embedding provider is `openai` or `ollama`, or whenever `LLMWIKI_EMBEDDING_PROVIDER` is set |
 
 ---
 

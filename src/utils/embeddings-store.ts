@@ -27,7 +27,7 @@
 import { open } from "fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "path";
-import { getActiveProviderName } from "./provider.js";
+import { getActiveEmbeddingProviderName, isEmbeddingProviderExplicit } from "./embedding-provider.js";
 import { atomicWrite } from "./markdown.js";
 import { EMBEDDINGS_FILE, EMBEDDING_MODELS, MAX_EMBEDDING_STORE_BYTES } from "./constants.js";
 import { assertEmbeddingStoreValid, filterMalformedIdentities, assertFieldCaps } from "./embeddings-validate.js";
@@ -296,11 +296,21 @@ export async function readStoreForUpdate(root: string): Promise<ParsedStore | nu
   }
 }
 
-/** Choose the active embedding model name, defaulting to anthropic's voyage model. */
+/**
+ * Choose the active embedding model name, defaulting to anthropic's voyage model.
+ *
+ * LLMWIKI_EMBEDDING_MODEL is honoured when an embedding provider was named
+ * explicitly, or when the effective provider is openai/ollama — the pre-existing
+ * rule. Anthropic and claude-agent keep ignoring it on the default path: they
+ * would otherwise start honouring a variable users may have set years ago, and a
+ * changed model rebuilds the entire store.
+ */
 export function resolveEmbeddingModel(): string {
-  const providerName = getActiveProviderName();
+  const providerName = getActiveEmbeddingProviderName();
   const configuredModel = process.env.LLMWIKI_EMBEDDING_MODEL?.trim();
-  if (configuredModel && (providerName === "openai" || providerName === "ollama")) {
+  const honoursConfigured =
+    isEmbeddingProviderExplicit() || providerName === "openai" || providerName === "ollama";
+  if (configuredModel && honoursConfigured) {
     return configuredModel;
   }
   return EMBEDDING_MODELS[providerName] ?? EMBEDDING_MODELS.anthropic;

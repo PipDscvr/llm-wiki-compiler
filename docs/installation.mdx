@@ -118,6 +118,19 @@ llmwiki calls an LLM during the compile and query phases. It does **not** requir
     export OLLAMA_EMBEDDINGS_HOST=http://localhost:11435/v1
     ```
 
+    **Different backends for chat and embeddings**
+
+    Embeddings can come from a different provider than chat — for example Claude Agent SDK for generation with a local vLLM instance serving vectors:
+
+    ```bash
+    export LLMWIKI_PROVIDER=claude-agent
+    export LLMWIKI_EMBEDDING_PROVIDER=openai
+    export OPENAI_EMBEDDINGS_BASE_URL=http://localhost:8000/v1
+    export LLMWIKI_EMBEDDING_MODEL=<your-local-embedding-model>
+    ```
+
+    A self-hosted endpoint needs no API key. Without `OPENAI_EMBEDDINGS_BASE_URL`, `OPENAI_API_KEY` is required.
+
     <Note>
       Local models often need more than the default 10-minute request timeout. Override with `OLLAMA_TIMEOUT_MS` (Ollama-specific, wins over `LLMWIKI_REQUEST_TIMEOUT_MS`) or set `LLMWIKI_REQUEST_TIMEOUT_MS` for a provider-agnostic override. Ollama's built-in default is 30 minutes.
     </Note>

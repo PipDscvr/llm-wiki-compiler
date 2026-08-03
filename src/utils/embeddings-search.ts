@@ -4,7 +4,7 @@
  * pipeline beyond embedding the live query string.
  */
 
-import { getProvider } from "./provider.js";
+import { getEmbeddingProvider } from "./embedding-provider.js";
 import { EMBEDDING_TOP_K } from "./constants.js";
 import * as output from "./output.js";
 import {
@@ -75,7 +75,7 @@ export async function findRelevantPages(
   const store = await loadActiveStore(root, (s) => s.entries.length > 0);
   if (!store) return [];
 
-  const queryVec = await getProvider().embed(question, "query");
+  const queryVec = await getEmbeddingProvider().embed(question, "query");
   assertVectorValid(queryVec, store.dimensions);
   return findTopK(queryVec, store, EMBEDDING_TOP_K).map((entry) => ({
     slug: entry.slug,
@@ -95,7 +95,7 @@ export async function findRelevantChunks(
 ): Promise<Array<{ chunk: ChunkEmbeddingEntry; score: number }>> {
   const store = await loadActiveStore(root, (s) => Boolean(s.chunks && s.chunks.length > 0));
   if (!store) return [];
-  const queryVec = await getProvider().embed(question, "query");
+  const queryVec = await getEmbeddingProvider().embed(question, "query");
   assertVectorValid(queryVec, store.dimensions);
   return findTopKChunks(queryVec, store.chunks ?? [], k);
 }

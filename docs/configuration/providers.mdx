@@ -113,6 +113,7 @@ Use the `openai` provider for any OpenAI-compatible server, including cloud Open
 | `OPENAI_API_KEY` | Yes | Your API key. For local servers that ignore auth, any dummy value works (e.g. `sk-local`) |
 | `OPENAI_BASE_URL` | For local/custom | Base URL for chat and tool calls. **Include `/v1`** |
 | `LLMWIKI_MODEL` | No | Model name override |
+| `LLMWIKI_EMBEDDING_PROVIDER` | No | Backend serving embeddings, independent of `LLMWIKI_PROVIDER`. One of `anthropic`, `claude-agent`, `openai`, `ollama` |
 | `LLMWIKI_EMBEDDING_MODEL` | No | Embedding model override |
 | `OPENAI_EMBEDDINGS_BASE_URL` | No | Separate endpoint for embeddings. When unset, embeddings use the same client and base URL as chat |
 

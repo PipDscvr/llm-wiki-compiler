@@ -20,8 +20,9 @@ import { getProvider } from "../src/utils/provider.js";
 import { OpenAIProvider } from "../src/providers/openai.js";
 import { OllamaProvider } from "../src/providers/ollama.js";
 import { AnthropicProvider } from "../src/providers/anthropic.js";
+import { createEnvSnapshot } from "./fixtures/env-snapshot.js";
 
-const ENV_KEYS = [
+const { setEnv, restore } = createEnvSnapshot([
   "LLMWIKI_PROVIDER",
   "LLMWIKI_EMBEDDING_PROVIDER",
   "LLMWIKI_EMBEDDING_MODEL",
@@ -30,26 +31,9 @@ const ENV_KEYS = [
   "OLLAMA_EMBEDDINGS_HOST",
   "VOYAGE_API_KEY",
   "ANTHROPIC_API_KEY",
-];
-const saved = new Map<string, string | undefined>();
+]);
 
-function setEnv(values: Record<string, string | undefined>): void {
-  for (const key of ENV_KEYS) {
-    if (!saved.has(key)) saved.set(key, process.env[key]);
-    delete process.env[key];
-  }
-  for (const [key, value] of Object.entries(values)) {
-    if (value !== undefined) process.env[key] = value;
-  }
-}
-
-afterEach(() => {
-  for (const [key, value] of saved) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
-  saved.clear();
-});
+afterEach(restore);
 
 describe("getEmbeddingProvider — default path is unchanged", () => {
   it("returns the chat provider's type when the override is unset", () => {

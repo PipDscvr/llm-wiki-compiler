@@ -27,7 +27,7 @@ import {
   type EmbeddingStoreV3,
 } from "./embeddings-store.js";
 import { resolveEmbedBatchSize } from "./embeddings-batch.js";
-import { getActiveProviderName } from "./provider.js";
+import { getActiveEmbeddingProviderName } from "./embedding-provider.js";
 import { acquireLockBlocking, releaseLock } from "./lock.js";
 import { loadProfile } from "../profile/load.js";
 import { migrateEmbeddingStore } from "./embeddings-migrate.js";
@@ -155,7 +155,7 @@ async function embedAndPersist(
   reembed: Set<PageId>,
   onDiskVersion: number,
 ): Promise<void> {
-  const batchSize = resolveEmbedBatchSize(getActiveProviderName());
+  const batchSize = resolveEmbedBatchSize(getActiveEmbeddingProviderName());
   const expectedDim = migrated.dimensions > 0 ? migrated.dimensions : undefined;
   const { store, report } = await reembedIntoStore(migrated, collected, reembed, batchSize, expectedDim);
   await writeEmbeddingStore(root, store);

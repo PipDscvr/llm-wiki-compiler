@@ -25,7 +25,7 @@
  * exist only for migration/reuse and are NOT a tamper boundary (S8).
  */
 
-import { getProvider } from "./provider.js";
+import { getEmbeddingProvider } from "./embedding-provider.js";
 import { assertVectorValid } from "./embeddings-validate.js";
 import {
   parseEmbeddingStore,
@@ -203,7 +203,7 @@ export async function findRelevantChunksV3(
 
 /** Embed the query string and assert the returned vector matches the store dim. */
 async function embedQuery(question: string, dimensions: number): Promise<number[]> {
-  const vec = await getProvider().embed(question, "query");
+  const vec = await getEmbeddingProvider().embed(question, "query");
   assertVectorValid(vec, dimensions);
   return vec;
 }
