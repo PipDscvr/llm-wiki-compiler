@@ -42,14 +42,16 @@ const EMBEDDING_CAPABLE_PROVIDERS: ReadonlySet<string> = new Set([
  * claude-agent embeddings go to Voyage and need VOYAGE_API_KEY.
  *
  * `endpointVar` names the override that points at a self-hosted server. A local
- * vLLM or Ollama instance ignores authentication, so requiring a key there would
- * break the very configuration this feature exists to support.
+ * vLLM instance ignores authentication, so requiring a key there would break the
+ * very configuration this feature exists to support. `ollama` has no `keyVar` at
+ * all — its OpenAI-compatible endpoint never requires a key, hosted or not — so
+ * it needs no `endpointVar` exemption either.
  */
 const EMBEDDING_CREDENTIALS: Record<string, { keyVar: string | null; endpointVar: string | null }> = {
   anthropic: { keyVar: "VOYAGE_API_KEY", endpointVar: null },
   "claude-agent": { keyVar: "VOYAGE_API_KEY", endpointVar: null },
   openai: { keyVar: "OPENAI_API_KEY", endpointVar: "OPENAI_EMBEDDINGS_BASE_URL" },
-  ollama: { keyVar: null, endpointVar: "OLLAMA_EMBEDDINGS_HOST" },
+  ollama: { keyVar: null, endpointVar: null },
 };
 
 /** Read an env var, treating empty/whitespace as unset. */
@@ -112,5 +114,8 @@ export function getEmbeddingProvider(): LLMProvider {
   const name = getActiveEmbeddingProviderName();
   assertEmbeddingCapable(name);
   assertEmbeddingCredential(name);
+  // buildProvider also resolves a chat model (LLMWIKI_MODEL) onto the returned
+  // provider, but that field goes unused here — only embed()/embedBatch() are
+  // ever called on the provider this function returns.
   return buildProvider(name);
 }

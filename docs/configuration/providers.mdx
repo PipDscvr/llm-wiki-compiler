@@ -59,7 +59,7 @@ llmwiki compile
 ```
 
 <Note>
-  The Anthropic provider delegates embeddings to the [Voyage API](https://www.voyageai.com/). Set `VOYAGE_API_KEY` to enable semantic search with `llmwiki query`. Without it, query falls back to lexical ranking.
+  The Anthropic provider delegates embeddings to the [Voyage API](https://www.voyageai.com/). Set `VOYAGE_API_KEY` to enable semantic search with `llmwiki query`. Without it, query falls back to lexical ranking. To route embeddings to a different backend instead, set `LLMWIKI_EMBEDDING_PROVIDER` - see [Environment Variables](/configuration/environment-variables).
 </Note>
 
   </Tab>
@@ -77,7 +77,7 @@ llmwiki compile
 
 **Embeddings**
 
-The Claude Agent SDK has no embeddings endpoint. Set `VOYAGE_API_KEY` to enable semantic search in `llmwiki query`; without it, query falls back to lexical ranking.
+The Claude Agent SDK has no embeddings endpoint. Set `VOYAGE_API_KEY` to enable semantic search in `llmwiki query`; without it, query falls back to lexical ranking. To route embeddings to a different backend instead, set `LLMWIKI_EMBEDDING_PROVIDER` - see [Environment Variables](/configuration/environment-variables).
 
 ```bash
 export VOYAGE_API_KEY=pa-...

@@ -27,7 +27,7 @@
 import { open } from "fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "path";
-import { getActiveEmbeddingProviderName, isEmbeddingProviderExplicit } from "./embedding-provider.js";
+import { getActiveEmbeddingProviderName } from "./embedding-provider.js";
 import { atomicWrite } from "./markdown.js";
 import { EMBEDDINGS_FILE, EMBEDDING_MODELS, MAX_EMBEDDING_STORE_BYTES } from "./constants.js";
 import { assertEmbeddingStoreValid, filterMalformedIdentities, assertFieldCaps } from "./embeddings-validate.js";
@@ -299,17 +299,20 @@ export async function readStoreForUpdate(root: string): Promise<ParsedStore | nu
 /**
  * Choose the active embedding model name, defaulting to anthropic's voyage model.
  *
- * LLMWIKI_EMBEDDING_MODEL is honoured when an embedding provider was named
- * explicitly, or when the effective provider is openai/ollama — the pre-existing
- * rule. Anthropic and claude-agent keep ignoring it on the default path: they
- * would otherwise start honouring a variable users may have set years ago, and a
- * changed model rebuilds the entire store.
+ * LLMWIKI_EMBEDDING_MODEL is honoured only when the effective embedding provider
+ * is openai or ollama — the pre-existing rule. Anthropic and claude-agent always
+ * ignore it, even when LLMWIKI_EMBEDDING_PROVIDER names one of them explicitly:
+ * both delegate to Voyage's `VoyageEmbeddingProvider.embed()`, which calls the
+ * Voyage API with no model argument and so always uses the hardcoded
+ * EMBEDDING_MODELS.anthropic model. Honouring a configured name here would tag
+ * the store — whose model field is its invalidation key — with a model that was
+ * never actually used to produce its vectors, and a changed model rebuilds the
+ * entire store.
  */
 export function resolveEmbeddingModel(): string {
   const providerName = getActiveEmbeddingProviderName();
   const configuredModel = process.env.LLMWIKI_EMBEDDING_MODEL?.trim();
-  const honoursConfigured =
-    isEmbeddingProviderExplicit() || providerName === "openai" || providerName === "ollama";
+  const honoursConfigured = providerName === "openai" || providerName === "ollama";
   if (configuredModel && honoursConfigured) {
     return configuredModel;
   }

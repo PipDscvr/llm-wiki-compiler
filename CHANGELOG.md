@@ -9,7 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Separate embedding provider** — `LLMWIKI_EMBEDDING_PROVIDER` selects the backend that serves embeddings, independently of `LLMWIKI_PROVIDER`. This makes split setups possible, such as Claude Agent SDK for generation with a local vLLM instance serving embeddings over its OpenAI-compatible endpoint. Valid values are `anthropic`, `claude-agent`, `openai`, and `ollama`; `minimax` and `copilot` expose no embeddings API and are rejected at startup rather than failing mid-compile. When the variable is set, the provider's own credential is required — `VOYAGE_API_KEY` for `anthropic`/`claude-agent`, `OPENAI_API_KEY` for `openai` — unless a self-hosted endpoint is configured via `OPENAI_EMBEDDINGS_BASE_URL` or `OLLAMA_EMBEDDINGS_HOST`, which need no key. Behaviour is unchanged when the variable is unset, including the fallback to lexical ranking when an embedding key is absent. Requested by @knew-inventai (#154).
+- **Separate embedding provider** — `LLMWIKI_EMBEDDING_PROVIDER` selects the backend that serves embeddings, independently of `LLMWIKI_PROVIDER`. This makes split setups possible, such as Claude Agent SDK for generation with a local vLLM instance serving embeddings over its OpenAI-compatible endpoint. Valid values are `anthropic`, `claude-agent`, `openai`, and `ollama`. `minimax` and `copilot` expose no embeddings API, and naming one now fails with a clear error listing the valid values instead of an opaque failure from the provider's `embed()`. When the variable is set, the provider's own credential is required — `VOYAGE_API_KEY` for `anthropic` and `claude-agent`, `OPENAI_API_KEY` for `openai` — unless `OPENAI_EMBEDDINGS_BASE_URL` points at a self-hosted endpoint, which needs no key. Behaviour is unchanged when the variable is unset.
+
+  Thanks to **@knew-inventai** for the request (#154).
+
+### Fixed
+
+- **Embedding store dimensions after a full rebuild** — when the embedding model changed, the rebuilt store carried the previous vector dimension forward, so switching to a provider whose vectors have a different dimension failed validation on every subsequent compile and never recovered. The rebuilt store now takes its dimension from the newly written vectors.
 
 ## [1.1.0] - 2026-07-15
 

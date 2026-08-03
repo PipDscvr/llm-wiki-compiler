@@ -49,13 +49,16 @@ describe("resolveEmbeddingModel — override unset (must match today exactly)", 
 });
 
 describe("resolveEmbeddingModel — override set", () => {
-  it("honours LLMWIKI_EMBEDDING_MODEL even for anthropic", () => {
+  it("ignores LLMWIKI_EMBEDDING_MODEL for anthropic even when named explicitly", () => {
     setEnv({
       LLMWIKI_PROVIDER: "claude-agent",
       LLMWIKI_EMBEDDING_PROVIDER: "anthropic",
       LLMWIKI_EMBEDDING_MODEL: "voyage-3",
     });
-    expect(resolveEmbeddingModel()).toBe("voyage-3");
+    // Voyage embeds with a hardcoded model, so recording a custom name here would
+    // make the store's model field — its invalidation key — describe vectors that
+    // were never produced.
+    expect(resolveEmbeddingModel()).toBe(EMBEDDING_MODELS.anthropic);
   });
 
   it("defaults to the embedding provider's model, not the chat provider's", () => {

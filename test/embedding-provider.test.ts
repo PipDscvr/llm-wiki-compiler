@@ -57,9 +57,15 @@ describe("getEmbeddingProvider — explicit override", () => {
       OPENAI_EMBEDDINGS_BASE_URL: "http://localhost:8000/v1",
       LLMWIKI_EMBEDDING_MODEL: "local-embed",
     });
-    expect(getEmbeddingProvider()).toBeInstanceOf(OpenAIProvider);
+    const provider = getEmbeddingProvider();
+    expect(provider).toBeInstanceOf(OpenAIProvider);
     expect(getActiveEmbeddingProviderName()).toBe("openai");
     expect(isEmbeddingProviderExplicit()).toBe(true);
+    // OllamaProvider extends OpenAIProvider, so the instanceof check above alone
+    // would pass even for an Ollama provider. Assert the configured embeddings
+    // base URL actually reached the constructed client (mirrors
+    // test/provider-factory.test.ts's expectClientBaseURL pattern).
+    expect(Reflect.get(Reflect.get(provider, "embeddingsClient"), "baseURL")).toBe("http://localhost:8000/v1");
   });
 
   it("accepts every embedding-capable provider", () => {
@@ -82,6 +88,8 @@ describe("getEmbeddingProvider — credential rule", () => {
     setEnv({ LLMWIKI_EMBEDDING_PROVIDER: "openai" });
     expect(() => getEmbeddingProvider()).toThrow(/OPENAI_API_KEY/);
     setEnv({ LLMWIKI_EMBEDDING_PROVIDER: "anthropic" });
+    expect(() => getEmbeddingProvider()).toThrow(/VOYAGE_API_KEY/);
+    setEnv({ LLMWIKI_EMBEDDING_PROVIDER: "claude-agent" });
     expect(() => getEmbeddingProvider()).toThrow(/VOYAGE_API_KEY/);
   });
 

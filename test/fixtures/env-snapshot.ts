@@ -22,6 +22,7 @@ export function createEnvSnapshot(keys: readonly string[]): {
         delete process.env[key];
       }
       for (const [key, value] of Object.entries(values)) {
+        if (!saved.has(key)) saved.set(key, process.env[key]);
         if (value !== undefined) process.env[key] = value;
       }
     },
