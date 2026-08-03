@@ -64,11 +64,8 @@ const SUPPORTED_PROVIDERS: ReadonlySet<string> = new Set(["anthropic", "claude-a
  * factory, so the two can never drift in how a given backend is built.
  *
  * Direct process.env access is acceptable here as this is a system boundary.
- *
- * Module-private until Task 2 gives it an importer — an export with no consumer
- * fails the dead-code gate.
  */
-function buildProvider(providerName: string): LLMProvider {
+export function buildProvider(providerName: string): LLMProvider {
   switch (providerName) {
     case "anthropic":
       return getAnthropicProvider();
