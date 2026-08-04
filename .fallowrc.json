@@ -9,6 +9,10 @@
     "src/viewer/assets/index.html",
     "src/viewer/assets/viewer.css"
   ],
+  "ignoreDependencies": [
+    "@fontsource/space-grotesk",
+    "@fontsource/jetbrains-mono"
+  ],
   "ignoreExports": [
     { "file": "src/utils/output.ts", "exports": ["getQuiet"] }
   ],

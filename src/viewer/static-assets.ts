@@ -42,6 +42,7 @@ const ASSET_CONTENT_TYPES: Record<string, string> = {
   ".js": "application/javascript; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".woff2": "font/woff2",
 };
 
 /**

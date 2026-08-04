@@ -26,6 +26,13 @@ const REQUIRED_ASSETS = [
   "dist/viewer/assets/d3.min.js",
   "dist/viewer/assets/THIRD_PARTY_NOTICES.txt",
   "dist/viewer/assets/llmwiki-logo-64.png",
+  "dist/viewer/assets/fonts/space-grotesk-latin-400-normal.woff2",
+  "dist/viewer/assets/fonts/space-grotesk-latin-500-normal.woff2",
+  "dist/viewer/assets/fonts/space-grotesk-latin-600-normal.woff2",
+  "dist/viewer/assets/fonts/space-grotesk-latin-700-normal.woff2",
+  "dist/viewer/assets/fonts/jetbrains-mono-latin-400-normal.woff2",
+  "dist/viewer/assets/fonts/jetbrains-mono-latin-500-normal.woff2",
+  "dist/viewer/assets/fonts/jetbrains-mono-latin-600-normal.woff2",
 ];
 
 interface PackEntry {
