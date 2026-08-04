@@ -2,12 +2,14 @@
   "$schema": "https://fallow.tools/schema.json",
   "entry": [
     "src/viewer/assets/viewer.js",
-    "scripts/copy-viewer-assets.mjs"
+    "scripts/copy-viewer-assets.mjs",
+    "src/viewer/assets/viewer-theme-boot.js"
   ],
   "ignorePatterns": [
     "docs/**",
     "src/viewer/assets/index.html",
-    "src/viewer/assets/viewer.css"
+    "src/viewer/assets/viewer.css",
+    "src/viewer/assets/viewer-tokens.css"
   ],
   "ignoreDependencies": [
     "@fontsource/space-grotesk",

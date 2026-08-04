@@ -33,6 +33,9 @@ const REQUIRED_ASSETS = [
   "dist/viewer/assets/fonts/jetbrains-mono-latin-400-normal.woff2",
   "dist/viewer/assets/fonts/jetbrains-mono-latin-500-normal.woff2",
   "dist/viewer/assets/fonts/jetbrains-mono-latin-600-normal.woff2",
+  "dist/viewer/assets/viewer-tokens.css",
+  "dist/viewer/assets/viewer-theme-boot.js",
+  "dist/viewer/assets/viewer-theme.js",
 ];
 
 interface PackEntry {

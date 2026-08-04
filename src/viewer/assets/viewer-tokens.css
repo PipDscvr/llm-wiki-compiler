@@ -1,0 +1,315 @@
+/**
+ * llmwiki viewer — Nebula design tokens.
+ *
+ * Self-hosted @font-face declarations, the light/dark custom-property sets,
+ * the reset, and the shared accessibility helpers. Every other stylesheet
+ * consumes these tokens and defines no raw colour literals.
+ *
+ * Dark is the default set on :root. `[data-theme="light"]` overrides it;
+ * viewer-theme-boot.js stamps that attribute before first paint. The
+ * prefers-color-scheme block is the no-stored-preference fallback only —
+ * an explicit data-theme always wins because it is a more specific selector.
+ */
+
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/assets/fonts/space-grotesk-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/assets/fonts/space-grotesk-latin-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/assets/fonts/space-grotesk-latin-600-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/assets/fonts/space-grotesk-latin-700-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/assets/fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/assets/fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/assets/fonts/jetbrains-mono-latin-600-normal.woff2") format("woff2");
+}
+
+:root {
+  color-scheme: dark light;
+  --font-sans: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --radius-badge: 4px;
+  --radius-chip: 6px;
+  --radius-row: 8px;
+  --radius-control: 9px;
+  --radius-tile: 11px;
+  --radius-panel: 12px;
+  --radius-shell: 14px;
+
+  --space-6: 6px;
+  --space-9: 9px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+
+  --type-metric: 600 32px/1 var(--font-sans);
+  --type-page-title: 600 26px/1 var(--font-sans);
+  --type-panel-title: 600 13.5px/1 var(--font-sans);
+  --type-row: 400 13px/1.35 var(--font-sans);
+  --type-body: 400 12.5px/1.5 var(--font-sans);
+  --type-provenance: 500 11px/1 var(--font-mono);
+  --type-metadata: 400 11px/1 var(--font-mono);
+  --type-label: 500 9.5px/1 var(--font-mono);
+  --type-badge: 500 9.5px/1 var(--font-mono);
+
+  /* Surfaces */
+  --bg-page: #08070d;
+  --bg-shell: #0b0a12;
+  --bg-sidebar: #0a0912;
+  --bg-card: #100f19;
+  --bg-inset: #12111c;
+  --bg-hover: #161425;
+  --bg-sunken: #0d0c16;
+  --bg-chip: #191727;
+
+  /* Borders */
+  --border: #201e30;
+  --border-soft: #1c1a2a;
+  --border-strong: #262338;
+  --border-shell: #1f1d2e;
+  --border-chip: #2a2740;
+  --border-button: #2f2b46;
+
+  /* Text */
+  --fg: #f7f6fc;
+  --fg-strong: #f4f2fb;
+  --fg-body: #e7e5f2;
+  --fg-muted: #a8a3bd;
+  --fg-dim: #7d7896;
+  --fg-faint: #6f6a89;
+  --fg-ghost: #5c5877;
+  --fg-disabled: #4d4964;
+
+  /* Accent */
+  --accent: #8b5cf6;
+  --accent-text: #a78bfa;
+  --accent-hover: #c4b5fd;
+  --on-accent: #0b0a12;
+
+  /* Status */
+  --ok: #5eead4;
+  --warn: #fb923c;
+  --warn-bg: #171120;
+  --warn-border: #3a2a1c;
+  --warn-muted: #a1876b;
+  --danger: #f87171;
+
+  /* Graph */
+  --graph-edge: #2c2842;
+  --graph-edge-hot: #a78bfa;
+  --graph-edge-dangling: #4a2f34;
+  --graph-bg-inner: #131120;
+  --graph-bg-outer: #0d0c16;
+
+  /* Status alphas — shared across both themes, so declared once. */
+  --accent-a03: rgba(139, 92, 246, 0.03);
+  --accent-a05: rgba(139, 92, 246, 0.05);
+  --accent-a12: rgba(139, 92, 246, 0.12);
+  --accent-a16: rgba(139, 92, 246, 0.16);
+  --accent-a22: rgba(139, 92, 246, 0.22);
+  --accent-a26: rgba(139, 92, 246, 0.26);
+  --accent-a30: rgba(139, 92, 246, 0.3);
+  --ok-a10: rgba(94, 234, 212, 0.1);
+  --ok-a24: rgba(94, 234, 212, 0.24);
+  --warn-a12: rgba(251, 146, 60, 0.12);
+  --warn-a13: rgba(251, 146, 60, 0.13);
+  --danger-a12: rgba(248, 113, 113, 0.12);
+
+  --max-content-width: 72ch;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --bg-page: #eceaf4;
+  --bg-shell: #ffffff;
+  --bg-sidebar: #f5f4fa;
+  --bg-card: #ffffff;
+  --bg-inset: #ffffff;
+  --bg-hover: #f4f3fa;
+  --bg-sunken: #faf9fe;
+  --bg-chip: #f0eef8;
+
+  /* Borders */
+  --border: #e7e4f1;
+  --border-soft: #e7e4f1;
+  --border-strong: #e2ddee;
+  --border-shell: #ded9ec;
+  --border-chip: #ded9ec;
+  --border-button: #d6d0e6;
+
+  /* Text */
+  --fg: #141221;
+  --fg-strong: #141221;
+  --fg-body: #2c2939;
+  --fg-muted: #54506a;
+  --fg-dim: #6d6884;
+  --fg-faint: #787391;
+  --fg-ghost: #9793aa;
+  --fg-disabled: #adaabb;
+
+  /* Accent */
+  --accent: #7c3aed;
+  --accent-text: #6d28d9;
+  --accent-hover: #5b21b6;
+  --on-accent: #ffffff;
+
+  /* Status */
+  --ok: #0d9488;
+  --warn: #c2610a;
+  --warn-bg: #fff8f0;
+  --warn-border: #efd6b6;
+  --warn-muted: #8d6440;
+  --danger: #dc2626;
+
+  /* Graph */
+  --graph-edge: #ded9ec;
+  --graph-edge-hot: #6d28d9;
+  --graph-edge-dangling: #eec6c6;
+  --graph-bg-inner: #fbfaff;
+  --graph-bg-outer: #faf9fe;
+}
+
+/* No stored preference: follow the OS. An explicit data-theme outranks this. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+
+    /* Surfaces */
+    --bg-page: #eceaf4;
+    --bg-shell: #ffffff;
+    --bg-sidebar: #f5f4fa;
+    --bg-card: #ffffff;
+    --bg-inset: #ffffff;
+    --bg-hover: #f4f3fa;
+    --bg-sunken: #faf9fe;
+    --bg-chip: #f0eef8;
+
+    /* Borders */
+    --border: #e7e4f1;
+    --border-soft: #e7e4f1;
+    --border-strong: #e2ddee;
+    --border-shell: #ded9ec;
+    --border-chip: #ded9ec;
+    --border-button: #d6d0e6;
+
+    /* Text */
+    --fg: #141221;
+    --fg-strong: #141221;
+    --fg-body: #2c2939;
+    --fg-muted: #54506a;
+    --fg-dim: #6d6884;
+    --fg-faint: #787391;
+    --fg-ghost: #9793aa;
+    --fg-disabled: #adaabb;
+
+    /* Accent */
+    --accent: #7c3aed;
+    --accent-text: #6d28d9;
+    --accent-hover: #5b21b6;
+    --on-accent: #ffffff;
+
+    /* Status */
+    --ok: #0d9488;
+    --warn: #c2610a;
+    --warn-bg: #fff8f0;
+    --warn-border: #efd6b6;
+    --warn-muted: #8d6440;
+    --danger: #dc2626;
+
+    /* Graph */
+    --graph-edge: #ded9ec;
+    --graph-edge-hot: #6d28d9;
+    --graph-edge-dangling: #eec6c6;
+    --graph-bg-inner: #fbfaff;
+    --graph-bg-outer: #faf9fe;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg-page);
+  color: var(--fg-body);
+  font-family: var(--font-sans);
+}
+
+a { color: var(--accent-text); text-decoration: none; }
+a:hover, a:focus-visible { color: var(--accent-hover); text-decoration: underline; }
+
+:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute; top: -100px; left: 0;
+  padding: 0.5rem 1rem;
+  background: var(--accent); color: var(--on-accent);
+  z-index: 100;
+}
+.skip-link:focus { top: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

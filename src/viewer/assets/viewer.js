@@ -19,6 +19,7 @@
  * `'self'`. The search-input wiring lives in `viewer-search.js`.
  */
 
+import { wireThemeToggle } from "./viewer-theme.js";
 import { wireSearch } from "./viewer-search.js";
 import { renderSidebar, markActive } from "./viewer-sidebar.js";
 import { renderProjectRail, renderSupportRail, clearSupportRail } from "./viewer-rail.js";
@@ -517,6 +518,7 @@ async function fetchJson(pathname) {
 
 /** Bootstrap: first-paint from embedded blob, then full fetch + router. */
 function main() {
+  wireThemeToggle();
   const embedded = readEmbeddedIndex();
   renderSidebar(embedded.pages);
   wireSearch({ fetchJson });
