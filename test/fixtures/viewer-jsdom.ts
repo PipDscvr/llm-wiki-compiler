@@ -1,26 +1,93 @@
 /**
- * Mount the viewer's static assets into a JSDOM instance for DOM-level
- * tests. The shell template's `<script type="module">` ES-module loader
- * is not driven by JSDOM's `eval`, so this helper performs a small
- * source rewrite to turn the viewer's `import { … } from "./viewer-search.js"`
- * line into a `const … = window.__viewerSearchModule.…;` declaration
- * and exposes the search module's exports on a window-scoped global.
+ * Mount the viewer's static assets into a JSDOM instance for DOM-level tests.
  *
- * Test fixtures pass an optional fetch responder; missing entries fall
- * through to a 404 so a test that forgot to wire `/api/pages` fails
- * loudly rather than silently producing an empty UI.
+ * JSDOM's `eval` does not drive ES-module loading, so every
+ * `src/viewer/assets/viewer-*.js` module is wrapped in an IIFE, its named
+ * exports collected, and the result registered on
+ * `window.__viewerModules["./<name>.js"]`. Static `import` lines in each
+ * module (and in the `viewer.js` entry point) are rewritten into registry
+ * reads. Discovery is by directory scan, so adding a client module requires
+ * no change here.
+ *
+ * `viewer-graph.js` is stubbed rather than evaluated — D3 is not exercised
+ * under JSDOM. `viewer-theme-boot.js` is a classic script and is evaluated
+ * verbatim before the modules, matching its `<head>` position in the shell.
+ *
+ * Test fixtures pass a fetch responder; unmatched URLs fall through to 404 so
+ * a test that forgot to wire an endpoint fails loudly rather than silently
+ * producing an empty UI.
  */
 
-import { readFile } from "fs/promises";
+import { readFile, readdir } from "fs/promises";
 import path from "path";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { vi } from "vitest";
 
-const SHELL_PATH = path.resolve("src/viewer/assets/index.html");
-const VIEWER_SCRIPT = path.resolve("src/viewer/assets/viewer.js");
-const SEARCH_SCRIPT = path.resolve("src/viewer/assets/viewer-search.js");
-const SIDEBAR_SCRIPT = path.resolve("src/viewer/assets/viewer-sidebar.js");
-const RAIL_SCRIPT = path.resolve("src/viewer/assets/viewer-rail.js");
+const ASSETS_DIR = path.resolve("src/viewer/assets");
+const SHELL_PATH = path.join(ASSETS_DIR, "index.html");
+const ENTRY_SCRIPT = "viewer.js";
+const THEME_BOOT_SCRIPT = "viewer-theme-boot.js";
+
+/**
+ * Modules whose evaluation order matters because they import each other.
+ * Anything not listed here is appended afterwards in directory order.
+ */
+const MODULE_ORDER = ["viewer-dom.js", "viewer-theme.js"];
+
+/** Match `import { a, b } from "./viewer-x.js";` including multi-line forms. */
+const IMPORT_PATTERN = /import\s*\{([\s\S]*?)\}\s*from\s*['"](\.\/[\w.-]+\.js)['"]\s*;/g;
+
+/** Match `export function name(` declarations. */
+const EXPORT_PATTERN = /export\s+function\s+(\w+)/g;
+
+/** Rewrite every static import into a read from the module registry. */
+function rewriteImports(source: string): string {
+  return source.replace(
+    IMPORT_PATTERN,
+    (_match, names: string, specifier: string) =>
+      `const {${names}} = window.__viewerModules[${JSON.stringify(specifier)}];`,
+  );
+}
+
+/** Collect the names a module exports via `export function NAME`. */
+function exportedNames(source: string): string[] {
+  return Array.from(source.matchAll(EXPORT_PATTERN)).map((m) => m[1]);
+}
+
+/**
+ * Wrap a module in an IIFE that returns its exports and assign it into the
+ * registry. The IIFE gives each module its own scope, so module-level `let`
+ * state (e.g. the sidebar's active filter) cannot leak between modules.
+ */
+function moduleToRegistryScript(source: string, specifier: string): string {
+  const names = exportedNames(source);
+  const body = rewriteImports(source).replace(/export\s+function\s+/g, "function ");
+  const literal = names.map((name) => `${name}: ${name}`).join(", ");
+  return `window.__viewerModules[${JSON.stringify(specifier)}] = (function () {\n${body}\nreturn { ${literal} };\n})();`;
+}
+
+/** List the client modules to mount, honouring MODULE_ORDER first. */
+async function listModuleFiles(): Promise<string[]> {
+  const entries = await readdir(ASSETS_DIR);
+  const modules = entries.filter(
+    (name) =>
+      name.startsWith("viewer-") &&
+      name.endsWith(".js") &&
+      name !== THEME_BOOT_SCRIPT,
+  );
+  const ordered = MODULE_ORDER.filter((name) => modules.includes(name));
+  const rest = modules.filter((name) => !ordered.includes(name)).sort();
+  return [...ordered, ...rest];
+}
+
+/** Read a file from the assets dir, returning null when it does not exist. */
+async function readOptional(name: string): Promise<string | null> {
+  try {
+    return await readFile(path.join(ASSETS_DIR, name), "utf-8");
+  } catch {
+    return null;
+  }
+}
 
 /** Page row shape the shell's `<script id="page-index">` blob carries. */
 export interface EmbeddedPage {
@@ -54,12 +121,10 @@ export async function mountViewerDom(
   responder: FetchResponder,
   startHash?: string,
 ): Promise<MountResult> {
-  const [shell, viewerSrc, searchSrc, sidebarSrc, railSrc] = await Promise.all([
+  const [shell, entrySrc, moduleFiles] = await Promise.all([
     readFile(SHELL_PATH, "utf-8"),
-    readFile(VIEWER_SCRIPT, "utf-8"),
-    readFile(SEARCH_SCRIPT, "utf-8"),
-    readFile(SIDEBAR_SCRIPT, "utf-8"),
-    readFile(RAIL_SCRIPT, "utf-8"),
+    readFile(path.join(ASSETS_DIR, ENTRY_SCRIPT), "utf-8"),
+    listModuleFiles(),
   ]);
   const html = embedPageIndex(shell, pages);
   const fetchMock = vi.fn(async (input: string | URL) => {
@@ -74,20 +139,20 @@ export async function mountViewerDom(
     virtualConsole: new VirtualConsole(),
   });
   (dom.window as unknown as { fetch: typeof fetchMock }).fetch = fetchMock;
-  dom.window.eval(rewriteModuleToGlobal(searchSrc, "__viewerSearchModule", ["wireSearch"]));
+  dom.window.eval("window.__viewerModules = {};");
+  // D3 is not exercised under JSDOM; stub the graph module before anything imports it.
   dom.window.eval(
-    rewriteModuleToGlobal(sidebarSrc, "__viewerSidebarModule", ["renderSidebar", "markActive"]),
+    'window.__viewerModules["./viewer-graph.js"] = { loadGraph: async function () {} };',
   );
-  dom.window.eval(
-    rewriteModuleToGlobal(
-      railSrc,
-      "__viewerRailModule",
-      ["renderProjectRail", "renderSupportRail", "clearSupportRail"],
-    ),
-  );
-  // Stub loadGraph so JSDOM tests don't need to execute the D3 graph module.
-  dom.window.eval("window.__viewerGraphModule = { loadGraph: async function() {} };");
-  dom.window.eval(rewriteViewerImports(viewerSrc));
+  const themeBoot = await readOptional(THEME_BOOT_SCRIPT);
+  if (themeBoot) dom.window.eval(themeBoot);
+  for (const name of moduleFiles) {
+    if (name === "viewer-graph.js") continue;
+    const source = await readOptional(name);
+    if (source === null) continue;
+    dom.window.eval(moduleToRegistryScript(source, `./${name}`));
+  }
+  dom.window.eval(rewriteImports(entrySrc));
   await flushMicrotasks();
   return { dom, fetchMock, flush: flushMicrotasks };
 }
@@ -99,41 +164,6 @@ function embedPageIndex(shell: string, pages: EmbeddedPage[]): string {
     "<!--PAGE_INDEX-->",
     `<script type="application/json" id="page-index">${json}</script>`,
   );
-}
-
-/**
- * Replace `export function …` lines with plain declarations and attach
- * the named exports to a window-scoped global so a rewritten viewer.js
- * can pick them up. JSDOM's `eval` doesn't drive ES-module loading, so
- * this is the cheapest workaround.
- */
-function rewriteModuleToGlobal(source: string, globalName: string, exports: string[]): string {
-  const objectLiteral = exports.map((name) => `${name}: ${name}`).join(", ");
-  return (
-    source.replace(/export function /g, "function ") +
-    `\nwindow.${globalName} = { ${objectLiteral} };\n`
-  );
-}
-
-/** Replace the viewer's static `import` lines with destructuring reads of the globals. */
-function rewriteViewerImports(source: string): string {
-  return source
-    .replace(
-      /import\s*\{\s*wireSearch\s*\}\s*from\s*['"]\.\/viewer-search\.js['"]\s*;/,
-      "const { wireSearch } = window.__viewerSearchModule;",
-    )
-    .replace(
-      /import\s*\{\s*renderSidebar\s*,\s*markActive\s*\}\s*from\s*['"]\.\/viewer-sidebar\.js['"]\s*;/,
-      "const { renderSidebar, markActive } = window.__viewerSidebarModule;",
-    )
-    .replace(
-      /import\s*\{\s*renderProjectRail\s*,\s*renderSupportRail\s*,\s*clearSupportRail\s*\}\s*from\s*['"]\.\/viewer-rail\.js['"]\s*;/,
-      "const { renderProjectRail, renderSupportRail, clearSupportRail } = window.__viewerRailModule;",
-    )
-    .replace(
-      /import\s*\{\s*loadGraph\s*\}\s*from\s*['"]\.\/viewer-graph\.js['"]\s*;/,
-      "const { loadGraph } = window.__viewerGraphModule;",
-    );
 }
 
 /** Standard JSON 200 helper for fetch responders. */
