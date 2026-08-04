@@ -19,6 +19,7 @@
  * `'self'`. The search-input wiring lives in `viewer-search.js`.
  */
 
+import { definitionList, heading, placeholder } from "./viewer-dom.js";
 import { wireThemeToggle } from "./viewer-theme.js";
 import { wireSearch } from "./viewer-search.js";
 import { renderSidebar, markActive } from "./viewer-sidebar.js";
@@ -134,7 +135,7 @@ function renderHome(envelope) {
 
 /** Append every section of the home dashboard to the main pane. */
 function appendHomeContent(main, envelope) {
-  main.appendChild(buildHeading("h1", projectTitle(envelope)));
+  main.appendChild(heading("h1", projectTitle(envelope)));
   main.appendChild(buildCountsBlock(envelope?.counts));
   appendIndexLinkIfAvailable(main, envelope);
   appendRecentBlockIfAny(main, envelope);
@@ -167,25 +168,8 @@ function hasRecentPages(envelope) {
 /** Render a `<dl>` of project counts on the home dashboard. */
 function buildCountsBlock(counts) {
   const rows = COUNT_ROWS.map(([label, key]) => [label, counts?.[key] ?? 0]);
-  const dl = buildDefinitionList(rows);
+  const dl = definitionList(rows);
   dl.className = "metric-grid";
-  return dl;
-}
-
-/** Build a `<dl>` from a list of `[label, value]` rows. */
-function buildDefinitionList(rows) {
-  const dl = document.createElement("dl");
-  for (const [label, value] of rows) {
-    const row = document.createElement("div");
-    row.className = "metric";
-    const dt = document.createElement("dt");
-    dt.textContent = label;
-    const dd = document.createElement("dd");
-    dd.textContent = String(value);
-    row.appendChild(dt);
-    row.appendChild(dd);
-    dl.appendChild(row);
-  }
   return dl;
 }
 
@@ -214,24 +198,9 @@ function buildRecentBlock(recent) {
   }
   const wrap = document.createElement("section");
   wrap.className = "recent-section";
-  wrap.appendChild(buildHeading("h2", "Recently updated"));
+  wrap.appendChild(heading("h2", "Recently updated"));
   wrap.appendChild(ul);
   return wrap;
-}
-
-/** Build a heading element with the given tag and text content. */
-function buildHeading(tag, text) {
-  const el = document.createElement(tag);
-  el.textContent = text;
-  return el;
-}
-
-/** Build a `<p class="placeholder">` with the given message. */
-function buildPlaceholder(text) {
-  const p = document.createElement("p");
-  p.className = "placeholder";
-  p.textContent = text;
-  return p;
 }
 
 /** Dispatch table: route.kind → handler for routes that fit the (main) signature. */
@@ -259,7 +228,7 @@ async function renderHealthPane(main) {
   try {
     const health = await fetchJson("/api/health");
     main.innerHTML = "";
-    main.appendChild(buildHeading("h1", "Health"));
+    main.appendChild(heading("h1", "Health"));
     main.appendChild(buildHealthDashboard(health));
     clearSupportRail();
   } catch (err) {
@@ -276,7 +245,7 @@ function buildHealthDashboard(health) {
   // was not yet fetched when navigating directly to #/health).
   prependBannerIfNeeded(wrap, health?.stateStatus);
   const rows = HEALTH_METRIC_ROWS.map(([label, key]) => [label, health?.[key] ?? 0]);
-  const metrics = buildDefinitionList(rows);
+  const metrics = definitionList(rows);
   metrics.className = "metric-list";
   wrap.appendChild(metrics);
   wrap.appendChild(buildLintBlock(health?.lint));
@@ -318,13 +287,13 @@ function buildStateStatusBanner(stateStatus) {
 /** Render the lint summary, or a "lint has not been run yet" placeholder. */
 function buildLintBlock(lint) {
   const wrap = document.createElement("section");
-  wrap.appendChild(buildHeading("h2", "Lint"));
+  wrap.appendChild(heading("h2", "Lint"));
   if (!lint) {
-    wrap.appendChild(buildPlaceholder("No cached lint summary yet — run `llmwiki lint`."));
+    wrap.appendChild(placeholder("No cached lint summary yet — run `llmwiki lint`."));
     return wrap;
   }
   const rows = LINT_METRIC_ROWS.map(([label, key, fallback]) => [label, lint[key] ?? fallback]);
-  wrap.appendChild(buildDefinitionList(rows));
+  wrap.appendChild(definitionList(rows));
   return wrap;
 }
 
@@ -367,7 +336,7 @@ async function renderIndexPane(main) {
   try {
     const payload = await fetchJson("/api/index");
     main.innerHTML = "";
-    main.appendChild(buildHeading("h1", "Index"));
+    main.appendChild(heading("h1", "Index"));
     appendRenderedBody(main, payload.html);
   } catch (err) {
     handleIndexError(main, err);
@@ -381,7 +350,7 @@ function handleIndexError(main, err) {
     return;
   }
   main.innerHTML = "";
-  main.appendChild(buildPlaceholder("wiki/index.md is not available. Run `llmwiki compile`."));
+  main.appendChild(placeholder("wiki/index.md is not available. Run `llmwiki compile`."));
 }
 
 /** Fetch /api/page/:dir/:slug and render. */
@@ -403,7 +372,7 @@ function pageApiPath(directory, slug) {
 function renderPagePayload(main, payload, slug) {
   const title = payload.title || slug;
   main.innerHTML = "";
-  main.appendChild(buildHeading("h1", title));
+  main.appendChild(heading("h1", title));
   if (payload.pageDirectory === "queries") {
     main.appendChild(buildQueryQuestion(title));
   }
@@ -428,7 +397,7 @@ function handlePageError(main, err, directory, slug) {
     return;
   }
   main.innerHTML = "";
-  main.appendChild(buildPlaceholder(`Page not found: ${directory}/${slug}`));
+  main.appendChild(placeholder(`Page not found: ${directory}/${slug}`));
   clearSupportRail();
 }
 
@@ -448,7 +417,7 @@ function appendRenderedBody(main, html) {
     main.appendChild(body);
     return body;
   }
-  const note = buildPlaceholder("No rendered content.");
+  const note = placeholder("No rendered content.");
   main.appendChild(note);
   return note;
 }
