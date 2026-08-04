@@ -37,9 +37,6 @@ const MODULE_ORDER = ["viewer-dom.js", "viewer-theme.js"];
 /** Match `import { a, b } from "./viewer-x.js";` including multi-line forms. */
 const IMPORT_PATTERN = /import\s*\{([\s\S]*?)\}\s*from\s*['"](\.\/[\w.-]+\.js)['"]\s*;/g;
 
-/** Match `export function name(` declarations. */
-const EXPORT_PATTERN = /export\s+function\s+(\w+)/g;
-
 /** Rewrite every static import into a read from the module registry. */
 function rewriteImports(source: string): string {
   return source.replace(
@@ -49,9 +46,57 @@ function rewriteImports(source: string): string {
   );
 }
 
-/** Collect the names a module exports via `export function NAME`. */
+/**
+ * Match a top-level `export` declaration and capture the exported name.
+ *
+ * WHY strip exports at all: JSDOM's `eval` does not drive ES-module
+ * loading, so a bare `export` keyword is a `SyntaxError` outside a real
+ * `<script type="module">`. Every viewer-*.js module is therefore
+ * stripped of its `export` keywords before being eval'd (see
+ * `stripExportKeyword`, which reuses this exact pattern so "what counts
+ * as an export" can never drift between matching and stripping) and
+ * wrapped in an IIFE.
+ *
+ * Supported forms: `function`, `async function`, `const`, `let`, `var`,
+ * `class` — every form a viewer module currently uses (`viewer-graph.js`
+ * ships `export async function`) plus the forms most likely for a future
+ * module (e.g. `export const foo = () => {}`). `export default` and
+ * re-export (`export { a, b }`) are NOT supported: a module using either
+ * fails loudly via `assertNoUnsupportedExports` below instead of
+ * producing a cryptic `SyntaxError: Unexpected token 'export'` from
+ * JSDOM with no pointer back to the cause.
+ */
+const EXPORT_PATTERN = /export\s+(?:async\s+function|function|const|let|var|class)\s+(\w+)/g;
+
+/** A line whose first token is `export` — one EXPORT_PATTERN did not match and strip. */
+const UNSTRIPPED_EXPORT_PATTERN = /^[ \t]*export\b.*$/m;
+
+/** Collect the names a module exports (see EXPORT_PATTERN for supported forms). */
 function exportedNames(source: string): string[] {
   return Array.from(source.matchAll(EXPORT_PATTERN)).map((m) => m[1]);
+}
+
+/** Strip the leading `export` keyword from every declaration EXPORT_PATTERN matches. */
+function stripExportKeyword(source: string): string {
+  return source.replace(EXPORT_PATTERN, (declaration) => declaration.replace(/^export\s+/, ""));
+}
+
+/**
+ * Throw a diagnostic naming the module and the offending line when a
+ * module uses an export form EXPORT_PATTERN does not recognise (e.g.
+ * `export default`, `export { a, b }`). Without this check, the orphaned
+ * `export` keyword reaches JSDOM's `eval` and fails with a bare
+ * `SyntaxError: Unexpected token 'export'` that names neither the module
+ * nor the line — this turns that into an actionable error instead.
+ */
+function assertNoUnsupportedExports(strippedBody: string, specifier: string): void {
+  const match = strippedBody.match(UNSTRIPPED_EXPORT_PATTERN);
+  if (!match) return;
+  throw new Error(
+    `${specifier} uses an export form the JSDOM harness does not support: "${match[0].trim()}". ` +
+      "Supported forms: function, async function, const, let, var, class " +
+      "(see EXPORT_PATTERN in test/fixtures/viewer-jsdom.ts).",
+  );
 }
 
 /**
@@ -61,7 +106,8 @@ function exportedNames(source: string): string[] {
  */
 function moduleToRegistryScript(source: string, specifier: string): string {
   const names = exportedNames(source);
-  const body = rewriteImports(source).replace(/export\s+function\s+/g, "function ");
+  const body = stripExportKeyword(rewriteImports(source));
+  assertNoUnsupportedExports(body, specifier);
   const literal = names.map((name) => `${name}: ${name}`).join(", ");
   return `window.__viewerModules[${JSON.stringify(specifier)}] = (function () {\n${body}\nreturn { ${literal} };\n})();`;
 }
