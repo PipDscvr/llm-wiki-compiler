@@ -37,6 +37,12 @@ const CONTENT_SECURITY_POLICY =
   "img-src 'self' data:; font-src 'self'; connect-src 'self'; " +
   "frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'none'";
 
+/** Profile id reported when the project runs the built-in default profile. */
+const DEFAULT_PROFILE_ID = "default";
+
+/** Warning code emitted for a citation whose source file is not on disk. */
+const UNRESOLVED_CITATION_CODE = "unresolved_citation";
+
 /** Configuration knobs accepted by `startViewerServer`. */
 interface ViewerServerConfig {
   /** Listening host. `--allow-lan` callers set this to a non-loopback bind address. */
@@ -326,17 +332,41 @@ function handleApiPages(res: ServerResponse, snapshot: ViewerSnapshot): void {
   writeJson(res, 200, {
     project: snapshot.project,
     stateStatus: snapshot.stateStatus,
+    profileId: snapshot.profile?.profileId ?? DEFAULT_PROFILE_ID,
     counts: {
       concepts: snapshot.counts.concepts,
       queries: snapshot.counts.queries,
       sourceFiles: snapshot.counts.sourceFiles,
       pendingReviews: snapshot.counts.pendingReviews,
+      compiledSources: snapshot.counts.compiledSources,
+      stale: snapshot.counts.stale,
+      orphaned: snapshot.counts.orphaned,
     },
+    graph: graphSummary(snapshot),
+    sourceFilenames: snapshot.sourceFilenames,
     index: { available: snapshot.index.available, href: snapshot.index.href },
     recentPages: snapshot.recentPages,
     pages: snapshot.pages.map(pageListRow),
     updatedAt: snapshot.generatedAt,
   });
+}
+
+/**
+ * Node/edge/dangling totals for the dashboard's graph panel and its
+ * "needs attention" card. Summarised here so the dashboard does not have
+ * to fetch the full `/api/graph` adjacency payload for three integers.
+ */
+function graphSummary(snapshot: ViewerSnapshot): Record<string, number> {
+  return {
+    nodeCount: snapshot.graph.nodes.length,
+    edgeCount: snapshot.graph.edges.length,
+    danglingCount: snapshot.graph.nodes.filter((node) => node.isDangling === true).length,
+  };
+}
+
+/** Count a page's warnings carrying the given stable code. */
+function countWarnings(page: ViewerPage, code: string): number {
+  return page.warnings.filter((warning) => warning.code === code).length;
 }
 
 /** Per-page row shape returned in `/api/pages.pages`. */
@@ -352,6 +382,8 @@ function pageListRow(page: ViewerPage): Record<string, unknown> {
       typeof page.frontmatter.updatedAt === "string" ? (page.frontmatter.updatedAt as string) : "",
     warnings: page.warnings,
     freshness: page.freshness,
+    citationCount: page.citations.length,
+    unresolvedCitationCount: countWarnings(page, UNRESOLVED_CITATION_CODE),
   };
 }
 
