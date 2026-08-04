@@ -14,12 +14,26 @@ You don't need to set everything - only the variables relevant to your chosen pr
 
 | Variable | Default | Description |
 |---|---|---|
-| `LLMWIKI_PROVIDER` | `anthropic` | Provider to use. One of: `anthropic`, `openai`, `ollama`, `copilot`, `claude-agent` |
+| `LLMWIKI_PROVIDER` | `anthropic` | Provider to use. One of: `anthropic`, `openai`, `ollama`, `minimax`, `copilot`, `claude-agent` |
 | `LLMWIKI_MODEL` | Provider default | Model name to use. Overrides the provider's built-in default model |
 | `LLMWIKI_EMBEDDING_PROVIDER` | Active chat provider | Backend serving embeddings, independent of `LLMWIKI_PROVIDER`. One of `anthropic`, `claude-agent`, `openai`, `ollama` |
 | `LLMWIKI_EMBEDDING_MODEL` | Provider default | Embedding model to use. Applies only when the effective embedding provider is `openai` or `ollama` - ignored for `anthropic` and `claude-agent`, even when `LLMWIKI_EMBEDDING_PROVIDER` names one of them explicitly |
 
-When you set `LLMWIKI_EMBEDDING_PROVIDER`, the named provider's own credential is required: `VOYAGE_API_KEY` for `anthropic` or `claude-agent`, `OPENAI_API_KEY` for `openai`, and no key for `ollama`. Setting `OPENAI_EMBEDDINGS_BASE_URL` marks a self-hosted OpenAI-compatible endpoint that needs no key, so `OPENAI_API_KEY` is not required in that case. This check only runs when `LLMWIKI_EMBEDDING_PROVIDER` is set - leaving it unset keeps today's behavior unchanged.
+When you set `LLMWIKI_EMBEDDING_PROVIDER`, the named provider's own credential is required: `VOYAGE_API_KEY` for `anthropic` or `claude-agent`, `OPENAI_API_KEY` (or `OPENAI_EMBEDDINGS_API_KEY`) for `openai`, and no key for `ollama`. Setting `OPENAI_EMBEDDINGS_BASE_URL` marks a self-hosted OpenAI-compatible endpoint that needs no key, so `OPENAI_API_KEY` is not required in that case. This check only runs when `LLMWIKI_EMBEDDING_PROVIDER` is set - leaving it unset keeps today's behavior unchanged.
+
+The check runs at startup, before any compile or query work begins, so a misspelled provider name or a missing key fails immediately instead of part-way through a run.
+
+<Warning>
+  If you point `OPENAI_EMBEDDINGS_BASE_URL` at a host you do not operate, set `OPENAI_EMBEDDINGS_API_KEY` as well. Without it the embeddings client reuses `OPENAI_API_KEY`, which sends your cloud OpenAI key to that host. llmwiki warns when this happens, except for endpoints on `localhost`.
+</Warning>
+
+### Changing the embedding backend rebuilds the index
+
+The embedding index records which provider, model, and endpoint produced its vectors. Changing any of them invalidates the index, and the next `llmwiki compile` re-embeds every page.
+
+This matters because vectors from different backends are not comparable even when the model name matches - a local server answering to `text-embedding-3-small` does not produce the same vectors as cloud OpenAI, and `nomic-embed-text` served by Ollama does not match the same model served over an OpenAI-compatible endpoint. Until the index is rebuilt, `llmwiki query` reports the index as outdated and falls back to lexical ranking rather than ranking against a mixed index.
+
+Moving between `anthropic` and `claude-agent` does **not** rebuild the index. Both send embeddings to Voyage with the same model, so their vectors are interchangeable.
 
 ---
 

@@ -13,6 +13,7 @@ import {
   type EmbeddingStore,
   readEmbeddingStore,
   resolveEmbeddingModel,
+  storeMatchesActiveEmbedding,
 } from "./embeddings-store.js";
 import { EmbeddingIntegrityError, assertVectorValid } from "./embeddings-validate.js";
 
@@ -111,9 +112,10 @@ async function loadActiveStore(
 ): Promise<EmbeddingStore | null> {
   const store = await readActiveStore(root);
   if (!store || !hasContent(store)) return null;
-  const activeModel = resolveEmbeddingModel();
-  if (store.model !== activeModel) {
-    warnStaleEmbeddingStore(store.model, activeModel);
+  // Compares the full embedding identity — provider, model, endpoint — not just
+  // the model name, which two different backends can share.
+  if (!storeMatchesActiveEmbedding(store as unknown as Record<string, unknown>)) {
+    warnStaleEmbeddingStore(store.model, resolveEmbeddingModel());
     return null;
   }
   return store;

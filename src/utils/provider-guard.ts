@@ -19,6 +19,7 @@
 
 import { DEFAULT_PROVIDER } from "./constants.js";
 import { resolveAnthropicAuthFromEnv } from "./claude-settings.js";
+import { findEmbeddingProviderProblem } from "./embedding-provider.js";
 
 /** Thrown when the active provider has no usable credentials. */
 export class ProviderUnavailableError extends Error {
@@ -49,11 +50,36 @@ const PROVIDER_KEY_VARS: Record<string, string | null> = {
 };
 
 /**
- * Throw if the active LLM provider is missing credentials.
+ * Throw if LLMWIKI_EMBEDDING_PROVIDER names a backend that cannot serve
+ * embeddings, or one whose credential is missing (issue #154).
+ *
+ * No-op when the variable is unset — the default path keeps degrading to lexical
+ * ranking on a missing embedding key, as documented.
+ *
+ * Runs HERE, at the door, rather than where the embedding provider is built.
+ * That call site sits inside retrieval and inside the compile write pass, and a
+ * throw there behaves differently on each surface: `query` exits 1, context
+ * retrieval degrades, and compile swallows it, bumps the pending-embeddings
+ * attempt counter, and quarantines the pages after five tries. One misspelled
+ * variable is not worth three behaviours and silent data attrition.
+ */
+function ensureEmbeddingProviderAvailable(): void {
+  const problem = findEmbeddingProviderProblem();
+  if (!problem) return;
+  if (problem.kind === "unknown") {
+    throw new UnknownProviderError(problem.provider, problem.supported, problem.message);
+  }
+  throw new ProviderUnavailableError(problem.provider, problem.missing, problem.message);
+}
+
+/**
+ * Throw if the active LLM provider is missing credentials, or if the embedding
+ * provider override is unusable.
  * Anthropic accepts either ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN
  * (resolved through the Claude Code settings fallback chain).
  */
 export function ensureProviderAvailable(): void {
+  ensureEmbeddingProviderAvailable();
   const provider = process.env.LLMWIKI_PROVIDER ?? DEFAULT_PROVIDER;
 
   if (provider === "anthropic") {

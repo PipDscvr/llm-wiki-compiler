@@ -280,13 +280,18 @@ describe("`llmwiki context` — Slice 2 semantic fallback warnings", () => {
   });
 
   it("emits query-embedding-unavailable when the provider has no credentials", async () => {
-    await seedConcept("alpha", "Alpha");
-    // Seed a valid v2 store with the anthropic embedding model so the
-    // active-model check passes; embed() then throws when VOYAGE_API_KEY
-    // is missing and the wrapper translates the throw into a stable warning.
+    // The seeded store covers `concepts/retrieval`, so the LIVE page must be
+    // that one: the prefilter drops store entries for pages that do not exist,
+    // and an empty candidate pool now returns before embedding the query at all.
+    // Seeding a different slug would leave nothing to rank and assert this
+    // warning through a path where no embedding was ever needed.
+    await seedConcept("retrieval", "Retrieval");
+    // A valid store carrying the anthropic embedding model so the active-model
+    // check passes; embed() then throws when VOYAGE_API_KEY is missing and the
+    // wrapper translates the throw into a stable warning.
     await seedEmbeddingStore(tmpDir, { model: "voyage-3-lite" });
     const result = await runCLI(
-      ["context", "alpha", "--json"],
+      ["context", "retrieval", "--json"],
       tmpDir,
       noCredentialsEnv(),
     );

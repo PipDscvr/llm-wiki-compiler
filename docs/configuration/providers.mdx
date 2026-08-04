@@ -116,6 +116,7 @@ Use the `openai` provider for any OpenAI-compatible server, including cloud Open
 | `LLMWIKI_EMBEDDING_PROVIDER` | No | Backend serving embeddings, independent of `LLMWIKI_PROVIDER`. One of `anthropic`, `claude-agent`, `openai`, `ollama` |
 | `LLMWIKI_EMBEDDING_MODEL` | No | Embedding model override |
 | `OPENAI_EMBEDDINGS_BASE_URL` | No | Separate endpoint for embeddings. When unset, embeddings use the same client and base URL as chat |
+| `OPENAI_EMBEDDINGS_API_KEY` | No | Credential for that separate embeddings endpoint. When unset, the embeddings client reuses `OPENAI_API_KEY` - set this whenever the endpoint belongs to someone else |
 
 **Split endpoint example** (separate servers for generation and embeddings)
 

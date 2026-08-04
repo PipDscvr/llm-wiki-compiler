@@ -24,6 +24,8 @@ import {
   writeEmbeddingStore,
   readStoreForUpdate,
   resolveEmbeddingModel,
+  resolveEmbeddingFingerprint,
+  storeMatchesActiveEmbedding,
   type EmbeddingStoreV3,
 } from "./embeddings-store.js";
 import { resolveEmbedBatchSize } from "./embeddings-batch.js";
@@ -84,7 +86,13 @@ export async function updateEmbeddingsLockedCore(
   const parsedOld = await readStoreForUpdate(root);
   const onDiskVersion = parsedOld?.version ?? 0;
 
-  const { store: migrated, reembedPageIds } = migrateEmbeddingStore(parsedOld, collected, model);
+  // A store whose vectors came from a DIFFERENT embedding configuration — other
+  // provider, other endpoint, other model — cannot have any of them preserved,
+  // so hand the migration `null` and let its existing rebuild path own the case.
+  // Gating here rather than inside the migration keeps that function pure: it
+  // takes the active identity as data and never reads the environment.
+  const preservable = storeMatchesActiveEmbedding(parsedOld?.store) ? parsedOld : null;
+  const { store: migrated, reembedPageIds } = migrateEmbeddingStore(preservable, collected, model);
   const reembed = unionReembed(reembedPageIds, changedPageIds, collected);
 
   // Persist when there is real work: something to re-embed, a sub-v3 store to
@@ -158,8 +166,12 @@ async function embedAndPersist(
   const batchSize = resolveEmbedBatchSize(getActiveEmbeddingProviderName());
   const expectedDim = migrated.dimensions > 0 ? migrated.dimensions : undefined;
   const { store, report } = await reembedIntoStore(migrated, collected, reembed, batchSize, expectedDim);
-  await writeEmbeddingStore(root, store);
-  reportPersist(store, report, onDiskVersion);
+  // Stamp the identity of the configuration that actually produced these vectors.
+  // Done here, at the single write boundary, so no path can persist a store whose
+  // provenance is unrecorded — that is what the next read gates preservation on.
+  const stamped: EmbeddingStoreV3 = { ...store, fingerprint: resolveEmbeddingFingerprint() };
+  await writeEmbeddingStore(root, stamped);
+  reportPersist(stamped, report, onDiskVersion);
 }
 
 /** Emit the embeddings report; on a migration, name the upgrade explicitly (M4). */

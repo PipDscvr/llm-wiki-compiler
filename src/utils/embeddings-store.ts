@@ -27,7 +27,11 @@
 import { open } from "fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "path";
-import { getActiveEmbeddingProviderName } from "./embedding-provider.js";
+import {
+  getActiveEmbeddingProviderName,
+  resolveEmbeddingBackend,
+  resolveEmbeddingEndpoint,
+} from "./embedding-provider.js";
 import { atomicWrite } from "./markdown.js";
 import { EMBEDDINGS_FILE, EMBEDDING_MODELS, MAX_EMBEDDING_STORE_BYTES } from "./constants.js";
 import { assertEmbeddingStoreValid, filterMalformedIdentities, assertFieldCaps } from "./embeddings-validate.js";
@@ -137,6 +141,13 @@ export interface ChunkEmbeddingV3 {
 export interface EmbeddingStoreV3 {
   version: 3;
   model: string;
+  /**
+   * Identity of the configuration that produced these vectors — see
+   * {@link resolveEmbeddingFingerprint}. Optional: a store written before this
+   * field existed has none, and is compared on `model` alone so upgrading does
+   * not force an unrequested re-embed of the whole wiki.
+   */
+  fingerprint?: string;
   dimensions: number;
   entries: PageEmbeddingV3[];
   chunks?: ChunkEmbeddingV3[];
@@ -317,4 +328,54 @@ export function resolveEmbeddingModel(): string {
     return configuredModel;
   }
   return EMBEDDING_MODELS[providerName] ?? EMBEDDING_MODELS.anthropic;
+}
+
+/**
+ * Identity of the configuration that PRODUCES a store's vectors: the embedding
+ * provider, its model, and the endpoint serving it.
+ *
+ * The model name alone is not that identity. It was a sound proxy while the
+ * embedding backend was pinned to the chat provider — the only pair sharing a
+ * model tag was anthropic/claude-agent, which really is the same Voyage
+ * backend. LLMWIKI_EMBEDDING_PROVIDER broke the proxy by making the backend
+ * vary on its own, so two configurations can now tag a store identically while
+ * producing vectors that do not share a space:
+ *
+ *  - setting or unsetting OPENAI_EMBEDDINGS_BASE_URL — both tag
+ *    `text-embedding-3-small`, one is cloud OpenAI and the other is whatever a
+ *    local server answers to under that alias;
+ *  - moving between `openai` and `ollama` with LLMWIKI_EMBEDDING_MODEL pinned to
+ *    a name both serve (`nomic-embed-text`, `bge-m3`).
+ *
+ * Neither changes the dimension, so nothing downstream catches it: the store is
+ * silently mixed and cosine ranking degrades into noise with no error. Folding
+ * provider and endpoint into the invalidation key is what makes that a clean
+ * rebuild instead.
+ */
+export function resolveEmbeddingFingerprint(): string {
+  const providerName = getActiveEmbeddingProviderName();
+  // Keyed on the BACKEND, not the provider name: anthropic and claude-agent both
+  // embed via Voyage, so moving between them must not trigger a rebuild.
+  // NUL-separated: no env value can contain one, so no pair of distinct
+  // configurations can collide by concatenation.
+  return [
+    resolveEmbeddingBackend(providerName),
+    resolveEmbeddingModel(),
+    resolveEmbeddingEndpoint(providerName),
+  ].join("\0");
+}
+
+/**
+ * True when `store` was built by the ACTIVE embedding configuration, so its
+ * vectors may be preserved and searched.
+ *
+ * Falls back to comparing `model` when the store predates
+ * {@link resolveEmbeddingFingerprint}: a legacy store's provenance is unknown,
+ * and forcing every existing project into a full re-embed on upgrade is a worse
+ * default than keeping today's (weaker) check until the next write stamps one.
+ */
+export function storeMatchesActiveEmbedding(store: Record<string, unknown> | null | undefined): boolean {
+  if (!store) return false;
+  if (typeof store.fingerprint === "string") return store.fingerprint === resolveEmbeddingFingerprint();
+  return store.model === resolveEmbeddingModel();
 }

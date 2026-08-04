@@ -8,6 +8,7 @@
 import OpenAI from "openai";
 import type { LLMProvider, LLMMessage, LLMTool } from "../utils/provider.js";
 import { EMBEDDING_MODELS, OPENAI_DEFAULT_TIMEOUT_MS } from "../utils/constants.js";
+import * as output from "../utils/output.js";
 import { assertVectorValid, normalizeEmbeddingData } from "../utils/embeddings-validate.js";
 
 /** Construction options for an OpenAI-compatible provider. */
@@ -15,6 +16,12 @@ interface OpenAIProviderOptions {
   baseURL?: string;
   apiKey?: string;
   embeddingsBaseURL?: string;
+  /**
+   * Credential for the EMBEDDINGS endpoint, when it differs from the chat one.
+   * Without this the embeddings client reuses `apiKey`/OPENAI_API_KEY, which
+   * sends the cloud OpenAI key to whatever host `embeddingsBaseURL` names.
+   */
+  embeddingsApiKey?: string;
   embeddingModel?: string;
   /**
    * Per-request timeout in milliseconds. Defaults to 10 minutes for cloud
@@ -52,6 +59,45 @@ function resolveOpenAITimeoutMs(): number | undefined {
  */
 const PLACEHOLDER_API_KEY = "llmwiki-unset";
 
+/** Endpoints already warned about, so a per-call provider build stays quiet. */
+const warnedForwardedKeyHosts = new Set<string>();
+
+/** True when `url`'s host is this machine — a forwarded key never leaves it. */
+function isLoopbackEndpoint(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
+  } catch {
+    return false; // unparseable → treat as remote and warn (fail loud, not silent)
+  }
+}
+
+/**
+ * Warn ONCE that the chat API key is being sent to a separate embeddings host.
+ *
+ * Silent credential forwarding is the failure mode here: nothing in the config
+ * says "OPENAI_API_KEY will also be sent to this other operator", and the fix
+ * (OPENAI_EMBEDDINGS_API_KEY) is invisible unless named. Also flags plaintext
+ * http to a remote host, which puts both the key and the wiki text on the wire.
+ */
+function warnForwardedKey(embeddingsBaseURL: string): void {
+  if (isLoopbackEndpoint(embeddingsBaseURL) || warnedForwardedKeyHosts.has(embeddingsBaseURL)) return;
+  warnedForwardedKeyHosts.add(embeddingsBaseURL);
+  output.status(
+    "!",
+    output.warn(
+      `Sending OPENAI_API_KEY to the embeddings endpoint ${embeddingsBaseURL}. ` +
+      `Set OPENAI_EMBEDDINGS_API_KEY to use a different credential there.` +
+      (embeddingsBaseURL.startsWith("http://") ? " That endpoint is plaintext http." : ""),
+    ),
+  );
+}
+
+/** Test-only hook: clear the warned-endpoint cache so each test sees a fresh warning. */
+export function resetForwardedKeyWarnings(): void {
+  warnedForwardedKeyHosts.clear();
+}
+
 /** Translate an Anthropic-style LLMTool to an OpenAI ChatCompletionTool. */
 export function translateToolToOpenAI(
   tool: LLMTool,
@@ -87,8 +133,28 @@ export class OpenAIProvider implements LLMProvider {
       timeout,
     });
     this.embeddingsClient = options.embeddingsBaseURL
-      ? new OpenAI({ apiKey: resolvedKey, baseURL: options.embeddingsBaseURL, timeout })
+      ? new OpenAI({
+          apiKey: this.resolveEmbeddingsKey(options, resolvedKey),
+          baseURL: options.embeddingsBaseURL,
+          timeout,
+        })
       : this.client;
+  }
+
+  /**
+   * Credential for the embeddings client: the dedicated key when set, otherwise
+   * the chat key — which is FORWARDED to a third-party host and warned about.
+   *
+   * Kept as forwarding rather than a hard split so existing setups that point
+   * OPENAI_EMBEDDINGS_BASE_URL at a hosted OpenAI-compatible service keep
+   * working. The warning is the point: sending a cloud key to another operator's
+   * endpoint should be a decision, not a silent default. Loopback is exempt —
+   * a key going to your own machine is not a disclosure.
+   */
+  private resolveEmbeddingsKey(options: OpenAIProviderOptions, chatKey: string): string {
+    if (options.embeddingsApiKey) return options.embeddingsApiKey;
+    if (chatKey !== PLACEHOLDER_API_KEY) warnForwardedKey(options.embeddingsBaseURL!);
+    return chatKey;
   }
 
   /** Send a single non-streaming completion request. */

@@ -75,6 +75,7 @@ export function buildProvider(providerName: string): LLMProvider {
       return new OpenAIProvider(getModelForProvider("openai"), {
         baseURL: readOptionalEnv("OPENAI_BASE_URL"),
         embeddingsBaseURL: readOptionalEnv("OPENAI_EMBEDDINGS_BASE_URL"),
+        embeddingsApiKey: readOptionalEnv("OPENAI_EMBEDDINGS_API_KEY"),
         embeddingModel: readOptionalEnv("LLMWIKI_EMBEDDING_MODEL"),
       });
     case "ollama":
