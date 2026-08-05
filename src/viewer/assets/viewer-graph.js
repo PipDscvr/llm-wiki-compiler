@@ -284,8 +284,8 @@ function attachHover(nodeSel, edgeSel, tooltip, svg) {
 }
 
 /**
- * Append the circle for each node group. Labels are absent in both modes —
- * Task 10 removed them per the design system's label-free canvas.
+ * Append the circle for each node group. Labels are absent in both modes,
+ * per the design system's label-free canvas.
  *
  * @param {object} nodeSel - D3 selection of node groups.
  * @param {{maxDegree: number, staleIds: Set<string>, settings: object}} ctx - Render context.

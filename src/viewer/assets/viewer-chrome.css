@@ -97,11 +97,11 @@
 .github-stars { font: 500 11px/1 var(--font-mono); color: var(--fg-dim); }
 
 /*
- * Three explicit columns: sidebar · fluid main · support rail. The Task 7
- * brief's draft only declared two (`230px minmax(0, 1fr)`); with three grid
- * items and no third track, CSS Grid's default row-flow auto-placement
- * wraps `.support-rail` onto a second row under the sidebar column instead
- * of beside the main pane. 268px matches the Nebula Design System reference
+ * Three explicit columns: sidebar · fluid main · support rail. Declaring
+ * only two (`230px minmax(0, 1fr)`) would leave three grid items with no
+ * third track, so CSS Grid's default row-flow auto-placement would wrap
+ * `.support-rail` onto a second row under the sidebar column instead of
+ * beside the main pane. 268px matches the Nebula Design System reference
  * ("230px sidebar · fluid main · 268px rail · 1420px shell").
  */
 .app-layout {
@@ -138,10 +138,10 @@
 
 /*
  * Product lockup — the 34px mark beside "LLM Wiki Compiler" /
- * "compile once · reuse forever" (design system §Component metrics). Not
- * in the Task 7 draft CSS; added to match the markup `buildLockup()`
- * actually emits in viewer-sidebar.js. The mark never sits on a coloured
- * plate, so this carries no background of its own.
+ * "compile once · reuse forever" (design system §Component metrics),
+ * matching the markup `buildLockup()` actually emits in viewer-sidebar.js.
+ * The mark never sits on a coloured plate, so this carries no background
+ * of its own.
  */
 .sidebar-lockup { display: flex; align-items: center; gap: 10px; }
 .sidebar-lockup-mark { width: 34px; height: 34px; flex: none; opacity: 0.9; }

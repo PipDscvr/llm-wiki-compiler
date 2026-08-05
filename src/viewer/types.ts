@@ -51,6 +51,15 @@ export interface ViewerWarning {
 }
 
 /**
+ * `ViewerWarning.code` for a citation whose source file is not on disk.
+ * Exported so the producer (`snapshot.ts`, which appends the warning) and
+ * the consumer (`server.ts`, which counts warnings by this code for
+ * `unresolvedCitationCount`) share one literal instead of two that could
+ * silently drift.
+ */
+export const UNRESOLVED_CITATION_CODE = "unresolved_citation";
+
+/**
  * In-memory representation of one wiki page as the viewer sees it.
  * Includes everything the server needs to render `/api/page/...` without
  * touching the disk again per request.

@@ -134,12 +134,18 @@ async function listModuleFiles(): Promise<string[]> {
   return [...ordered, ...rest];
 }
 
-/** Read a file from the assets dir, returning null when it does not exist. */
+/**
+ * Read a file from the assets dir, returning null when it does not exist.
+ * Only ENOENT is treated as "optional and absent" — a permissions error or
+ * any other filesystem failure re-throws, so a broken fixture fails loudly
+ * instead of silently rendering as if the file were never there.
+ */
 async function readOptional(name: string): Promise<string | null> {
   try {
     return await readFile(path.join(ASSETS_DIR, name), "utf-8");
-  } catch {
-    return null;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
   }
 }
 

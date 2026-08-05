@@ -48,6 +48,22 @@ describe("viewer JSDOM harness", () => {
     const { dom } = await mountViewerDom([], responder);
     expect(dom.window.document.querySelector("[data-main-pane]")).toBeTruthy();
   });
+
+  it("stubs viewer-graph.js instead of evaluating the real D3-dependent module", async () => {
+    const { dom } = await mountViewerDom([], responder);
+    const registry = (dom.window as unknown as {
+      __viewerModules: Record<string, { staleIdsFromEnvelope: (envelope: unknown) => Set<string> }>;
+    }).__viewerModules;
+    // The real staleIdsFromEnvelope derives ids from page freshness (see
+    // viewer-client-graph.test.ts); the harness's stub always returns an
+    // empty Set regardless of input. A stale page proving otherwise here
+    // would mean the real, D3-dependent module got evaluated instead.
+    const envelopeWithStalePage = {
+      pages: [{ id: "concepts/x", freshness: { freshnessStatus: "stale" } }],
+    };
+    const stale = registry["./viewer-graph.js"].staleIdsFromEnvelope(envelopeWithStalePage);
+    expect(stale.size).toBe(0);
+  });
 });
 
 // --- Export-form support ---
@@ -87,5 +103,35 @@ describe("viewer JSDOM harness — export form support", () => {
   it("fails loudly, naming the file, for an unsupported export form", async () => {
     await writeFile(UNSUPPORTED_FIXTURE, "export default function tempDefaultExport() {}\n", "utf-8");
     await expect(mountViewerDom([], responder)).rejects.toThrow(/viewer-export-default-check\.js/);
+  });
+});
+
+// --- Multi-line import support ---
+//
+// IMPORT_PATTERN uses `[\s\S]*?` between the braces specifically so an
+// import spanning several lines (one named binding per line, as several
+// real viewer-*.js files do) still rewrites into a registry read. This was
+// previously verified only by an ad-hoc script, never by a running test.
+const MULTILINE_IMPORT_FIXTURE = path.join(ASSETS_DIR, "viewer-multiline-import-check.js");
+
+describe("viewer JSDOM harness — multi-line imports", () => {
+  afterEach(async () => {
+    await rm(MULTILINE_IMPORT_FIXTURE, { force: true });
+  });
+
+  it("rewrites a multi-line import into a registry read", async () => {
+    await writeFile(
+      MULTILINE_IMPORT_FIXTURE,
+      'import {\n  el,\n  heading,\n} from "./viewer-dom.js";\n\n' +
+        "export function tempMultilineImportCheck() {\n" +
+        '  return typeof el === "function" && typeof heading === "function";\n' +
+        "}\n",
+      "utf-8",
+    );
+    const { dom } = await mountViewerDom([], responder);
+    const registry = (dom.window as unknown as {
+      __viewerModules: Record<string, { tempMultilineImportCheck: () => boolean }>;
+    }).__viewerModules;
+    expect(registry["./viewer-multiline-import-check.js"].tempMultilineImportCheck()).toBe(true);
   });
 });

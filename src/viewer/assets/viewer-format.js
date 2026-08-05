@@ -34,8 +34,14 @@ export function projectTitle(envelope) {
  * @param {unknown} iso - ISO-8601 timestamp.
  * @returns {string}
  */
-// CRAP is estimated from zero call-graph references at this point in the
-// rollout, not from missing tests (see test/viewer-format.test.ts).
+// CRAP is estimated from zero call-graph references into this module:
+// test/viewer-format.test.ts reads this file's source and evals it directly
+// (JSDOM's eval does not drive ES-module loading — see
+// test/fixtures/viewer-jsdom.ts for the same constraint applied to the
+// shared harness), so static analysis cannot see that every branch below is
+// exercised by that file's "relativeAge" describe block. Not missing tests,
+// and not missing callers either — viewer-lists.js and viewer-dashboard.js
+// both import this directly; fallow just cannot trace either edge.
 // fallow-ignore-next-line complexity
 export function relativeAge(iso) {
   if (typeof iso !== "string" || iso.length === 0) return "";
@@ -57,8 +63,8 @@ export function relativeAge(iso) {
  * @param {unknown} lint - The `/api/health` lint cache entry, or null.
  * @returns {number|null}
  */
-// CRAP is estimated from zero call-graph references at this point in the
-// rollout, not from missing tests (see test/viewer-format.test.ts).
+// Same call-graph blind spot as relativeAge above — see that function's
+// comment.
 // fallow-ignore-next-line complexity
 export function lintTotal(lint) {
   if (!lint || typeof lint !== "object") return null;

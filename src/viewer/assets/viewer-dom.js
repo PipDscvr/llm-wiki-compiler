@@ -1,7 +1,7 @@
 /**
  * llmwiki viewer — shared DOM element builders.
  *
- * Every render module builds its DOM through these four helpers rather than
+ * Every render module builds its DOM through these five helpers rather than
  * hand-rolling `document.createElement` chains. Centralising them keeps the
  * render modules short and, more importantly, keeps text insertion on
  * `textContent` — the server is the only component permitted to produce

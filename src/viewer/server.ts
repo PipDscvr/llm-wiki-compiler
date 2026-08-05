@@ -26,6 +26,7 @@ import { searchPages } from "./search.js";
 import { workflowStatus } from "../workflows/status.js";
 import { buildWorkflowRunsEnvelope } from "./workflow-runs.js";
 import type { PageDirectory } from "../export/types.js";
+import { UNRESOLVED_CITATION_CODE } from "./types.js";
 import type { ViewerSnapshot, ViewerPage } from "./types.js";
 import { assertSafeSlug, PathSafetyError } from "./path-safety.js";
 
@@ -39,9 +40,6 @@ const CONTENT_SECURITY_POLICY =
 
 /** Profile id reported when the project runs the built-in default profile. */
 const DEFAULT_PROFILE_ID = "default";
-
-/** Warning code emitted for a citation whose source file is not on disk. */
-const UNRESOLVED_CITATION_CODE = "unresolved_citation";
 
 /** Configuration knobs accepted by `startViewerServer`. */
 interface ViewerServerConfig {
@@ -327,7 +325,7 @@ async function handleShell(res: ServerResponse, snapshot: ViewerSnapshot): Promi
   res.end(body);
 }
 
-/** `/api/pages` — full envelope with counts, recent pages, page list, and stateStatus. */
+/** `/api/pages` — the full bootstrap envelope: project/profile identity, stateStatus, counts, graph summary, recent pages, and the page list. */
 function handleApiPages(res: ServerResponse, snapshot: ViewerSnapshot): void {
   writeJson(res, 200, {
     project: snapshot.project,

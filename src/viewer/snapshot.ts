@@ -35,6 +35,7 @@ import { collectEntityPages, invalidEntityPagePaths } from "../profile/collect.j
 import { readLiveValidRelations } from "../relations/live-valid.js";
 import type { ProfilePack } from "../profile/types.js";
 import type { FreshnessSnapshot } from "../freshness/types.js";
+import { UNRESOLVED_CITATION_CODE } from "./types.js";
 import type {
   ViewerCounts,
   ViewerIndex,
@@ -253,7 +254,7 @@ function appendCitationWarningsForMarker(
     const file = trimmed.split(/[:#]/)[0];
     if (file.length > 0 && !sourceFiles.has(file)) {
       into.push({
-        code: "unresolved_citation",
+        code: UNRESOLVED_CITATION_CODE,
         message: `Source not found: ${file}`,
       });
     }

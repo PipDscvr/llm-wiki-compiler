@@ -35,7 +35,10 @@ const STAT_CARDS = [
     label: "Concepts",
     badge: "PAGES",
     value: (m) => m.counts.concepts ?? 0,
-    sub: (m) => `${m.totalCitations} citations · ${m.pageCount} pages`,
+    // Scoped to concept pages only (not envelope-wide totalCitations/pageCount,
+    // which also include queries) — the card is named "Concepts", so its
+    // sub-line must describe concepts, not the whole envelope.
+    sub: (m) => `${m.conceptsCitations} citations · ${m.counts.concepts ?? 0} pages`,
   },
   {
     key: "sources",
@@ -127,6 +130,10 @@ function buildModel(envelope, health) {
     freshnessById: freshnessIndex(pages),
     pageCount: pages.length,
     totalCitations,
+    // Concepts-only citation total for the "Concepts" stat card's sub-line —
+    // totalCitations above is envelope-wide (concepts + queries) and would
+    // mislabel a query's citations as belonging to the concepts card.
+    conceptsCitations: citationsInDirectory(pages, "concepts"),
     unresolved,
     dangling,
     attention: dangling + unresolved,
@@ -137,6 +144,12 @@ function buildModel(envelope, health) {
 /** Sum a numeric projection over a list. */
 function sumBy(items, project) {
   return items.reduce((total, item) => total + project(item), 0);
+}
+
+/** Sum citationCount over the pages in one pageDirectory (e.g. "concepts"). */
+function citationsInDirectory(pages, directory) {
+  const inDirectory = pages.filter((p) => p.pageDirectory === directory);
+  return sumBy(inDirectory, (p) => p.citationCount ?? 0);
 }
 
 /** Index page freshness by page id so recent rows can join against it. */

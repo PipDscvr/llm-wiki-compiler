@@ -5,7 +5,7 @@
  * markdown (`.rendered-body`), the header search control and its results
  * dropdown, citation chips (`src/viewer/citation-rule.ts`), freshness
  * badges/caption, the support rail's warnings block, the warning/corrupt
- * banners, the health route, and the list routes from Task 8
+ * banners, the health route, and the list routes
  * (`#/concepts`, `#/queries`, `#/sources`). Every colour here is a token
  * from viewer-tokens.css — no raw colour literals — so both themes stay
  * correct automatically. The base reset (`body`, `:focus-visible`,
@@ -303,7 +303,7 @@
 }
 .metric-list .metric { display: contents; }
 
-/* ---- List routes (#/concepts, #/queries, #/sources — Task 8) ---- */
+/* ---- List routes (#/concepts, #/queries, #/sources) ---- */
 
 /*
  * `.list-pane` shares its element with `.main-pane` (viewer-lists.js sets

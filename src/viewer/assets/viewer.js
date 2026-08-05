@@ -19,7 +19,7 @@
  * `'self'`. The search-input wiring lives in `viewer-search.js`.
  */
 
-import { definitionList, heading, placeholder } from "./viewer-dom.js";
+import { definitionList, el, heading, placeholder } from "./viewer-dom.js";
 import { wireThemeToggle } from "./viewer-theme.js";
 import { wireSearch } from "./viewer-search.js";
 import { renderSidebar, markActive } from "./viewer-sidebar.js";
@@ -310,10 +310,7 @@ function renderPagePayload(main, payload, slug) {
 
 /** Question banner shown above the body for saved-query pages. */
 function buildQueryQuestion(title) {
-  const p = document.createElement("p");
-  p.className = "query-question";
-  p.textContent = `Question: ${title}`;
-  return p;
+  return el("p", "query-question", `Question: ${title}`);
 }
 
 /** Render the 404 placeholder or a generic error for /api/page failures. */
@@ -373,10 +370,7 @@ function hasMatchingHeadingText(heading, title) {
 /** Render every payload warning as a banner above the page body. */
 function appendWarnings(main, warnings) {
   for (const w of warnings) {
-    const banner = document.createElement("div");
-    banner.className = "warning-banner";
-    banner.textContent = w.message || w.code;
-    main.appendChild(banner);
+    main.appendChild(el("div", "warning-banner", w.message || w.code));
   }
 }
 
@@ -385,10 +379,7 @@ function renderError(message) {
   const main = document.querySelector(MAIN_SELECTOR);
   if (!main) return;
   main.innerHTML = "";
-  const banner = document.createElement("div");
-  banner.className = "warning-banner";
-  banner.textContent = message;
-  main.appendChild(banner);
+  main.appendChild(el("div", "warning-banner", message));
   clearSupportRail();
 }
 

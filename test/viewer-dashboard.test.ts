@@ -88,6 +88,31 @@ describe("dashboard stat cards", () => {
     expect(sub).toContain("1 compiled");
     expect(sub).toContain("1 on disk");
   });
+
+  it("scopes the concepts sub-line to concept pages, excluding queries", async () => {
+    const base = envelopeWith(0, 0);
+    const envelope = {
+      ...base,
+      counts: { ...base.counts, concepts: 1, queries: 1 },
+      pages: [
+        { ...base.pages[0], citationCount: 5, unresolvedCitationCount: 0 },
+        { id: "queries/q1", pageDirectory: "queries", slug: "q1", title: "Q1",
+          kind: "query", summary: "", updatedAt: "2026-08-02T00:00:00.000Z", warnings: [],
+          freshness: { freshnessStatus: "fresh", contradicted: false, archived: false },
+          citationCount: 3, unresolvedCitationCount: 0 },
+      ],
+    };
+    const responder: FetchResponder = (url) => {
+      if (url.endsWith("/api/pages")) return jsonResponse(envelope);
+      if (url.endsWith("/api/health")) return jsonResponse({ lint: null });
+      if (url.endsWith("/api/graph")) return jsonResponse({ nodes: [], edges: [] });
+      return null;
+    };
+    const { dom } = await mountViewerDom([], responder);
+    const main = dom.window.document.querySelector("[data-main-pane]") as HTMLElement;
+    const sub = main.querySelector('[data-stat="concepts"] .stat-sub')?.textContent ?? "";
+    expect(sub).toBe("5 citations · 1 pages");
+  });
 });
 
 describe("dashboard panels", () => {
@@ -98,8 +123,11 @@ describe("dashboard panels", () => {
 
   it("renders a citations-resolved bar in the compile receipt", async () => {
     const main = await mountDashboard(0, 2);
-    const receipt = main.querySelector("[data-compile-receipt]")?.textContent ?? "";
-    expect(receipt).toContain("Citations resolved");
+    const receipt = main.querySelector("[data-compile-receipt]") as HTMLElement;
+    expect(receipt.textContent).toContain("Citations resolved");
+    // Design system's two-segment meter: a filled portion plus a distinct
+    // remainder segment, not a single bar — pin the structure, not just the label.
+    expect(receipt.querySelector(".bar-track > .bar-fill + .bar-remainder")).toBeTruthy();
   });
 
   it("lists a dangling-link next action when links dangle", async () => {

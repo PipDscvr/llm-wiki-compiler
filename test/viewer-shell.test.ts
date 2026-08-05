@@ -93,6 +93,18 @@ describe("viewer.js — first paint + sidebar", () => {
     const main = dom.window.document.querySelector("[data-main-pane]")!;
     expect(main.textContent).toContain("demo-wiki");
   });
+
+  it("paints the nav shell even when the bootstrap fetch never resolves", async () => {
+    // Unlike pageAndIndexResponder (which always settles quickly), this proves
+    // first paint does not AWAIT /api/pages or /api/health — it only checks
+    // that painting happens to finish before mountViewerDom's fixed flush
+    // window, which a fetch-then-paint regression would still slip through.
+    const neverResolves: FetchResponder = () => new Promise(() => {});
+    const { dom } = await mountViewerDom([], neverResolves);
+    const sidebar = dom.window.document.querySelector("[data-sidebar]")!;
+    expect(sidebar.textContent).toContain("BROWSE");
+    expect(sidebar.textContent).toContain("MAINTAIN");
+  });
 });
 
 describe("viewer.js — hash router", () => {
