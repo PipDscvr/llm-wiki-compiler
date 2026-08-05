@@ -4,7 +4,7 @@
  * Mounts `src/viewer/assets/viewer.js` into a JSDOM instance via the
  * shared `mountViewerDom` fixture (which handles ES-module rewriting
  * for JSDOM's eval). Stubs `fetch` to return fixture envelopes and
- * asserts the script renders the sidebar groups, the home dashboard,
+ * asserts the script renders the sidebar nav, the home dashboard,
  * and the page-rendered HTML coming back from `/api/page/...`.
  */
 
@@ -67,17 +67,21 @@ afterEach(() => {
 });
 
 describe("viewer.js — first paint + sidebar", () => {
-  it("renders the embedded page-index blob into sidebar groups before any fetch", async () => {
+  it("renders the sidebar nav before any fetch settles", async () => {
     const pages: EmbeddedPage[] = [
       { id: "concepts/alpha", pageDirectory: "concepts", slug: "alpha", title: "Alpha" },
       { id: "queries/q1", pageDirectory: "queries", slug: "q1", title: "Q1" },
     ];
     const { dom } = await mountViewerDom(pages, pageAndIndexResponder(pages));
     const sidebar = dom.window.document.querySelector("[data-sidebar]")!;
-    expect(sidebar.textContent).toContain("Concepts");
-    expect(sidebar.textContent).toContain("Alpha");
-    expect(sidebar.textContent).toContain("Saved Queries");
-    expect(sidebar.textContent).toContain("Q1");
+    // Nav structure is data-independent (renderSidebar({}) paints it before
+    // /api/pages settles). The full label/route contract is pinned in
+    // viewer-sidebar-nav.test.ts; this only guards that this mount path
+    // reaches the real nav shell rather than the old page tree.
+    expect(sidebar.textContent).toContain("BROWSE");
+    expect(sidebar.textContent).toContain("MAINTAIN");
+    expect(sidebar.querySelector('a[data-route="concepts"]')).not.toBeNull();
+    expect(sidebar.querySelectorAll("a[data-route]").length).toBeGreaterThanOrEqual(6);
   });
 
   it("renders the home dashboard with project title from /api/pages", async () => {

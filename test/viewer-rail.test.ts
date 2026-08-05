@@ -1,11 +1,11 @@
 /**
- * Support-rail + sidebar-grouping + stale-rail-clearing + freshness-badge tests.
+ * Support-rail + stale-rail-clearing + freshness-badge tests.
  *
  * Mounts the real viewer assets through `mountViewerDom` and drives
  * hash-route navigation to assert the right metadata renders on the
  * right route. Covers every Slice-5 review finding that touches the
- * client's right-hand rail or the sidebar group structure, plus the
- * Slice-9 freshness badges and the "Freshness as of…" caption.
+ * client's right-hand rail, plus the Slice-9 freshness badges and the
+ * "Freshness as of…" caption.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -173,46 +173,6 @@ describe("support rail — every spec field renders", () => {
     const rail = dom.window.document.querySelector("[data-support-rail]") as HTMLElement;
     expect(rail.textContent).not.toContain("Kind");
     expect(rail.textContent).not.toContain("Confidence");
-  });
-});
-
-describe("sidebar — concept grouping by kind", () => {
-  it("groups concepts by frontmatter `kind`, missing kind falls back to concept", async () => {
-    const embedded: EmbeddedPage[] = [
-      { id: "concepts/a", pageDirectory: "concepts", slug: "a", title: "Alpha", kind: "concept" },
-      { id: "concepts/b", pageDirectory: "concepts", slug: "b", title: "Beta", kind: "entity" },
-      { id: "concepts/c", pageDirectory: "concepts", slug: "c", title: "Gamma", kind: "" },
-      { id: "queries/q1", pageDirectory: "queries", slug: "q1", title: "Q1", kind: "" },
-    ];
-    const { dom } = await mountViewerDom(embedded, responderFor(embedded, []));
-    const groups = dom.window.document.querySelectorAll(
-      "[data-sidebar] details[data-kind]",
-    ) as NodeListOf<HTMLDetailsElement>;
-    const kinds = Array.from(groups).map((d) => d.dataset.kind);
-    expect(kinds).toContain("concept");
-    expect(kinds).toContain("entity");
-    expect(kinds).toContain("query");
-    expect(dom.window.document.querySelector("[data-sidebar] section h2")?.textContent).toBe("Project");
-    // The fallback "concept" kind appears first among page groups.
-    expect(kinds[0]).toBe("concept");
-    // Two pages classified as concept (a + c with missing kind).
-    const conceptGroup = Array.from(groups).find((d) => d.dataset.kind === "concept");
-    expect(conceptGroup!.querySelectorAll("li").length).toBe(2);
-  });
-
-  it("renders groups as collapsible <details> elements (keyboard-toggleable by default)", async () => {
-    const embedded: EmbeddedPage[] = [
-      { id: "concepts/a", pageDirectory: "concepts", slug: "a", title: "Alpha", kind: "concept" },
-    ];
-    const { dom } = await mountViewerDom(embedded, responderFor(embedded, []));
-    const group = dom.window.document.querySelector(
-      "[data-sidebar] details[data-kind='concept']",
-    ) as HTMLDetailsElement;
-    expect(group).not.toBeNull();
-    expect(group.tagName).toBe("DETAILS");
-    expect(group.open).toBe(true);
-    group.open = false;
-    expect(group.open).toBe(false);
   });
 });
 
