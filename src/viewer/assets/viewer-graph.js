@@ -5,55 +5,86 @@
  * route. Expects `globalThis.d3` to be set by the D3 IIFE bundle loaded
  * as a `<script>` tag in index.html before this module runs.
  *
- * Nodes are coloured by `nodeKind`/`kind`: typed entity nodes use the entity
- * palette (checked via `d.nodeKind === "entity"` before the `kind` fallback);
- * wikilink nodes use `kind`-keyed palettes (concept/comparison/overview). Node
- * size reflects total degree. Hovering saturates and highlights connected edges.
- * Clicking navigates to the page.
+ * Colour lives entirely in viewer-graph.css. D3 assigns semantic classes —
+ * `graph-node graph-node--<kind>` on nodes, `graph-edge`/`graph-edge--relation`
+ * on edges — rather than a hardcoded SVG fill/stroke presentation attribute,
+ * because presentation attributes cannot read CSS custom properties: a graph
+ * coloured that way would stay dark when the viewer switches to the light
+ * theme. `nodeClass()` resolves the design system's four node semantics —
+ * concept, entity, stale, dangling — in that priority order (a dangling
+ * target has no backing page at all; a stale page outranks its kind because
+ * "the source moved on" is the more urgent fact). `GraphNode` carries no
+ * freshness field, so `staleIdsFromEnvelope()` joins it client-side from the
+ * `/api/pages` envelope the caller already holds; Task 11 wires that call in.
  *
- * Typed relation edges render with a dashed green stroke and carry the
- * `relationType` as a tooltip title. Symmetric relation edges have no arrowhead;
- * directed and wikilink edges use the arrowhead marker.
+ * The canvas is deliberately label-free — no per-node `<text>` — because at
+ * 128 nodes the labels overlapped into noise. Identification lives in the
+ * hover tooltip (title, kind, connection count) and the legend (page
+ * header). Each node group holds two circles: a halo (`.graph-halo`, drawn
+ * first so it sits behind the node, invisible until hot) and the node
+ * itself (`.graph-node`). Node radius and stroke width stay data-driven
+ * `.attr()` calls because they come from degree, not from the theme.
+ *
+ * Typed relation edges get the `graph-edge--relation` class and carry the
+ * `relationType` as a tooltip title. Symmetric relation edges have no
+ * arrowhead; directed and wikilink edges use the arrowhead marker.
  */
 
 const MIN_RADIUS = 4;
 const MAX_RADIUS = 10;
-
-const KIND_COLORS = {
-  concept:    { rest: '#1c3e67', restStroke: '#1565c0', fill: '#1565c0', stroke: '#4fc3f7', hot: '#1e88e5', strokeHot: '#82d9ff' },
-  entity:     { rest: '#143f44', restStroke: '#00695c', fill: '#00695c', stroke: '#80cbc4', hot: '#00897b', strokeHot: '#b2dfdb' },
-  comparison: { rest: '#653724', restStroke: '#e65100', fill: '#e65100', stroke: '#ffb74d', hot: '#f4511e', strokeHot: '#ffcc80' },
-  overview:   { rest: '#1e3c2f', restStroke: '#1b5e20', fill: '#1b5e20', stroke: '#81c784', hot: '#2e7d32', strokeHot: '#a5d6a7' },
-};
-
-const ORPHAN_COLOR   = { fill: '#212121', stroke: '#424242', hot: '#37474f', strokeHot: '#607d8b' };
-const DANGLING_COLOR = { fill: '#0f172a', stroke: '#475569', hot: '#1e293b', strokeHot: '#94a3b8' };
-const DEFAULT_EDGE_STROKE   = '#374151';
-const RELATION_EDGE_STROKE  = '#2d5a3d';
-const HOT_EDGE_STROKE       = '#60a5fa';
 const ARROWHEAD_MARKER_ID   = 'llmwiki-arrowhead';
 const HIGH_DEGREE_THRESHOLD = 5;
-const RESTING_FILL   = '#374151';
-const RESTING_STROKE = '#4b5563';
 
-/** Resolve the active color palette for a node — entity nodes bypass the kind lookup. */
-function paletteForNode(kind, nodeKind) {
-  if (nodeKind === 'entity') return KIND_COLORS.entity;
-  return KIND_COLORS[kind] || KIND_COLORS.concept;
+/**
+ * Freshness states that colour a node amber. `GraphNode` carries no freshness
+ * field, so the ids are joined from /api/pages — data the client already holds.
+ */
+const STALE_STATUSES = new Set(["stale", "orphaned"]);
+
+/** True for a ghost node with no backing page — a broken wikilink or relation target. */
+function isDanglingNode(d) {
+  return d.isDangling === true || d.kind === "dangling";
 }
 
-/** Return the hover color config for a node (kind + degree + nodeKind determine the palette). */
-function colorForNode(kind, degree, nodeKind) {
-  if (kind === 'dangling') return DANGLING_COLOR;
-  if (degree === 0) return ORPHAN_COLOR;
-  return paletteForNode(kind, nodeKind);
+/**
+ * Resolve the semantic class for a node. Colour lives entirely in
+ * viewer-graph.css so both themes are handled by the stylesheet — SVG
+ * presentation attributes cannot read CSS custom properties.
+ *
+ * Order is deliberate: a dangling target has no page at all, and a stale page
+ * outranks its kind because "the source moved on" is the more urgent fact.
+ *
+ * @param {object} d - The node datum.
+ * @param {Set<string>} staleIds - Page ids whose freshness is stale or orphaned.
+ */
+function nodeClass(d, staleIds) {
+  if (isDanglingNode(d)) return "graph-node graph-node--dangling";
+  if (staleIds.has(d.id)) return "graph-node graph-node--stale";
+  if (d.nodeKind === "entity") return "graph-node graph-node--entity";
+  return "graph-node graph-node--concept";
 }
 
-/** Return the resting (non-hovered) fill and stroke for a node, tinted by kind. */
-function restColorsForNode(kind, nodeKind) {
-  if (kind === 'dangling') return { fill: RESTING_FILL, stroke: RESTING_STROKE };
-  const c = paletteForNode(kind, nodeKind);
-  return { fill: c.rest, stroke: c.restStroke };
+/** The `pages` array of an /api/pages envelope, or `[]` when absent/malformed. */
+function pagesFromEnvelope(envelope) {
+  return Array.isArray(envelope?.pages) ? envelope.pages : [];
+}
+
+/** True when a page's computed freshness is stale or orphaned. */
+function isStalePage(page) {
+  return STALE_STATUSES.has(page.freshness?.freshnessStatus);
+}
+
+/**
+ * Build the stale-id set from an /api/pages envelope. Returns an empty set
+ * when the envelope is absent, so a failed page fetch degrades the graph to
+ * kind-only colouring rather than breaking it.
+ */
+export function staleIdsFromEnvelope(envelope) {
+  const ids = new Set();
+  for (const page of pagesFromEnvelope(envelope)) {
+    if (isStalePage(page)) ids.add(page.id);
+  }
+  return ids;
 }
 
 /** Map a node's degree to a circle radius using a linear scale. */
@@ -149,44 +180,33 @@ function onTick(edgeSel, nodeSel) {
   nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
 }
 
+/**
+ * Dim everything, mark the hovered node and its edges hot. Each node group
+ * holds two circles (halo + node), so both are targeted by class rather than
+ * by tag — a bare `.select('circle')` would hit whichever circle comes
+ * first in document order (the halo), not the node.
+ */
+function applyHighlight(hoveredId, edgeSel, nodeSel) {
+  edgeSel.classed('is-dimmed', true).classed('is-hot', false);
+  nodeSel.select('.graph-node').classed('is-dimmed', true).classed('is-hot', false);
+  nodeSel.select('.graph-halo').classed('is-hot', false);
 
-/** Dim all nodes/edges, saturate the hovered node, highlight its edges only. */
-function applyHighlight(hoveredId, edgeSel, nodeSel, maxDegree) {
   edgeSel
-    .attr('stroke', '#1a2233')
-    .attr('stroke-opacity', 0.25)
-    .attr('stroke-width', 1.2);
+    .filter(d => d.source.id === hoveredId || d.target.id === hoveredId)
+    .classed('is-dimmed', false)
+    .classed('is-hot', true);
 
-  nodeSel.select('circle').style('filter', 'brightness(0.3)');
-
-  const hotEdges = edgeSel.filter(
-    d => d.source.id === hoveredId || d.target.id === hoveredId
-  );
-  hotEdges.attr('stroke', HOT_EDGE_STROKE).attr('stroke-opacity', 1).attr('stroke-width', 2);
-
-  const hoveredSel = nodeSel.filter(d => d.id === hoveredId);
-  hoveredSel.select('circle')
-    .attr('fill',   d => colorForNode(d.kind, d.degree, d.nodeKind).hot)
-    .attr('stroke', d => colorForNode(d.kind, d.degree, d.nodeKind).strokeHot)
-    .style('filter', 'brightness(1.5) saturate(2) drop-shadow(0 0 6px #60a5fa)');
-  hoveredSel.select('text')
-    .attr('y', d => radiusForDegree(d.degree, maxDegree) + 8);
+  const hovered = nodeSel.filter(d => d.id === hoveredId);
+  hovered.select('.graph-node').classed('is-dimmed', false).classed('is-hot', true);
+  hovered.select('.graph-halo').classed('is-hot', true);
 }
 
-/** Restore all edges and nodes to their default visual state. */
-function resetHighlight(edgeSel, nodeSel, maxDegree) {
-  edgeSel
-    .attr('stroke', DEFAULT_EDGE_STROKE)
-    .attr('stroke-opacity', 0.7)
-    .attr('stroke-width', 1.2);
-
-  nodeSel.select('circle')
-    .style('filter', null)
-    .attr('fill',   d => restColorsForNode(d.kind, d.nodeKind).fill)
-    .attr('stroke', d => restColorsForNode(d.kind, d.nodeKind).stroke);
-  nodeSel.select('text').attr('y', d => radiusForDegree(d.degree, maxDegree) + 3);
+/** Clear every highlight class, including the halo. */
+function resetHighlight(edgeSel, nodeSel) {
+  edgeSel.classed('is-dimmed', false).classed('is-hot', false);
+  nodeSel.select('.graph-node').classed('is-dimmed', false).classed('is-hot', false);
+  nodeSel.select('.graph-halo').classed('is-hot', false);
 }
-
 
 /** Attach drag behaviour to node groups so users can reposition nodes. */
 function attachDrag(nodeSel, sim) {
@@ -221,10 +241,10 @@ function nodeMetaText(d) {
 }
 
 /** Wire hover and click interactions onto node groups. */
-function attachHover(nodeSel, edgeSel, tooltip, svg, maxDegree) {
+function attachHover(nodeSel, edgeSel, tooltip, svg) {
   nodeSel
     .on('mouseenter', function(event, d) {
-      applyHighlight(d.id, edgeSel, nodeSel, maxDegree);
+      applyHighlight(d.id, edgeSel, nodeSel);
       tooltip.querySelector('.tip-title').textContent = d.title;
       tooltip.querySelector('.tip-meta').textContent = nodeMetaText(d);
       positionTooltip(tooltip, event, svg.node());
@@ -233,7 +253,7 @@ function attachHover(nodeSel, edgeSel, tooltip, svg, maxDegree) {
       positionTooltip(tooltip, event, svg.node());
     })
     .on('mouseleave', function() {
-      resetHighlight(edgeSel, nodeSel, maxDegree);
+      resetHighlight(edgeSel, nodeSel);
       tooltip.style.display = 'none';
     })
     .on('click', function(_event, d) {
@@ -242,61 +262,65 @@ function attachHover(nodeSel, edgeSel, tooltip, svg, maxDegree) {
     });
 }
 
-/** Append circle and label children to each node group. */
-function appendNodeVisuals(nodeSel, maxDegree) {
+/**
+ * Append the circle for each node group. Labels are deliberately absent: the
+ * design system keeps the canvas label-free and moves identification to the
+ * hover tooltip, which already reports title, kind, and degree.
+ *
+ * @param {object} nodeSel - D3 selection of node groups.
+ * @param {{maxDegree: number, staleIds: Set<string>}} ctx - Render context.
+ */
+function appendNodeVisuals(nodeSel, ctx) {
+  // Halo ring, drawn first so it sits behind the node. Invisible until the
+  // node is hot — the design system's "focus · halo ring" semantic.
   nodeSel.append('circle')
-    .attr('r',                d => radiusForDegree(d.degree, maxDegree))
-    .attr('fill',             d => restColorsForNode(d.kind, d.nodeKind).fill)
-    .attr('stroke',           d => restColorsForNode(d.kind, d.nodeKind).stroke)
+    .attr('class', 'graph-halo')
+    .attr('r',     d => radiusForDegree(d.degree, ctx.maxDegree) + 9);
+
+  nodeSel.append('circle')
+    .attr('class',            d => nodeClass(d, ctx.staleIds))
+    .attr('r',                d => radiusForDegree(d.degree, ctx.maxDegree))
     .attr('stroke-dasharray', d => d.isDangling ? '3,2' : null)
     .attr('stroke-width',     d => d.degree > HIGH_DEGREE_THRESHOLD ? 2.5 : d.degree > 0 ? 2 : 1);
-
-  nodeSel.append('text')
-    .text(d => d.title)
-    .attr('class', 'node-label')
-    .attr('text-anchor', 'middle')
-    .attr('y',            d => radiusForDegree(d.degree, maxDegree) + 3)
-    .attr('dy',           '0.75em')
-    .attr('font-size',    d => Math.max(5, radiusForDegree(d.degree, maxDegree) * 0.4))
-    .attr('font-family',  'monospace')
-    .attr('pointer-events', 'none');
 }
 
-/** Append an arrowhead marker definition to the SVG defs block. */
+/** Append the arrowhead marker definition; its fill comes from the stylesheet. */
 function appendArrowheadDef(svg) {
   svg.append('defs').append('marker')
-    .attr('id',          ARROWHEAD_MARKER_ID)
-    .attr('viewBox',     '0 -4 8 8')
-    .attr('refX',        8)
-    .attr('refY',        0)
-    .attr('markerWidth', 6)
+    .attr('id',           ARROWHEAD_MARKER_ID)
+    .attr('viewBox',      '0 -4 8 8')
+    .attr('refX',         8)
+    .attr('refY',         0)
+    .attr('markerWidth',  6)
     .attr('markerHeight', 6)
-    .attr('orient',      'auto')
+    .attr('orient',       'auto')
     .append('path')
-    .attr('d',    'M0,-4L8,0L0,4')
-    .attr('fill', DEFAULT_EDGE_STROKE);
+    .attr('class', 'graph-arrowhead')
+    .attr('d',     'M0,-4L8,0L0,4');
 }
 
 /**
- * Apply the typed edge styling to an edge selection: relation edges get the
- * distinct dashed stroke + relationType title; symmetric edges get NO arrowhead
- * (marker-end null), while directed relation + wikilink edges get the arrowhead.
+ * Apply structural edge styling. Colour comes from viewer-graph.css via the
+ * class; only the arrowhead decision and the relation tooltip are data-driven.
+ * Symmetric relations get no arrowhead; directed and wikilink edges do.
  *
  * @param {object} edgeSel - The D3 line selection bound to edge data.
  * @returns {object} The same selection (for chaining).
  */
 function styleEdges(edgeSel) {
   return edgeSel
-    .attr('stroke',         d => d.edgeKind === 'relation' ? RELATION_EDGE_STROKE : DEFAULT_EDGE_STROKE)
-    .attr('stroke-width',   d => d.edgeKind === 'relation' ? 1.5 : 1.2)
-    .attr('stroke-opacity', 0.7)
-    .attr('stroke-dasharray', d => d.edgeKind === 'relation' ? '5,3' : null)
-    .attr('title',          d => d.edgeKind === 'relation' ? d.relationType : null)
-    .attr('marker-end',     d => d.direction === 'symmetric' ? null : `url(#${ARROWHEAD_MARKER_ID})`);
+    .attr('class',      d => d.edgeKind === 'relation' ? 'graph-edge graph-edge--relation' : 'graph-edge')
+    .attr('title',      d => d.edgeKind === 'relation' ? d.relationType : null)
+    .attr('marker-end', d => d.direction === 'symmetric' ? null : `url(#${ARROWHEAD_MARKER_ID})`);
 }
 
-/** Build and run the D3 simulation; append edges, nodes, labels, and interactions. */
-function renderGraph(svg, g, data, tooltip, width, height) {
+/**
+ * Build and run the D3 simulation; append edges, nodes, and interactions.
+ *
+ * @param {{staleIds?: Set<string>}} [options] - Threaded through from
+ *   `loadGraph`; `staleIds` feeds `nodeClass()` via the render context.
+ */
+function renderGraph(svg, g, data, tooltip, width, height, options = {}) {
   const d3 = globalThis.d3;
   const maxDegree = Math.max(0, ...data.nodes.map(n => n.degree));
 
@@ -318,9 +342,10 @@ function renderGraph(svg, g, data, tooltip, width, height) {
     .join('g')
     .style('cursor', d => d.isDangling ? 'default' : 'pointer');
 
-  appendNodeVisuals(nodeSel, maxDegree);
+  const ctx = { maxDegree, staleIds: options.staleIds ?? new Set() };
+  appendNodeVisuals(nodeSel, ctx);
   attachDrag(nodeSel, sim);
-  attachHover(nodeSel, edgeSel, tooltip, svg, maxDegree);
+  attachHover(nodeSel, edgeSel, tooltip, svg);
 
   // Stop the simulation when the SVG is removed from the document (e.g. navigating away from #/graph).
   sim.on('tick', () => {
@@ -331,19 +356,28 @@ function renderGraph(svg, g, data, tooltip, width, height) {
   return { sim, edgeSel, nodeSel };
 }
 
-/** Build the legend item for the relation edge kind (dashed line swatch + label). */
-function buildRelationLegendItem() {
+/** Legend entries: label plus the node class whose swatch it shows. */
+const LEGEND_KINDS = [
+  { label: 'concept',  kind: 'concept' },
+  { label: 'entity',   kind: 'entity' },
+  { label: 'stale',    kind: 'stale' },
+  { label: 'dangling', kind: 'dangling' },
+];
+
+/** Build one legend row with a class-styled swatch. */
+function buildLegendItem(label, kindClass) {
   const item = document.createElement('div');
   item.className = 'graph-legend-item';
-
-  const swatch = document.createElement('div');
-  swatch.className = 'graph-legend-dot';
-  swatch.style.background = 'transparent';
-  swatch.style.border = `1px dashed ${RELATION_EDGE_STROKE}`;
-
-  item.appendChild(swatch);
-  item.appendChild(document.createTextNode('relation'));
+  const dot = document.createElement('div');
+  dot.className = `graph-legend-dot graph-legend-dot--${kindClass}`;
+  item.appendChild(dot);
+  item.appendChild(document.createTextNode(label));
   return item;
+}
+
+/** Build the legend item for the relation edge kind (dashed swatch + label). */
+function buildRelationLegendItem() {
+  return buildLegendItem('relation', 'relation');
 }
 
 /** Append the "Edge kind" heading + the relation-edge legend item to the legend. */
@@ -366,28 +400,8 @@ function buildLegend(container) {
   kindHeading.textContent = 'Node kind';
   legend.appendChild(kindHeading);
 
-  const LEGEND_KINDS = [
-    { label: 'concept',    dashed: false, ...KIND_COLORS.concept },
-    { label: 'entity',     dashed: false, ...KIND_COLORS.entity },
-    { label: 'comparison', dashed: false, ...KIND_COLORS.comparison },
-    { label: 'overview',   dashed: false, ...KIND_COLORS.overview },
-    { label: 'orphan',     dashed: false, ...ORPHAN_COLOR },
-    { label: 'missing',    dashed: true,  ...DANGLING_COLOR },
-  ];
-
-  for (const { label, dashed, fill, stroke } of LEGEND_KINDS) {
-    const item = document.createElement('div');
-    item.className = 'graph-legend-item';
-
-    const dot = document.createElement('div');
-    dot.className = 'graph-legend-dot';
-    dot.style.background = fill;
-    dot.style.border = `1px ${dashed ? 'dashed' : 'solid'} ${stroke}`;
-
-    const text = document.createTextNode(label);
-    item.appendChild(dot);
-    item.appendChild(text);
-    legend.appendChild(item);
+  for (const { label, kind } of LEGEND_KINDS) {
+    legend.appendChild(buildLegendItem(label, kind));
   }
 
   appendEdgeKindSection(legend);
@@ -418,8 +432,12 @@ function renderEmptyState(container) {
  * Fetches `/api/graph`, builds the SVG, and starts the force simulation.
  *
  * @param {HTMLElement} container - The `.graph-pane` element to render into.
+ * @param {{staleIds?: Set<string>}} [options] - Render options. `staleIds`
+ *   comes from `staleIdsFromEnvelope()` over the already-fetched `/api/pages`
+ *   envelope; a caller that omits it gets kind-only colouring (no stale
+ *   nodes highlighted).
  */
-export async function loadGraph(container) {
+export async function loadGraph(container, options = {}) {
   const data = await fetchGraphData(container);
   if (!data) return;
   if (!data.nodes || data.nodes.length === 0) {
@@ -427,7 +445,7 @@ export async function loadGraph(container) {
     return;
   }
   const { svg, g, width, height, tooltip } = initGraph(container);
-  renderGraph(svg, g, data, tooltip, width, height);
+  renderGraph(svg, g, data, tooltip, width, height, options);
   buildLegend(container);
 }
 
