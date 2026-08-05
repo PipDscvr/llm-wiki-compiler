@@ -17,6 +17,11 @@
  * freshness field, so `staleIdsFromEnvelope()` joins it client-side from the
  * `/api/pages` envelope the caller already holds — both `#/graph` (viewer.js)
  * and the dashboard's compact panel (viewer-dashboard.js) pass it in.
+ * `LEGEND_KINDS` is exported for the same reason: the dashboard panel
+ * renders its own compact legend row (compact mode suppresses this file's
+ * overlay legend — see `loadGraph`'s JSDoc) from the identical four-entry
+ * list `nodeClass()` resolves against, rather than a second copy that
+ * could silently drift out of sync.
  *
  * The canvas is deliberately label-free — no per-node `<text>` — because at
  * 128 nodes the labels overlapped into noise. Identification lives in the
@@ -378,8 +383,14 @@ function renderGraph(view, data, options) {
   return { sim, edgeSel, nodeSel };
 }
 
-/** Legend entries: label plus the node class whose swatch it shows. */
-const LEGEND_KINDS = [
+/**
+ * Legend entries: label plus the node class whose swatch it shows. Exported
+ * so the dashboard's compact panel (viewer-dashboard.js) can render its own
+ * inline legend row from the same four semantics `nodeClass()` resolves
+ * against, rather than hardcoding a second copy that could drift out of
+ * sync with this one.
+ */
+export const LEGEND_KINDS = [
   { label: 'concept',  kind: 'concept' },
   { label: 'entity',   kind: 'entity' },
   { label: 'stale',    kind: 'stale' },

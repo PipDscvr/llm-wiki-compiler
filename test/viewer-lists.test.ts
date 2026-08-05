@@ -86,6 +86,23 @@ describe("#/concepts", () => {
     expect(main.querySelector(".list-dot.is-warn")).toBeTruthy();
   });
 
+  it("marks an unverified page with the calm dot, not the warning one", async () => {
+    // "unverified" (freshness could not be computed, e.g. a missing or
+    // corrupt state.json) must read the same as "fresh" — it is not
+    // evidence of a problem with the page. Pins the same rule the
+    // dashboard's recently-compiled row asserts in viewer-dashboard.test.ts.
+    const page = {
+      id: "concepts/gamma", pageDirectory: "concepts", slug: "gamma", title: "Gamma",
+      kind: "concept", summary: "", updatedAt: "2026-08-01T00:00:00.000Z", warnings: [],
+      freshness: { freshnessStatus: "unverified", contradicted: false, archived: false },
+      citationCount: 0, unresolvedCitationCount: 0,
+    };
+    const { dom } = await mountViewerDom([], responderWithEnvelope({ pages: [page] }), "#/concepts");
+    const dot = dom.window.document.querySelector(".list-dot");
+    expect(dot?.className).toContain("is-ok");
+    expect(dot?.className).not.toContain("is-warn");
+  });
+
   it("renders the freshness filter", async () => {
     const main = await mountAt("#/concepts");
     expect(main.querySelector("[data-freshness-filter]")).toBeTruthy();

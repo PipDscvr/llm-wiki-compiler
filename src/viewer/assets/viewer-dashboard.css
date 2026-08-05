@@ -220,6 +220,21 @@
 .list-dot.is-ok { background: var(--ok); }
 .list-dot.is-warn { background: var(--warn); }
 
+/* Compact legend row (concept / entity / stale / dangling) for the
+ * knowledge-graph panel — spec §5.3. A plain flow row, not the absolutely-
+ * positioned `.graph-legend` overlay viewer-graph.css defines for the full
+ * `#/graph` explorer (there is no room to float an overlay over a 296px
+ * panel). Reuses that file's `.graph-legend-item`/`.graph-legend-dot--*`
+ * rules unchanged for the item layout and swatch colours, so this row can
+ * never invent a second palette. */
+.panel-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-12);
+  font: var(--type-metadata);
+  color: var(--fg-muted);
+}
+
 /* Compact graph surface: viewer-dashboard.js renders the real force-directed
  * graph into [data-graph-panel] here (see file header). `position: relative`
  * is not decorative — it establishes the containing block that the graph's

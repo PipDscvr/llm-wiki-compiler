@@ -38,20 +38,33 @@ function envelopeWith(danglingCount: number, unresolved: number) {
   };
 }
 
-/** Mount the home route with the given envelope shape and lint block. */
-async function mountDashboard(
-  danglingCount: number,
-  unresolved: number,
+/**
+ * Mount the home route with a given /api/pages envelope and lint payload,
+ * and return its main pane. The one responder-building implementation —
+ * `mountDashboard` below is a thin convenience wrapper over this rather
+ * than a second copy.
+ */
+async function mountDashboardWithEnvelope(
+  envelope: unknown,
   lint: unknown = null,
 ): Promise<HTMLElement> {
   const responder: FetchResponder = (url) => {
-    if (url.endsWith("/api/pages")) return jsonResponse(envelopeWith(danglingCount, unresolved));
+    if (url.endsWith("/api/pages")) return jsonResponse(envelope);
     if (url.endsWith("/api/health")) return jsonResponse({ lint });
     if (url.endsWith("/api/graph")) return jsonResponse({ nodes: [], edges: [] });
     return null;
   };
   const { dom } = await mountViewerDom([], responder);
   return dom.window.document.querySelector("[data-main-pane]") as HTMLElement;
+}
+
+/** Mount the home route with the dangling/unresolved shortcut envelope and a lint block. */
+async function mountDashboard(
+  danglingCount: number,
+  unresolved: number,
+  lint: unknown = null,
+): Promise<HTMLElement> {
+  return mountDashboardWithEnvelope(envelopeWith(danglingCount, unresolved), lint);
 }
 
 /** Read a stat card by its data-stat key. */
@@ -102,14 +115,7 @@ describe("dashboard stat cards", () => {
           citationCount: 3, unresolvedCitationCount: 0 },
       ],
     };
-    const responder: FetchResponder = (url) => {
-      if (url.endsWith("/api/pages")) return jsonResponse(envelope);
-      if (url.endsWith("/api/health")) return jsonResponse({ lint: null });
-      if (url.endsWith("/api/graph")) return jsonResponse({ nodes: [], edges: [] });
-      return null;
-    };
-    const { dom } = await mountViewerDom([], responder);
-    const main = dom.window.document.querySelector("[data-main-pane]") as HTMLElement;
+    const main = await mountDashboardWithEnvelope(envelope);
     const sub = main.querySelector('[data-stat="concepts"] .stat-sub')?.textContent ?? "";
     expect(sub).toBe("5 citations · 1 pages");
   });
@@ -143,5 +149,34 @@ describe("dashboard panels", () => {
   it("reserves a container for the graph panel", async () => {
     const main = await mountDashboard(0, 0);
     expect(main.querySelector("[data-graph-panel]")).toBeTruthy();
+  });
+
+  it("renders the four-item graph legend with a text label per entry", async () => {
+    const main = await mountDashboard(0, 0);
+    const legend = main.querySelector(".panel-legend");
+    expect(legend).toBeTruthy();
+    for (const label of ["concept", "entity", "stale", "dangling"]) {
+      expect(legend?.textContent).toContain(label);
+    }
+  });
+});
+
+describe("dashboard recently-compiled freshness dot", () => {
+  it("renders the calm dot for unverified freshness, not the warning one", async () => {
+    // "unverified" (freshness could not be computed, e.g. a missing or
+    // corrupt state.json) must read the same as "fresh" — it is not
+    // evidence of a problem with the page. Pins the same rule the
+    // #/concepts list route asserts in viewer-lists.test.ts.
+    const base = envelopeWith(0, 0);
+    const envelope = {
+      ...base,
+      pages: [
+        { ...base.pages[0], freshness: { freshnessStatus: "unverified", contradicted: false, archived: false } },
+      ],
+    };
+    const main = await mountDashboardWithEnvelope(envelope);
+    const dot = main.querySelector(".recent-row .list-dot");
+    expect(dot?.className).toContain("is-ok");
+    expect(dot?.className).not.toContain("is-warn");
   });
 });

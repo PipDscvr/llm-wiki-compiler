@@ -201,10 +201,19 @@ export async function mountViewerDom(
   (dom.window as unknown as { fetch: typeof fetchMock }).fetch = fetchMock;
   dom.window.eval("window.__viewerModules = {};");
   // D3 is not exercised under JSDOM; stub the graph module before anything imports it.
+  // LEGEND_KINDS is real data (not a D3 call), mirrored verbatim from
+  // viewer-graph.js so the dashboard's compact legend (viewer-dashboard.js)
+  // renders its real four entries under this harness too.
   dom.window.eval(
     'window.__viewerModules["./viewer-graph.js"] = {' +
       " loadGraph: async function () {}," +
-      " staleIdsFromEnvelope: function () { return new Set(); }" +
+      " staleIdsFromEnvelope: function () { return new Set(); }," +
+      " LEGEND_KINDS: [" +
+      "   { label: 'concept', kind: 'concept' }," +
+      "   { label: 'entity', kind: 'entity' }," +
+      "   { label: 'stale', kind: 'stale' }," +
+      "   { label: 'dangling', kind: 'dangling' }," +
+      " ]" +
       " };",
   );
   const themeBoot = await readOptional(THEME_BOOT_SCRIPT);

@@ -127,7 +127,6 @@
    * sidebar. Nudged toward --fg-faint, the next rung up, by the smallest
    * step that clears the floor: 3.03:1. */
   --fg-ghost: #5e5a79;
-  --fg-disabled: #4d4964;
 
   /* Accent */
   --accent: #8b5cf6;
@@ -203,7 +202,6 @@
    * Nudged toward --fg-faint, the next rung up, by the smallest step
    * that clears the floor: 3.03:1. */
   --fg-ghost: #8f8aa3;
-  --fg-disabled: #adaabb;
 
   /* Accent */
   --accent: #7c3aed;
@@ -260,7 +258,6 @@
     /* Kept in sync with the :root[data-theme="light"] contrast fix above
      * — same values, this block just serves the no-stored-preference path. */
     --fg-ghost: #8f8aa3;
-    --fg-disabled: #adaabb;
 
     /* Accent */
     --accent: #7c3aed;

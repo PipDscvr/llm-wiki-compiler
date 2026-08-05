@@ -11,7 +11,7 @@
  */
 
 import { el, emptyState, heading } from "./viewer-dom.js";
-import { relativeAge } from "./viewer-format.js";
+import { isWarnFreshness, relativeAge } from "./viewer-format.js";
 
 /** Filter options offered on the concepts route. */
 const FRESHNESS_FILTERS = [
@@ -29,9 +29,6 @@ const FRESHNESS_PREDICATES = {
   contradicted: (f) => f.contradicted === true,
   archived: (f) => f.archived === true,
 };
-
-/** Freshness states that earn the warning dot; everything else reads as calm. */
-const WARN_STATUSES = new Set(["stale", "orphaned"]);
 
 /** Render the concepts route with its freshness filter. */
 export function renderConceptsList(main, envelope) {
@@ -184,7 +181,7 @@ function buildPageRow(page) {
  */
 function buildFreshnessDot(freshness) {
   const status = freshness?.freshnessStatus ?? "unverified";
-  const dot = el("span", `list-dot ${WARN_STATUSES.has(status) ? "is-warn" : "is-ok"}`);
+  const dot = el("span", `list-dot ${isWarnFreshness(status) ? "is-warn" : "is-ok"}`);
   dot.title = status;
   dot.setAttribute("aria-label", status);
   return dot;

@@ -25,8 +25,8 @@
  */
 
 import { el, emptyState } from "./viewer-dom.js";
-import { lintTotal, relativeAge } from "./viewer-format.js";
-import { loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js";
+import { isWarnFreshness, lintTotal, relativeAge } from "./viewer-format.js";
+import { LEGEND_KINDS, loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js";
 
 /** Stat card definitions: key, label, badge, and value/sub-line derivations. */
 const STAT_CARDS = [
@@ -234,14 +234,17 @@ function buildRecentPanel(model) {
 }
 
 /** Build one recently-compiled row. */
-// Optional chaining, a status ternary, and a title fallback inflate
+// Optional chaining, a predicate call, and a title fallback inflate
 // cyclomatic count for what stays a single flat row builder
 // (cognitive complexity: 3).
 // fallow-ignore-next-line complexity
 function buildRecentRow(page, freshness) {
   const row = el("div", "recent-row");
   const status = freshness?.freshnessStatus ?? "unverified";
-  const dot = el("span", `list-dot ${status === "fresh" ? "is-ok" : "is-warn"}`);
+  // Same rule as the #/concepts and #/queries list rows (viewer-lists.js) —
+  // only stale/orphaned warn. This dot and that one share the .list-dot
+  // class and must never disagree about what a given status means.
+  const dot = el("span", `list-dot ${isWarnFreshness(status) ? "is-warn" : "is-ok"}`);
   dot.title = status;
   dot.setAttribute("aria-label", status);
   row.appendChild(dot);
@@ -253,15 +256,16 @@ function buildRecentRow(page, freshness) {
 }
 
 /**
- * Build the graph panel shell: caption, the `[data-graph-panel]` surface
- * `mountGraphPanel` renders the compact graph into, and a footer link to
- * the full `#/graph` explorer.
+ * Build the graph panel shell: caption, the four-item legend, the
+ * `[data-graph-panel]` surface `mountGraphPanel` renders the compact graph
+ * into, and a footer link to the full `#/graph` explorer.
  */
 function buildGraphPanel(model) {
   const panel = buildPanel("Knowledge graph");
   panel.appendChild(
     el("div", "panel-caption", `${model.graph.nodeCount} nodes · ${model.graph.edgeCount} edges`),
   );
+  panel.appendChild(buildGraphLegend());
   const surface = el("div", "graph-panel-surface");
   surface.dataset.graphPanel = "";
   panel.appendChild(surface);
@@ -269,6 +273,30 @@ function buildGraphPanel(model) {
     buildPanelFooter(`${model.graph.danglingCount} dangling targets`, "Open explorer →", "#/graph"),
   );
   return panel;
+}
+
+/**
+ * Build the panel's own compact legend row (concept / entity / stale /
+ * dangling — spec §5.3). `viewer-graph.js` suppresses its own overlay
+ * legend in compact mode specifically because this panel renders one
+ * instead (see its `loadGraph` JSDoc); without this row the panel would
+ * show four colours of node with no key, making colour the only signal —
+ * exactly what spec §6 requires the viewer to avoid.
+ *
+ * Reuses `LEGEND_KINDS` (the shared four-semantic list `nodeClass()` in
+ * viewer-graph.js resolves against) and the `.graph-legend-dot--*` swatch
+ * classes already styled in viewer-graph.css for the full explorer's own
+ * legend, so this row can never drift into a second, disagreeing palette.
+ */
+function buildGraphLegend() {
+  const row = el("div", "panel-legend");
+  for (const { label, kind } of LEGEND_KINDS) {
+    const item = el("div", "graph-legend-item");
+    item.appendChild(el("div", `graph-legend-dot graph-legend-dot--${kind}`));
+    item.appendChild(el("span", undefined, label));
+    row.appendChild(item);
+  }
+  return row;
 }
 
 /** Build the right rail: compile receipt, next actions, snapshot note. */

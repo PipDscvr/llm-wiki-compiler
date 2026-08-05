@@ -72,3 +72,29 @@ export function lintTotal(lint) {
   const errors = typeof lint.errors === "number" ? lint.errors : 0;
   return warnings + errors;
 }
+
+/**
+ * Freshness statuses that earn the warning dot. Only `"stale"` and
+ * `"orphaned"` are actionable; `"fresh"` and `"unverified"` both read as
+ * calm — an unverified page (freshness could not be computed, e.g. a
+ * missing or corrupt state.json) is not evidence of a problem with the
+ * page itself, so it must not warn.
+ *
+ * Single source of truth for every freshness dot in the viewer. The
+ * dashboard and the list routes each once hardcoded their own version of
+ * this rule and quietly disagreed about what "unverified" should render
+ * as — every consumer now imports this instead of re-deriving it.
+ */
+const WARN_FRESHNESS_STATUSES = new Set(["stale", "orphaned"]);
+
+/**
+ * True when a freshness status should render the warning dot rather than
+ * the calm one.
+ *
+ * @param {unknown} status - A `FreshnessStatus` value, or anything else —
+ *   handled defensively so a malformed payload never throws.
+ * @returns {boolean}
+ */
+export function isWarnFreshness(status) {
+  return WARN_FRESHNESS_STATUSES.has(status);
+}
