@@ -79,16 +79,20 @@ const MUTED_TEXT_CASES: [fg: string, bg: string, theme: ThemeName, expected: Exp
   // .nav-section-label (viewer-chrome.css), 9.5px, on the sidebar.
   ["--fg-ghost", "--bg-sidebar", "dark", "fail"],
   ["--fg-ghost", "--bg-sidebar", "light", "fail"],
-  // .graph-legend-heading / .tip-hint (viewer-graph.css, 10px) and
-  // .pattern-eyebrow (viewer-dashboard.css, 9.5px) -- all card-hosted.
+  // .graph-legend-heading / .tip-hint (viewer-graph.css, 10px) -- both
+  // card-hosted. (.pattern-eyebrow used to be a third consumer here; the
+  // 2026-08-05 fidelity pass moved it to --accent-text -- mockup tree line
+  // 269 -- which is not one of the at-risk tokens tracked in this file.)
   // --bg-card is LIGHTER than --bg-sidebar in dark theme (#100f19 vs
   // #0a0912), so this pairing is worse than the sidebar one above, not
   // safer -- see the fix report for why an earlier task believed the
   // opposite.
   ["--fg-ghost", "--bg-card", "dark", "fail"],
   ["--fg-ghost", "--bg-card", "light", "fail"],
-  // .result-kind (viewer-content.css, 9.5px), .recent-age / .action-hint
-  // (viewer-dashboard.css, 11px) -- all card-hosted.
+  // .result-kind (viewer-content.css, 9.5px), .action-hint
+  // (viewer-dashboard.css, 11px), .recent-age (viewer-dashboard.css,
+  // 10.5px as of the 2026-08-05 fidelity pass -- mockup tree line 169) --
+  // all card-hosted, all still well under the large-text threshold.
   ["--fg-faint", "--bg-card", "dark", "fail"],
   ["--fg-faint", "--bg-card", "light", "pass"],
   // .search-kbd (viewer-content.css, 10px), .list-citations
@@ -107,7 +111,8 @@ const MUTED_TEXT_CASES: [fg: string, bg: string, theme: ThemeName, expected: Exp
   // separately below (see viewer-sidebar.js appendNavCount).
   ["--fg-faint", "--bg-sidebar", "dark", "fail"],
   ["--fg-faint", "--bg-sidebar", "light", "fail"],
-  // .stat-card.is-warn .stat-sub (viewer-dashboard.css), 12.5px. The one
+  // .stat-card.is-warn .stat-sub (viewer-dashboard.css, 11px as of the
+  // 2026-08-05 fidelity pass -- mockup tree line 132; was 12.5px). The one
   // pairing that was already safe -- §6 of the design spec predicted this
   // one was at risk and it was not.
   ["--warn-muted", "--warn-bg", "dark", "pass"],

@@ -23,6 +23,14 @@
  * Next actions are informational. The viewer is read-only and cannot run any
  * of them, so each names the CLI command rather than offering a dead button.
  *
+ * A panel (`buildPanel`, `buildGraphPanel`) is a bordered shell with NO
+ * padding of its own — a head band, a body, and (where the mockup shows
+ * one) a footer band, each supplying its own padding/border. `buildPanel`
+ * handles the common single-title-plus-optional-link head shape shared by
+ * the recently-compiled panel and the rail's receipt/next-actions panels;
+ * the graph panel's head differs enough (title+caption grouped left,
+ * Fit/expand chips right) that it builds its own via `buildGraphPanelHead`.
+ *
  * The dashboard renders into TWO places, not one: `main` gets the stat
  * grid, hero, recently-compiled/graph split, and pattern strip directly
  * (no wrapping `.dashboard-primary` div — `.dashboard` on `main` itself
@@ -39,7 +47,17 @@ import { isWarnFreshness, lintTotal, relativeAge } from "./viewer-format.js";
 import { LEGEND_KINDS, loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js";
 import { renderDashboardRail } from "./viewer-rail.js";
 
-/** Stat card definitions: key, label, badge, and value/sub-line derivations. */
+/**
+ * Stat card definitions: key, label, badge, and value/sub-line derivations.
+ *
+ * `badge` is a fixed category noun (mockup tree lines 108/118/128) — true
+ * regardless of the card's count, like "PAGES" or "INPUT" — except
+ * `badgeWhenCalm` on "reviews": the mockup's "CLEAR" (tree line 139) only
+ * reads correctly when the queue actually is empty, so it replaces the
+ * fixed "QUEUE" label just for that state rather than being hardcoded
+ * unconditionally (which would misread as "CLEAR" beside a non-zero
+ * candidate count).
+ */
 const STAT_CARDS = [
   {
     key: "concepts",
@@ -61,7 +79,7 @@ const STAT_CARDS = [
   {
     key: "attention",
     label: "Needs attention",
-    badge: "CHECKS",
+    badge: "LINT",
     warnWhenNonZero: true,
     value: (m) => m.attention,
     sub: (m) => `${m.dangling} dangling · ${m.unresolved} unresolved citations`,
@@ -70,7 +88,9 @@ const STAT_CARDS = [
     key: "reviews",
     label: "Awaiting review",
     badge: "QUEUE",
+    badgeWhenCalm: "CLEAR",
     warnWhenNonZero: true,
+    calmWhenZero: true,
     value: (m) => m.counts.pendingReviews ?? 0,
     sub: (m) =>
       (m.counts.pendingReviews ?? 0) === 0
@@ -175,15 +195,46 @@ function buildStatGrid(model) {
   return grid;
 }
 
+/** True when a card's warnWhenNonZero flag is set and its value has something to report. */
+function isCardWarn(card, value) {
+  return card.warnWhenNonZero === true && value > 0;
+}
+
+/** True when a card's calmWhenZero flag is set and its value is clear. */
+function isCardCalm(card, value) {
+  return card.calmWhenZero === true && value === 0;
+}
+
+/**
+ * Resolve a card's state from its value: "warn" and "calm" are mutually
+ * exclusive (see STAT_CARDS' comment and the CSS rules' own comments in
+ * viewer-dashboard.css); anything else is "neutral" (concepts, sources,
+ * and any signal card that opted into neither flag).
+ *
+ * @param {object} card - A STAT_CARDS entry.
+ * @param {number} value - That card's computed value.
+ * @returns {"warn"|"calm"|"neutral"}
+ */
+function statCardState(card, value) {
+  if (isCardWarn(card, value)) return "warn";
+  if (isCardCalm(card, value)) return "calm";
+  return "neutral";
+}
+
+/** Resolve a card's badge text for its current state (see badgeWhenCalm's own comment). */
+function statCardBadgeText(card, state) {
+  return state === "calm" && card.badgeWhenCalm ? card.badgeWhenCalm : card.badge;
+}
+
 /** Build one stat card. */
 function buildStatCard(card, model) {
   const value = card.value(model);
-  const warn = card.warnWhenNonZero === true && value > 0;
-  const wrap = el("div", `stat-card${warn ? " is-warn" : ""}`);
+  const state = statCardState(card, value);
+  const wrap = el("div", `stat-card${state === "neutral" ? "" : ` is-${state}`}`);
   wrap.dataset.stat = card.key;
   const head = el("div", "stat-head");
   head.appendChild(el("span", "stat-label", card.label));
-  head.appendChild(el("span", "stat-badge", card.badge));
+  head.appendChild(el("span", "stat-badge", statCardBadgeText(card, state)));
   wrap.appendChild(head);
   wrap.appendChild(el("div", "stat-value", String(value)));
   wrap.appendChild(el("div", "stat-sub", card.sub(model)));
@@ -221,9 +272,14 @@ function buildSplit(model) {
   return split;
 }
 
-/** Build the recently-compiled panel. */
+/**
+ * Build the recently-compiled panel. The head's "View all" (mockup tree
+ * line 161) and the footer's "All N concepts →" (tree line 223) both point
+ * at #/concepts — two affordances to the same place, matching the mockup's
+ * own duplication rather than dropping one as redundant.
+ */
 function buildRecentPanel(model) {
-  const panel = buildPanel("Recently compiled");
+  const panel = buildPanel("Recently compiled", buildTrailingLink("View all", "#/concepts"));
   const body = el("div", "panel-body");
   if (model.recentPages.length === 0) {
     body.appendChild(
@@ -238,7 +294,17 @@ function buildRecentPanel(model) {
     body.appendChild(buildRecentRow(page, model.freshnessById.get(page.id)));
   }
   panel.appendChild(body);
-  panel.appendChild(buildPanelFooter("cited pages, most recent first", "All concepts →", "#/concepts"));
+  // The mockup's footer caption ("cited / total claims per page", tree line
+  // 221) describes the per-row claims ratio this build omits (no claims
+  // inventory to back it — see file header); this caption instead describes
+  // what the row actually shows. The "N concepts" count is real data,
+  // already computed for the hero/stat cards above, not a mockup literal.
+  panel.appendChild(
+    buildPanelFooter(
+      "cited pages, most recent first",
+      buildTrailingLink(`All ${model.counts.concepts ?? 0} concepts →`, "#/concepts"),
+    ),
+  );
   return panel;
 }
 
@@ -265,23 +331,62 @@ function buildRecentRow(page, freshness) {
 }
 
 /**
- * Build the graph panel shell: caption, the four-item legend, the
+ * Build the graph panel shell: a head with the title/edge-count grouped on
+ * the left and view-control chips on the right, the four-item legend, the
  * `[data-graph-panel]` surface `mountGraphPanel` renders the compact graph
- * into, and a footer link to the full `#/graph` explorer.
+ * into, and a footer. Unlike `buildRecentPanel`, this panel does not reuse
+ * `buildPanel()`'s single-title head — the mockup's head shape here is
+ * different (title + caption grouped left, two chips right; tree lines
+ * 225-235), so it is built directly.
  */
 function buildGraphPanel(model) {
-  const panel = buildPanel("Knowledge graph");
-  panel.appendChild(
-    el("div", "panel-caption", `${model.graph.nodeCount} nodes · ${model.graph.edgeCount} edges`),
-  );
+  const panel = el("section", "panel graph-panel");
+  panel.appendChild(buildGraphPanelHead(model));
   panel.appendChild(buildGraphLegend());
   const surface = el("div", "graph-panel-surface");
   surface.dataset.graphPanel = "";
   panel.appendChild(surface);
-  panel.appendChild(
-    buildPanelFooter(`${model.graph.danglingCount} dangling targets`, "Open explorer →", "#/graph"),
-  );
+  panel.appendChild(buildPanelFooter("hover a node to inspect", buildDanglingNote(model.graph)));
   return panel;
+}
+
+/**
+ * Build the graph panel's head. "Fit" and "⤢" (tree lines 232-235) are
+ * rendered as inert visual chips, not wired to real zoom/fullscreen
+ * behaviour: the mockup captures no title/onClick on either (the tree
+ * labels interactive icons that way — see the theme toggle), and adding a
+ * real fit-to-view action would mean exposing zoom control out of
+ * viewer-graph.js's `loadGraph`, a feature addition beyond this pass's
+ * pixel-fidelity scope.
+ */
+function buildGraphPanelHead(model) {
+  const head = el("div", "panel-head");
+  const left = el("div", "panel-head-group");
+  left.appendChild(el("span", "panel-title", "Knowledge graph"));
+  left.appendChild(
+    el("span", "panel-caption", `${model.graph.nodeCount} nodes · ${model.graph.edgeCount} edges`),
+  );
+  head.appendChild(left);
+  const controls = el("div", "panel-controls");
+  controls.appendChild(el("span", "panel-chip", "Fit"));
+  controls.appendChild(el("span", "panel-chip", "⤢"));
+  head.appendChild(controls);
+  return head;
+}
+
+/**
+ * Build the graph footer's trailing dangling-count note. Only tinted
+ * --danger when non-zero (mockup tree line 258) — a zero count is good
+ * news, not a warning, the same rule the stat cards' counter tiles use.
+ * The mockup's left-hand "focus · Andrej Karpathy" (tree lines 254-257)
+ * names whichever node is currently hovered; reproducing that would mean
+ * wiring this footer to viewer-graph.js's hover state, so the footer's
+ * caption instead names the real, always-available interaction (see
+ * buildGraphPanel's "hover a node to inspect").
+ */
+function buildDanglingNote(graph) {
+  const className = graph.danglingCount > 0 ? "footer-danger" : undefined;
+  return el("span", className, `${graph.danglingCount} dangling targets`);
 }
 
 /**
@@ -296,6 +401,8 @@ function buildGraphPanel(model) {
  * viewer-graph.js resolves against) and the `.graph-legend-dot--*` swatch
  * classes already styled in viewer-graph.css for the full explorer's own
  * legend, so this row can never drift into a second, disagreeing palette.
+ * The trailing "size = degree" note (mockup tree line 249) is static —
+ * always true, not derived from the model.
  */
 function buildGraphLegend() {
   const row = el("div", "panel-legend");
@@ -305,6 +412,7 @@ function buildGraphLegend() {
     item.appendChild(el("span", undefined, label));
     row.appendChild(item);
   }
+  row.appendChild(el("span", "panel-legend-note", "size = degree"));
   return row;
 }
 
@@ -413,10 +521,15 @@ function nextActionRows(model) {
   return rows;
 }
 
-/** Build the four-column explainer strip. */
+/**
+ * Build the four-column explainer strip. The head's caption ("shown until
+ * you dismiss it", mockup tree line 266) is rendered as static text only —
+ * the mockup carries no visible dismiss control in the DOM to wire up, so
+ * this stops short of adding real dismiss/persistence behaviour.
+ */
 function buildPatternStrip() {
   const strip = el("section", "pattern-strip");
-  strip.appendChild(el("div", "panel-head", "The LLM Wiki pattern"));
+  strip.appendChild(buildPatternHead());
   const grid = el("div", "pattern-grid");
   for (const [eyebrow, body] of PATTERN_COLUMNS) {
     const column = el("div", "pattern-column");
@@ -428,19 +541,41 @@ function buildPatternStrip() {
   return strip;
 }
 
-/** Build a titled panel shell. */
-function buildPanel(title) {
+/** Build the pattern strip's head band: title + a small static caption. */
+function buildPatternHead() {
+  const head = el("div", "pattern-head");
+  head.appendChild(el("span", "pattern-title", "The LLM Wiki pattern"));
+  head.appendChild(el("span", "pattern-head-caption", "shown until you dismiss it"));
+  return head;
+}
+
+/**
+ * Build a titled panel shell: a bordered container plus a head band
+ * (title, and an optional trailing node such as a "View all" link).
+ * Shared by the recently-compiled panel and the rail's compile-receipt /
+ * next-actions panels — the graph panel's head shape differs too much to
+ * reuse this (see buildGraphPanelHead).
+ */
+function buildPanel(title, trailing) {
   const panel = el("section", "panel");
-  panel.appendChild(el("div", "panel-head", title));
+  const head = el("div", "panel-head");
+  head.appendChild(el("span", "panel-title", title));
+  if (trailing) head.appendChild(trailing);
+  panel.appendChild(head);
   return panel;
 }
 
-/** Build a panel footer with a caption and a trailing link. */
-function buildPanelFooter(caption, linkText, href) {
+/** Build a panel footer band: a caption on the left, a trailing node on the right. */
+function buildPanelFooter(caption, trailing) {
   const footer = el("div", "panel-footer");
   footer.appendChild(el("span", undefined, caption));
-  const link = el("a", undefined, linkText);
-  link.href = href;
-  footer.appendChild(link);
+  footer.appendChild(trailing);
   return footer;
+}
+
+/** Build a trailing `<a>` link, shared by a panel head's link and a panel footer's link. */
+function buildTrailingLink(text, href) {
+  const link = el("a", undefined, text);
+  link.href = href;
+  return link;
 }
