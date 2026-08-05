@@ -212,10 +212,14 @@ function buildFooterGroup() {
   return group;
 }
 
+/** The published documentation site. The repository README is a summary; this
+ *  is the full reference the card's subtitle describes. */
+const DOCS_URL = "https://llmwiki.atomicstrata.ai/introduction";
+
 /** Build the standing "Read the docs" card pinned to the sidebar footer. */
 function buildDocsCard() {
   const card = el("a", "docs-card");
-  card.href = "https://github.com/atomicstrata/llm-wiki-compiler#readme";
+  card.href = DOCS_URL;
   card.target = "_blank";
   card.rel = "noopener noreferrer";
   card.appendChild(el("div", "docs-card-title", "Read the docs"));

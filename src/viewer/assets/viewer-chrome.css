@@ -28,7 +28,22 @@
   background: var(--bg-shell);
 }
 
+/* Pinned like the sidebar, so the project identity, search and theme toggle
+ * stay reachable while the main column scrolls. It sticks within
+ * `.main-column`, so it spans the content width only and never covers the
+ * sidebar.
+ *
+ * `background` is load-bearing here, not decoration: a transparent sticky
+ * header would let scrolling content show through it.
+ *
+ * `z-index: 20` sits above everything in the content column (the graph
+ * tooltip, the highest, is 5) and below the skip link (100), which must stay
+ * on top of all chrome. The header's own search dropdown is a descendant, so
+ * it rides this stacking context rather than fighting it. */
 .app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -165,7 +180,18 @@
  * a uniform flex gap. A gap here would compound with those per-child
  * margins — see the fidelity audit's root-cause note.
  */
+/* Pinned: the nav stays put while the main column scrolls. `sticky` rather
+ * than `fixed` so the sidebar keeps its grid column — `fixed` removes it from
+ * flow and the 230px track would collapse. `align-self: start` stops the grid
+ * from stretching the item to the row's full height, which would leave sticky
+ * nothing to travel within. `overflow-y: auto` lets the nav scroll on its own
+ * when it is taller than the window, so the footer card stays reachable. */
 .sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow-y: auto;
   border-right: 1px solid var(--border-soft);
   background: var(--bg-sidebar);
   padding: 18px 14px;
