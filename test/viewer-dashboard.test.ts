@@ -129,7 +129,10 @@ describe("dashboard panels", () => {
 
   it("renders a citations-resolved bar in the compile receipt", async () => {
     const main = await mountDashboard(0, 2);
-    const receipt = main.querySelector("[data-compile-receipt]") as HTMLElement;
+    // The receipt renders into the shared support rail, not inside main —
+    // see viewer-rail.js renderDashboardRail and the rail-unification
+    // tests below.
+    const receipt = main.ownerDocument!.querySelector("[data-compile-receipt]") as HTMLElement;
     expect(receipt.textContent).toContain("Citations resolved");
     // Design system's two-segment meter: a filled portion plus a distinct
     // remainder segment, not a single bar — pin the structure, not just the label.
@@ -138,12 +141,14 @@ describe("dashboard panels", () => {
 
   it("lists a dangling-link next action when links dangle", async () => {
     const main = await mountDashboard(11, 0);
-    expect(main.querySelector("[data-next-actions]")?.textContent).toContain("11 dangling");
+    const nextActions = main.ownerDocument!.querySelector("[data-next-actions]");
+    expect(nextActions?.textContent).toContain("11 dangling");
   });
 
   it("omits the dangling next action when nothing dangles", async () => {
     const main = await mountDashboard(0, 0);
-    expect(main.querySelector("[data-next-actions]")?.textContent).not.toContain("dangling");
+    const nextActions = main.ownerDocument!.querySelector("[data-next-actions]");
+    expect(nextActions?.textContent).not.toContain("dangling");
   });
 
   it("reserves a container for the graph panel", async () => {
@@ -178,5 +183,20 @@ describe("dashboard recently-compiled freshness dot", () => {
     const dot = main.querySelector(".recent-row .list-dot");
     expect(dot?.className).toContain("is-ok");
     expect(dot?.className).not.toContain("is-warn");
+  });
+});
+
+describe("dashboard rail unification", () => {
+  it("renders the receipt, next actions, and snapshot note into the shared support rail, not a second rail inside main", async () => {
+    const main = await mountDashboard(0, 0);
+    const rail = main.ownerDocument!.querySelector("[data-support-rail]") as HTMLElement;
+    expect(rail.querySelector("[data-compile-receipt]")).toBeTruthy();
+    expect(rail.querySelector("[data-next-actions]")).toBeTruthy();
+    expect(rail.querySelector(".snapshot-note")).toBeTruthy();
+    // Regression guard: the dashboard must not also build its own rail
+    // column inside main — that was the two-rail bug the mockup only ever
+    // showed one column for.
+    expect(main.querySelector("[data-compile-receipt]")).toBeNull();
+    expect(main.querySelector(".dashboard-rail")).toBeNull();
   });
 });

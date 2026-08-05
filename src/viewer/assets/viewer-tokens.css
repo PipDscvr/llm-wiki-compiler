@@ -162,6 +162,9 @@
   --warn-a12: rgba(251, 146, 60, 0.12);
   --warn-a13: rgba(251, 146, 60, 0.13);
   --danger-a12: rgba(248, 113, 113, 0.12);
+  /* Shell drop-shadow (mockup tree line 3) — a pure black overlay, same in
+   * both themes, so declared once here like the alphas above. */
+  --shadow-shell: rgba(0, 0, 0, 0.5);
 
   --max-content-width: 72ch;
   font-family: var(--font-sans);
@@ -284,8 +287,18 @@
 
 * { box-sizing: border-box; }
 
+/*
+ * `padding: 30px 34px` is the mockup's page gutter around the centred
+ * shell (tree line 2) — off the spacing scale, so it is a literal here,
+ * not a token (see the fidelity audit's root-cause note). Centring itself
+ * stays `.app-shell`'s own `max-width` + `margin: 0 auto` (viewer-chrome.css)
+ * rather than the mockup's fixed `width: 1420px` + flex-centred wrapper,
+ * so the shell can still shrink below 1420px instead of overflowing.
+ */
 body {
   margin: 0;
+  min-height: 100vh;
+  padding: 30px 34px;
   background: var(--bg-page);
   color: var(--fg-body);
   font-family: var(--font-sans);

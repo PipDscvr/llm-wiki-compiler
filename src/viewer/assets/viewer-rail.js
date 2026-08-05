@@ -21,6 +21,13 @@
  * a legacy page with no provenance metadata shows a compact rail
  * rather than a wall of `(none)` rows. Labels mirror `review show`
  * where practical.
+ *
+ * `[data-support-rail]` is a single shared element (one rail column in
+ * the mockup, see viewer-chrome.css `.content-grid`) — every renderer
+ * below targets the same `SUPPORT_SELECTOR` and replaces whatever was
+ * there before, so only one of them "owns" the rail at a time. The
+ * dashboard route calls `renderDashboardRail`; page routes call
+ * `renderSupportRail`; every other route calls `clearSupportRail`.
  */
 
 const SUPPORT_SELECTOR = "[data-support-rail]";
@@ -48,7 +55,17 @@ const RAIL_VALUE_RENDERERS = {
   contradictedBy: renderContradictionList,
 };
 
-/** Render project-level metadata for the dashboard route. */
+/**
+ * Render project-level metadata for the dashboard route.
+ *
+ * ORPHANED as of the Nebula skeleton restructure (2026-08-05): the
+ * dashboard's rail now shows the compile receipt / next actions /
+ * snapshot note (`renderDashboardRail`, matching the mockup) instead of
+ * project metadata, so `applyHomeEnvelope` (viewer.js) no longer calls
+ * this. No caller remains anywhere in the client. Left in place rather
+ * than deleted — the restructure brief that introduced this asked for
+ * that — for a later task to either give it a home or remove it.
+ */
 export function renderProjectRail(envelope) {
   const support = document.querySelector(SUPPORT_SELECTOR);
   if (!support) return;
@@ -58,6 +75,19 @@ export function renderProjectRail(envelope) {
     appendPlainRailField(dl, label, value);
   }
   support.appendChild(dl);
+}
+
+/**
+ * Render the dashboard's rail panels — compile receipt, next actions,
+ * snapshot note — into the shared support rail. The dashboard is the only
+ * caller that places more than one panel at once, so this takes a list of
+ * built nodes rather than a single payload like `renderSupportRail` does.
+ */
+export function renderDashboardRail(panels) {
+  const support = document.querySelector(SUPPORT_SELECTOR);
+  if (!support) return;
+  support.innerHTML = "";
+  for (const panel of panels) support.appendChild(panel);
 }
 
 /**

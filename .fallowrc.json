@@ -19,7 +19,8 @@
     "@fontsource/jetbrains-mono"
   ],
   "ignoreExports": [
-    { "file": "src/utils/output.ts", "exports": ["getQuiet"] }
+    { "file": "src/utils/output.ts", "exports": ["getQuiet"] },
+    { "file": "src/viewer/assets/viewer-rail.js", "exports": ["renderProjectRail"] }
   ],
   "overrides": [
     {

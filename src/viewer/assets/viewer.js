@@ -23,7 +23,7 @@ import { definitionList, el, heading, placeholder } from "./viewer-dom.js";
 import { wireThemeToggle } from "./viewer-theme.js";
 import { wireSearch } from "./viewer-search.js";
 import { renderSidebar, markActive } from "./viewer-sidebar.js";
-import { renderProjectRail, renderSupportRail, clearSupportRail } from "./viewer-rail.js";
+import { renderSupportRail, clearSupportRail } from "./viewer-rail.js";
 import { loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js";
 import { renderHeader } from "./viewer-header.js";
 import { renderConceptsList, renderQueriesList, renderSourcesList } from "./viewer-lists.js";
@@ -238,8 +238,10 @@ async function loadAndRenderHome() {
 function applyHomeEnvelope(envelope) {
   const main = document.querySelector(MAIN_SELECTOR);
   if (!main) return;
+  // renderDashboard fills the shared support rail itself (compile receipt /
+  // next actions / snapshot note, via renderDashboardRail) — no separate
+  // rail call belongs here. See viewer-rail.js's renderProjectRail JSDoc.
   renderDashboard(main, envelope, bootstrapData.health);
-  renderProjectRail(envelope);
   injectGlobalCorruptBanner(envelope?.stateStatus);
 }
 

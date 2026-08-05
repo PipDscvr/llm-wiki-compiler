@@ -90,8 +90,12 @@ describe("viewer.js — first paint + sidebar", () => {
     ];
     const { dom } = await mountViewerDom(pages, pageAndIndexResponder(pages));
     expect(dom.window.document.querySelector("[data-app-title]")!.textContent).toBe("demo-wiki");
-    const main = dom.window.document.querySelector("[data-main-pane]")!;
-    expect(main.textContent).toContain("demo-wiki");
+    // The project title also reaches the dashboard's compile receipt (its
+    // "Root" row reads envelope.project.rootName). The receipt now renders
+    // into the shared support rail, not inside main — see viewer-rail.js
+    // renderDashboardRail.
+    const rail = dom.window.document.querySelector("[data-support-rail]")!;
+    expect(rail.textContent).toContain("demo-wiki");
   });
 
   it("paints the nav shell even when the bootstrap fetch never resolves", async () => {
@@ -150,6 +154,12 @@ describe("viewer.js — malformed hash routes", () => {
     const fetchedPaths = fetchMock.mock.calls.map((args) => String(args[0]));
     expect(fetchedPaths.some((p) => p.includes("/api/page/"))).toBe(false);
     const main = dom.window.document.querySelector("[data-main-pane]")!;
-    expect(main.textContent).toContain("demo-wiki");
+    // Dashboard-only copy (the hero, only built by renderDashboard) proves
+    // the fallback actually reached the home route rather than merely not
+    // throwing. "demo-wiki" is not used here: the project title now
+    // surfaces on the home route through the compile receipt in the
+    // shared support rail (see the test above), not inside main, so it is
+    // no longer a route-specific signal for this element.
+    expect(main.textContent).toContain("Your knowledge base is ready.");
   });
 });

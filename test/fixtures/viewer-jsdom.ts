@@ -39,8 +39,15 @@ const THEME_BOOT_SCRIPT = "viewer-theme-boot.js";
  * dependent first and crash destructuring an undefined registry entry.
  * Pinning it here (like viewer-dom.js and viewer-theme.js) guarantees it
  * registers before any dependent regardless of filename.
+ *
+ * `viewer-rail.js` has the same problem for the same reason: the Nebula
+ * skeleton restructure (2026-08-05) made `viewer-dashboard.js` import
+ * `renderDashboardRail` from it — the dashboard's receipt/next-actions/
+ * snapshot-note panels now render through the shared support-rail module
+ * instead of a private `.dashboard-rail` column — and "viewer-dashboard.js"
+ * still sorts before "viewer-rail.js" alphabetically.
  */
-const MODULE_ORDER = ["viewer-dom.js", "viewer-format.js", "viewer-theme.js"];
+const MODULE_ORDER = ["viewer-dom.js", "viewer-format.js", "viewer-theme.js", "viewer-rail.js"];
 
 /** Match `import { a, b } from "./viewer-x.js";` including multi-line forms. */
 const IMPORT_PATTERN = /import\s*\{([\s\S]*?)\}\s*from\s*['"](\.\/[\w.-]+\.js)['"]\s*;/g;

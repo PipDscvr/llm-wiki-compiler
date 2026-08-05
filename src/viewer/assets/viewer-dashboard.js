@@ -22,11 +22,22 @@
  *
  * Next actions are informational. The viewer is read-only and cannot run any
  * of them, so each names the CLI command rather than offering a dead button.
+ *
+ * The dashboard renders into TWO places, not one: `main` gets the stat
+ * grid, hero, recently-compiled/graph split, and pattern strip directly
+ * (no wrapping `.dashboard-primary` div — `.dashboard` on `main` itself
+ * *is* the primary column, matching the mockup's flex layout); the compile
+ * receipt, next actions, and snapshot note go into the shared
+ * `[data-support-rail]` via `renderDashboardRail` instead of a private
+ * `.dashboard-rail` column. That keeps the dashboard to the mockup's two
+ * content columns — see the fidelity audit's A2 note — rather than a
+ * third column only the home route ever showed.
  */
 
 import { el, emptyState } from "./viewer-dom.js";
 import { isWarnFreshness, lintTotal, relativeAge } from "./viewer-format.js";
 import { LEGEND_KINDS, loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js";
+import { renderDashboardRail } from "./viewer-rail.js";
 
 /** Stat card definitions: key, label, badge, and value/sub-line derivations. */
 const STAT_CARDS = [
@@ -87,13 +98,11 @@ export function renderDashboard(main, envelope, health) {
   const model = buildModel(envelope, health);
   main.innerHTML = "";
   main.className = "main-pane dashboard";
-  const primary = el("div", "dashboard-primary");
-  primary.appendChild(buildStatGrid(model));
-  primary.appendChild(buildHero(model));
-  primary.appendChild(buildSplit(model));
-  primary.appendChild(buildPatternStrip());
-  main.appendChild(primary);
-  main.appendChild(buildRail(model));
+  main.appendChild(buildStatGrid(model));
+  main.appendChild(buildHero(model));
+  main.appendChild(buildSplit(model));
+  main.appendChild(buildPatternStrip());
+  renderDashboardRail([buildReceipt(model), buildNextActions(model), buildSnapshotNote()]);
   void mountGraphPanel(main, envelope);
 }
 
@@ -299,18 +308,14 @@ function buildGraphLegend() {
   return row;
 }
 
-/** Build the right rail: compile receipt, next actions, snapshot note. */
-function buildRail(model) {
-  const rail = el("div", "dashboard-rail");
-  rail.appendChild(buildReceipt(model));
-  rail.appendChild(buildNextActions(model));
+/** Build the rail's closing note: the viewer is a frozen, not live, snapshot. */
+function buildSnapshotNote() {
   const note = el("div", "snapshot-note");
   note.appendChild(
     el("span", undefined,
       "The viewer serves a frozen snapshot. Changes on disk appear after llmwiki view restarts."),
   );
-  rail.appendChild(note);
-  return rail;
+  return note;
 }
 
 /** Build the compile receipt panel. */

@@ -22,8 +22,14 @@
 
 /* ---- Main pane ---- */
 
+/*
+ * `.main-pane` no longer carries its own padding: it sits inside
+ * `.content-grid` (viewer-chrome.css), which supplies the outer gutter
+ * for both the main pane and the support rail together (mockup tree line
+ * 97). A second padding here would double-inset every route's content —
+ * see the fidelity audit's A2 note on the rail's nesting.
+ */
 .main-pane {
-  padding: 32px;
   width: min(100%, var(--max-content-width));
   overflow-x: auto;
 }
@@ -33,10 +39,6 @@
  * index) — the routes that don't use this heading put it inside their own
  * wrapper instead (e.g. `.rendered-body`'s own headings, below). */
 .main-pane > h1 { margin: 0 0 var(--space-16); color: var(--fg-strong); }
-
-@media (max-width: 800px) {
-  .main-pane { padding: 16px; }
-}
 
 /* ---- Rendered markdown body ---- */
 

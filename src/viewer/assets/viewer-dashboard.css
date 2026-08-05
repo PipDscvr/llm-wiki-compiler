@@ -17,31 +17,23 @@
  *     just a styled box — see the rule's own comment for why that matters.
  *
  * `.main-pane` (viewer-content.css) caps prose width at `min(100%, 72ch)`,
- * which is far too narrow for a 4-column stat grid plus a 268px rail.
- * `.dashboard` overrides `width` back to 100% — same selector specificity,
- * later in the cascade (this sheet loads after viewer-content.css) —
- * without editing the shared rule the page/index routes still rely on.
- * `.graph-pane` (viewer-graph.css) and `.list-pane` (viewer-content.css,
- * later in that same file) override the same rule the same way, for the
- * same reason.
+ * which is far too narrow for a 4-column stat grid. `.dashboard` overrides
+ * `width` back to 100% — same selector specificity, later in the cascade
+ * (this sheet loads after viewer-content.css) — without editing the shared
+ * rule the page/index routes still rely on. `.graph-pane` (viewer-graph.css)
+ * and `.list-pane` (viewer-content.css, later in that same file) override
+ * the same rule the same way, for the same reason.
+ *
+ * `.dashboard` (on `main` itself) is the mockup's primary column
+ * (tree line ~73) — a flex column, not a grid. The rail is no longer a
+ * child of `main` at all: it lives in the shared `[data-support-rail]`,
+ * a sibling of `main` inside `.content-grid` (viewer-chrome.css). See the
+ * fidelity audit's A2 note.
  */
 
 .dashboard {
   width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 268px;
-  gap: var(--space-16);
-  align-items: start;
-}
-
-.dashboard-primary {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-16);
   min-width: 0;
-}
-
-.dashboard-rail {
   display: flex;
   flex-direction: column;
   gap: var(--space-16);
@@ -355,7 +347,6 @@
 }
 
 @media (max-width: 900px) {
-  .dashboard { grid-template-columns: minmax(0, 1fr); }
   .dashboard-split { grid-template-columns: minmax(0, 1fr); }
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pattern-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
