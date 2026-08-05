@@ -12,9 +12,9 @@
  *     `--warn` remainder), never a neutral track. A grey remainder would
  *     read as "no data"; amber reads as "this much is unresolved", which is
  *     the fact being reported.
- *   - `.graph-panel-surface` is a reserved, empty container. Task 11 draws
- *     the real compact graph into it; this file only supplies its frame so
- *     nothing here fabricates graph structure that doesn't exist yet.
+ *   - `.graph-panel-surface` holds a real compact graph (viewer-dashboard.js
+ *     renders it, not a decorative frame) and is a positioned container, not
+ *     just a styled box — see the rule's own comment for why that matters.
  *
  * `.main-pane` (viewer.css) caps prose width at `min(100%, 72ch)`, which is
  * far too narrow for a 4-column stat grid plus a 268px rail. `.dashboard`
@@ -217,9 +217,17 @@
 .list-dot.is-ok { background: var(--ok); }
 .list-dot.is-warn { background: var(--warn); }
 
-/* Reserved graph panel frame. Task 11 draws the compact graph inside
- * [data-graph-panel]; deliberately empty until then (see file header). */
+/* Compact graph surface: viewer-dashboard.js renders the real force-directed
+ * graph into [data-graph-panel] here (see file header). `position: relative`
+ * is not decorative — it establishes the containing block that the graph's
+ * absolutely-positioned hover tooltip (`.graph-tooltip`, viewer-graph.css)
+ * resolves against; without it, the tooltip escapes this panel and positions
+ * against whatever ancestor happens to be positioned instead. `overflow:
+ * hidden` clips nodes the compact simulation pushes past the panel's bounds
+ * while settling, matching `.graph-pane` on the full #/graph route. */
 .graph-panel-surface {
+  position: relative;
+  overflow: hidden;
   min-height: 296px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-tile);

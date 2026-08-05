@@ -42,9 +42,11 @@
 import { emptyState } from "./viewer-dom.js";
 
 /**
- * Force and sizing parameters per mode. Compact serves the ~268px dashboard
- * panel: shorter links and weaker repulsion keep the layout inside a small
- * box that would otherwise push most nodes out of view.
+ * Force and sizing parameters per mode. Compact serves the dashboard's
+ * `[data-graph-panel]` — a small, fluid-width panel (roughly half the main
+ * column, collapsing to full width under 900px) about 296px tall: shorter
+ * links and weaker repulsion keep the layout inside that box rather than
+ * pushing most nodes out of view.
  */
 const MODE_SETTINGS = {
   full:    { linkDistance: 80, charge: -200, minRadius: 4,   maxRadius: 10, drag: true },
