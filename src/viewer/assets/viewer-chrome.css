@@ -19,14 +19,13 @@
  * render model.
  */
 
+/* Full-bleed: no max-width, no card border, radius or shadow. The mockup's
+ * 1420px framed card is a design presentation; a local viewer should use the
+ * whole window. `min-height` makes the sidebar's right border run the full
+ * viewport height even when a route renders little content. */
 .app-shell {
-  max-width: 1420px;
-  margin: 0 auto;
-  border: 1px solid var(--border-shell);
-  border-radius: var(--radius-shell);
+  min-height: 100vh;
   background: var(--bg-shell);
-  overflow: hidden;
-  box-shadow: 0 24px 60px var(--shadow-shell);
 }
 
 .app-header {
@@ -118,10 +117,12 @@
  * shell's full height while the rail only spans the content area below
  * the header.
  */
+/* Stretches to the shell's full height so the sidebar column — and its
+ * right border — reach the bottom of the window on every route. */
 .app-layout {
   display: grid;
   grid-template-columns: 230px minmax(0, 1fr);
-  min-height: 0;
+  min-height: 100vh;
 }
 
 /* The main column: header on top, `.content-grid` below it (tree line 70).

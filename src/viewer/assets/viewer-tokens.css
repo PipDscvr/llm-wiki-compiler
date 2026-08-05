@@ -68,6 +68,11 @@
 }
 
 :root {
+  /* The mockup's card framing (--bg-page canvas, --border-shell,
+   * --radius-shell, --shadow-shell) is deliberately NOT implemented:
+   * the viewer runs full-bleed in the browser window. Those tokens were
+   * removed rather than left as decoys. Restore them only if the framed
+   * presentation is reinstated. */
   color-scheme: dark light;
   --font-sans: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -78,7 +83,6 @@
   --radius-control: 9px;
   --radius-tile: 11px;
   --radius-panel: 12px;
-  --radius-shell: 14px;
 
   --space-6: 6px;
   --space-9: 9px;
@@ -97,7 +101,6 @@
   --type-badge: 500 9.5px/1 var(--font-mono);
 
   /* Surfaces */
-  --bg-page: #08070d;
   --bg-shell: #0b0a12;
   --bg-sidebar: #0a0912;
   --bg-card: #100f19;
@@ -110,7 +113,6 @@
   --border: #201e30;
   --border-soft: #1c1a2a;
   --border-strong: #262338;
-  --border-shell: #1f1d2e;
   --border-chip: #2a2740;
   --border-button: #2f2b46;
 
@@ -172,9 +174,6 @@
   --warn-a12: rgba(251, 146, 60, 0.12);
   --warn-a13: rgba(251, 146, 60, 0.13);
   --danger-a12: rgba(248, 113, 113, 0.12);
-  /* Shell drop-shadow (mockup tree line 3) — a pure black overlay, same in
-   * both themes, so declared once here like the alphas above. */
-  --shadow-shell: rgba(0, 0, 0, 0.5);
 
   --max-content-width: 72ch;
   font-family: var(--font-sans);
@@ -186,7 +185,6 @@
   color-scheme: light;
 
   /* Surfaces */
-  --bg-page: #eceaf4;
   --bg-shell: #ffffff;
   --bg-sidebar: #f5f4fa;
   --bg-card: #ffffff;
@@ -199,7 +197,6 @@
   --border: #e7e4f1;
   --border-soft: #e7e4f1;
   --border-strong: #e2ddee;
-  --border-shell: #ded9ec;
   --border-chip: #ded9ec;
   --border-button: #d6d0e6;
 
@@ -247,7 +244,6 @@
     color-scheme: light;
 
     /* Surfaces */
-    --bg-page: #eceaf4;
     --bg-shell: #ffffff;
     --bg-sidebar: #f5f4fa;
     --bg-card: #ffffff;
@@ -260,7 +256,6 @@
     --border: #e7e4f1;
     --border-soft: #e7e4f1;
     --border-strong: #e2ddee;
-    --border-shell: #ded9ec;
     --border-chip: #ded9ec;
     --border-button: #d6d0e6;
 
@@ -309,11 +304,15 @@
  * rather than the mockup's fixed `width: 1420px` + flex-centred wrapper,
  * so the shell can still shrink below 1420px instead of overflowing.
  */
+/* The viewer fills the browser window. The mockup frames the app as a card
+ * floating on a canvas with a 30px 34px gutter — that is how a design
+ * presents a screen, not how a local tool should sit in a window. Body
+ * matches the shell so no seam can appear if content is shorter than the
+ * viewport. */
 body {
   margin: 0;
   min-height: 100vh;
-  padding: 30px 34px;
-  background: var(--bg-page);
+  background: var(--bg-shell);
   color: var(--fg-body);
   font-family: var(--font-sans);
 }
