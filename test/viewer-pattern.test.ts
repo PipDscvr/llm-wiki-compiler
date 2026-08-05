@@ -1,14 +1,18 @@
 /**
  * Pattern strip dismiss/persistence contract.
  *
- * The strip's own head caption ("shown until you dismiss it") is a promise
- * the DOM must keep — these tests pin the mechanism that makes it true: a
- * real button, immediate removal on click, persistence across a re-render,
- * and a fail-open default when storage is unavailable (private browsing,
- * disabled storage) so a throwing localStorage can never take the whole
- * dashboard down with it. Regression guard for the same class of bug as the
- * graph panel's Fit/expand chips (commit c786404): a control that LOOKS
- * real but does nothing.
+ * These tests pin the strip's dismiss mechanism: a real button, immediate
+ * removal on click, persistence across a re-render, and a fail-open default
+ * when storage is unavailable (private browsing, disabled storage) so a
+ * throwing localStorage can never take the whole dashboard down with it.
+ * Regression guard for the same class of bug as the graph panel's
+ * Fit/expand chips (commit c786404): a control that LOOKS real but does
+ * nothing.
+ *
+ * The mockup's "shown until you dismiss it" caption is intentionally gone —
+ * it described an affordance the static mockup could not draw, and the "×"
+ * now carries that meaning itself. The first test keeps it from creeping
+ * back as redundant narration beside the button.
  */
 
 import { describe, expect, it } from "vitest";
@@ -43,10 +47,11 @@ function throwingStorage() {
 }
 
 describe("pattern strip dismiss control", () => {
-  it("keeps the caption text unchanged now that the control it promises exists", async () => {
+  it("states dismissibility through the button alone, with no caption narrating it", async () => {
     const { dom } = await mountViewerDom([], responder);
-    const caption = dom.window.document.querySelector(".pattern-head-caption");
-    expect(caption?.textContent).toBe("shown until you dismiss it");
+    const head = dom.window.document.querySelector(".pattern-head");
+    expect(head?.querySelector("[data-pattern-dismiss]")).toBeTruthy();
+    expect(head?.textContent).not.toMatch(/dismiss/i);
   });
 
   it("renders the dismiss control as a real button with an accessible name, not a bare glyph", async () => {

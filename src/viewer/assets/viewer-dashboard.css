@@ -572,15 +572,6 @@
 /* 600 13px/1 has no matching token (--type-panel-title is 13.5px) —
  * mockup tree line 263. */
 .pattern-title { font: 600 13px/1 var(--font-sans); color: var(--fg-strong); }
-.pattern-head-caption { font: 400 10.5px/1 var(--font-mono); color: var(--fg-faint); }
-
-/* Groups the caption with the dismiss button (viewer-pattern.js) so
- * `.pattern-head`'s space-between still puts exactly two things at its
- * ends — the title, and this group — regardless of the group's own
- * internal count. The mockup has no dismiss control to anchor a layout
- * against (see buildPatternDismissButton's comment), so this pairing is
- * this build's own choice, not a pixel-fidelity match. */
-.pattern-head-right { display: flex; align-items: center; gap: 10px; }
 
 .pattern-grid {
   display: grid;

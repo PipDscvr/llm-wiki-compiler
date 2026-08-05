@@ -86,19 +86,19 @@ function buildPatternDismissButton() {
 }
 
 /**
- * Build the pattern strip's head band: title left, caption + dismiss button
- * grouped right (`.pattern-head-right`, viewer-dashboard.css) so
- * `.pattern-head`'s space-between keeps the title alone on the left. The
- * caption's wording ("shown until you dismiss it") is the promise
- * `dismissPatternStrip` now keeps.
+ * Build the pattern strip's head band: title left, dismiss button right via
+ * `.pattern-head`'s space-between.
+ *
+ * The mockup's caption here ("shown until you dismiss it", mockup tree line
+ * 266) is deliberately dropped: it existed to describe an affordance the
+ * static mockup could not draw. The "×" now states the same thing by being
+ * clickable, so keeping the sentence would just narrate the button sitting
+ * next to it.
  */
 function buildPatternHead() {
   const head = el("div", "pattern-head");
   head.appendChild(el("span", "pattern-title", "The LLM Wiki pattern"));
-  const right = el("div", "pattern-head-right");
-  right.appendChild(el("span", "pattern-head-caption", "shown until you dismiss it"));
-  right.appendChild(buildPatternDismissButton());
-  head.appendChild(right);
+  head.appendChild(buildPatternDismissButton());
   return head;
 }
 
