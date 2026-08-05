@@ -38,6 +38,16 @@ function envelopeWith(danglingCount: number, unresolved: number) {
   };
 }
 
+/** Build the /api/pages + /api/health + /api/graph responder a dashboard mount needs. */
+function dashboardResponder(envelope: unknown, lint: unknown = null): FetchResponder {
+  return (url) => {
+    if (url.endsWith("/api/pages")) return jsonResponse(envelope);
+    if (url.endsWith("/api/health")) return jsonResponse({ lint });
+    if (url.endsWith("/api/graph")) return jsonResponse({ nodes: [], edges: [] });
+    return null;
+  };
+}
+
 /**
  * Mount the home route with a given /api/pages envelope and lint payload,
  * and return its main pane. The one responder-building implementation —
@@ -48,13 +58,7 @@ async function mountDashboardWithEnvelope(
   envelope: unknown,
   lint: unknown = null,
 ): Promise<HTMLElement> {
-  const responder: FetchResponder = (url) => {
-    if (url.endsWith("/api/pages")) return jsonResponse(envelope);
-    if (url.endsWith("/api/health")) return jsonResponse({ lint });
-    if (url.endsWith("/api/graph")) return jsonResponse({ nodes: [], edges: [] });
-    return null;
-  };
-  const { dom } = await mountViewerDom([], responder);
+  const { dom } = await mountViewerDom([], dashboardResponder(envelope, lint));
   return dom.window.document.querySelector("[data-main-pane]") as HTMLElement;
 }
 
@@ -202,6 +206,56 @@ describe("dashboard panels", () => {
     for (const label of ["concept", "entity", "stale", "dangling"]) {
       expect(legend?.textContent).toContain(label);
     }
+  });
+});
+
+/**
+ * The Fit / expand controls in the graph panel's head. Regression guard for
+ * a reported bug: both used to be inert `<span class="panel-chip">`s with no
+ * handler — styled like buttons but doing nothing on click.
+ */
+describe("dashboard graph panel controls", () => {
+  it("renders Fit as a real button with an accessible name, not an inert span", async () => {
+    const { dom } = await mountViewerDom([], dashboardResponder(envelopeWith(0, 0)));
+    const fit = dom.window.document.querySelector("[data-graph-fit]");
+    expect(fit?.tagName).toBe("BUTTON");
+    expect(fit?.textContent?.trim()).toBe("Fit");
+  });
+
+  it("renders the expand control as a link to #/graph with an accessible name", async () => {
+    const { dom } = await mountViewerDom([], dashboardResponder(envelopeWith(0, 0)));
+    const expand = dom.window.document.querySelector(".graph-panel .panel-controls a");
+    expect(expand?.tagName).toBe("A");
+    expect(expand?.getAttribute("href")).toBe("#/graph");
+    expect(expand?.getAttribute("aria-label")).toBeTruthy();
+  });
+
+  it("starts Fit disabled and enables it once loadGraph resolves a handle", async () => {
+    const { dom, resolveGraphHandle, flush } = await mountViewerDom(
+      [], dashboardResponder(envelopeWith(0, 0)), undefined, "deferred",
+    );
+    const fit = dom.window.document.querySelector("[data-graph-fit]") as HTMLButtonElement;
+    expect(fit.disabled).toBe(true);
+    resolveGraphHandle("present");
+    await flush();
+    expect(fit.disabled).toBe(false);
+  });
+
+  it("keeps Fit disabled when loadGraph yields no handle", async () => {
+    const { dom, resolveGraphHandle, flush } = await mountViewerDom(
+      [], dashboardResponder(envelopeWith(0, 0)), undefined, "deferred",
+    );
+    resolveGraphHandle("none");
+    await flush();
+    const fit = dom.window.document.querySelector("[data-graph-fit]") as HTMLButtonElement;
+    expect(fit.disabled).toBe(true);
+  });
+
+  it("invokes the graph handle's fit() when Fit is clicked", async () => {
+    const { dom, graphFitMock } = await mountViewerDom([], dashboardResponder(envelopeWith(0, 0)));
+    const fit = dom.window.document.querySelector("[data-graph-fit]") as HTMLButtonElement;
+    fit.click();
+    expect(graphFitMock).toHaveBeenCalledTimes(1);
   });
 });
 

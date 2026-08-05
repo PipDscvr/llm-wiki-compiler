@@ -64,6 +64,8 @@ const MODE_SETTINGS = {
 };
 const ARROWHEAD_MARKER_ID   = 'llmwiki-arrowhead';
 const HIGH_DEGREE_THRESHOLD = 5;
+/** Zoom scale bounds, shared by the interactive zoom behaviour and the "Fit" action below. */
+const ZOOM_SCALE_EXTENT = [0.1, 4];
 
 /**
  * Compact-force tuning constants (used by `compactForces`, below).
@@ -262,7 +264,7 @@ function initGraph(container) {
   const g = svg.append('g');
 
   const zoom = d3.zoom()
-    .scaleExtent([0.1, 4])
+    .scaleExtent(ZOOM_SCALE_EXTENT)
     .on('zoom', (event) => g.attr('transform', event.transform));
   svg.call(zoom);
 
@@ -453,6 +455,98 @@ function renderGraph(view, data, options) {
   return { sim, edgeSel, nodeSel };
 }
 
+/** Duration (ms) of the "Fit" zoom transition; skipped under prefers-reduced-motion. */
+const FIT_TRANSITION_MS = 750;
+/** Breathing room (px) kept between the fitted node bounding box and the panel edge. */
+const FIT_PADDING_PX = 32;
+/** Smallest bounding-box span treated as non-zero, so a one-node graph cannot divide by zero. */
+const FIT_MIN_EXTENT = 1;
+
+/** True when the OS/browser requests reduced motion; the fit action skips its transition then. */
+function prefersReducedMotion() {
+  return Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+}
+
+/**
+ * Clamp a scale to the zoom behaviour's own scaleExtent, so "Fit" can never
+ * zoom past what the user's own scroll/pinch gestures are limited to.
+ */
+function clampZoomScale(scale) {
+  const [min, max] = ZOOM_SCALE_EXTENT;
+  return Math.min(Math.max(scale, min), max);
+}
+
+/**
+ * Compute the axis-aligned bounding box of each node's current simulation
+ * position. Reads live `.x`/`.y` (not a cached layout captured at render
+ * time) so "Fit" reflects wherever the simulation and any drag have
+ * actually settled the nodes by the time the user clicks it. Non-finite
+ * coordinates are filtered out first — `Math.min`/`Math.max` of zero
+ * arguments fall back to their `Infinity`/`-Infinity` identities, the same
+ * "nothing found" values a caller would seed a manual scan with.
+ *
+ * @param {object[]} nodes - Node data bound to the rendered node selection.
+ * @returns {{minX: number, minY: number, maxX: number, maxY: number}}
+ */
+function nodeBoundingBox(nodes) {
+  const xs = nodes.map((d) => d.x).filter(Number.isFinite);
+  const ys = nodes.map((d) => d.y).filter(Number.isFinite);
+  return {
+    minX: Math.min(...xs), maxX: Math.max(...xs),
+    minY: Math.min(...ys), maxY: Math.max(...ys),
+  };
+}
+
+/**
+ * Build the zoom transform that centres and scales a node bounding box to
+ * fill `width`×`height` with `FIT_PADDING_PX` of breathing room — the
+ * standard "translate to the viewport centre, scale, then translate back by
+ * the box's own centre" construction, clamped to the zoom behaviour's own
+ * scaleExtent.
+ *
+ * @param {{minX: number, minY: number, maxX: number, maxY: number}} box - From `nodeBoundingBox`.
+ * @param {number} width - Panel width (simulation units).
+ * @param {number} height - Panel height (simulation units).
+ */
+function fitTransform(box, width, height) {
+  const boxWidth  = Math.max(box.maxX - box.minX, FIT_MIN_EXTENT);
+  const boxHeight = Math.max(box.maxY - box.minY, FIT_MIN_EXTENT);
+  const scale = clampZoomScale(
+    Math.min((width - FIT_PADDING_PX * 2) / boxWidth, (height - FIT_PADDING_PX * 2) / boxHeight),
+  );
+  const centerX = (box.minX + box.maxX) / 2;
+  const centerY = (box.minY + box.maxY) / 2;
+  return globalThis.d3.zoomIdentity
+    .translate(width / 2, height / 2)
+    .scale(scale)
+    .translate(-centerX, -centerY);
+}
+
+/**
+ * Build the "Fit" control's action for one render. Recomputes the node
+ * bounding box from LIVE simulation positions on every call — not a
+ * snapshot taken when the graph first rendered — so it reflects panning or
+ * dragging that happened before the click. Applies the transform through
+ * the zoom behaviour itself (`zoom.transform`, the same one mouse/wheel/drag
+ * gestures drive) rather than writing the `<g>` transform attribute
+ * directly, so d3-zoom's own internal transform stays in sync — otherwise
+ * the next user pan would jump to wherever the zoom behaviour last thought
+ * it was.
+ *
+ * @param {{svg: object, zoom: object, width: number, height: number}} view - From `initGraph`.
+ * @param {object} nodeSel - The rendered node selection (from `renderGraph`).
+ * @returns {() => void} The `fit()` action.
+ */
+function makeFitAction(view, nodeSel) {
+  return function fit() {
+    const transform = fitTransform(nodeBoundingBox(nodeSel.data()), view.width, view.height);
+    const target = prefersReducedMotion()
+      ? view.svg
+      : view.svg.transition().duration(FIT_TRANSITION_MS);
+    target.call(view.zoom.transform, transform);
+  };
+}
+
 /**
  * Legend entries: label plus the node class whose swatch it shows. Exported
  * so the dashboard's compact panel (viewer-dashboard.js) can render its own
@@ -551,14 +645,23 @@ function renderEmptyState(container) {
  *   `staleIds` comes from `staleIdsFromEnvelope()` over the already-fetched
  *   `/api/pages` envelope; a caller that omits it gets kind-only colouring
  *   (no stale nodes highlighted).
- * @returns {Promise<void>}
+ * @returns {Promise<{fit: () => void}|null>} A control handle exposing
+ *   `fit()` (see `makeFitAction`), or `null` when nothing was rendered — no
+ *   data, an empty graph, or a failed fetch. Callers use the `null` case to
+ *   know a "Fit" affordance has nothing to act on (see viewer-dashboard.js's
+ *   `mountGraphPanel`).
  */
 export async function loadGraph(container, options = {}) {
   const data = await fetchGraphData(container);
-  if (!data) return;
-  if (!hasRenderableNodes(data)) return renderEmptyState(container);
-  renderGraph(initGraph(container), data, options);
+  if (!data) return null;
+  if (!hasRenderableNodes(data)) {
+    renderEmptyState(container);
+    return null;
+  }
+  const view = initGraph(container);
+  const { nodeSel } = renderGraph(view, data, options);
   if (!options.compact) buildLegend(container);
+  return { fit: makeFitAction(view, nodeSel) };
 }
 
 /** Fetch /api/graph and parse JSON; render an inline error banner and return null on failure. */

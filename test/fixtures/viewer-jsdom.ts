@@ -169,10 +169,81 @@ export interface EmbeddedPage {
 /** Fetch responder: returns a Response or `null` to fall through to 404. */
 export type FetchResponder = (url: string) => Response | Promise<Response> | null | undefined;
 
+/** Resolution mode for the stubbed graph module's `loadGraph()` (see `setupGraphStub`). */
+export type GraphHandleMode = "present" | "deferred";
+
+/** The outcome a `"deferred"`-mode graph load can be settled to via `resolveGraphHandle`. */
+export type GraphHandleOutcome = "present" | "none";
+
+/** The control handle shape the real `loadGraph()` resolves to once a graph has rendered. */
+interface GraphHandle {
+  fit: () => void;
+}
+
 export interface MountResult {
   dom: JSDOM;
   fetchMock: ReturnType<typeof vi.fn>;
   flush(): Promise<void>;
+  /** Spy backing the stubbed graph handle's `fit()` — observable from the test. */
+  graphFitMock: ReturnType<typeof vi.fn>;
+  /**
+   * Settle a `"deferred"`-mode graph load. `"present"` resolves `loadGraph()`
+   * to a handle backed by `graphFitMock`; `"none"` resolves it to `null`,
+   * mirroring an empty or failed graph. No-op in `"present"` mode — that
+   * mode's `loadGraph()` has already resolved by the time `mountViewerDom`
+   * returns.
+   */
+  resolveGraphHandle(outcome: GraphHandleOutcome): void;
+}
+
+/** A promise plus its external resolver, so a test can control when the stubbed loadGraph() settles. */
+function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+/**
+ * Stub `viewer-graph.js` in the module registry — D3 is not exercised under
+ * JSDOM (see file header). `loadGraph` resolves `loadGraphResult`, mirroring
+ * the real module's contract: a handle exposing `fit()`, or `null` when
+ * nothing was rendered. `LEGEND_KINDS` is real data (not a D3 call),
+ * mirrored verbatim from viewer-graph.js so the dashboard's compact legend
+ * (viewer-dashboard.js) renders its real four entries under this harness too.
+ */
+function registerGraphStub(win: Window & typeof globalThis, loadGraphResult: Promise<GraphHandle | null>): void {
+  const registry = (win as unknown as { __viewerModules: Record<string, unknown> }).__viewerModules;
+  registry["./viewer-graph.js"] = {
+    loadGraph: () => loadGraphResult,
+    staleIdsFromEnvelope: () => new Set(),
+    LEGEND_KINDS: [
+      { label: "concept", kind: "concept" },
+      { label: "entity", kind: "entity" },
+      { label: "stale", kind: "stale" },
+      { label: "dangling", kind: "dangling" },
+    ],
+  };
+}
+
+/**
+ * Wire the stubbed graph module into the registry for one mount, and return
+ * the two hooks a test needs: the `fit()` spy, and a resolver usable when
+ * `mode` is `"deferred"`. `"present"` resolves `loadGraph()` immediately —
+ * the common case, mirroring a graph that rendered successfully.
+ */
+function setupGraphStub(
+  win: Window & typeof globalThis,
+  mode: GraphHandleMode,
+): { graphFitMock: ReturnType<typeof vi.fn>; resolveGraphHandle: (outcome: GraphHandleOutcome) => void } {
+  const graphFitMock = vi.fn();
+  const deferred = createDeferred<GraphHandle | null>();
+  const resolveGraphHandle = (outcome: GraphHandleOutcome) =>
+    deferred.resolve(outcome === "present" ? { fit: graphFitMock } : null);
+  const loadGraphResult = mode === "present" ? Promise.resolve({ fit: graphFitMock }) : deferred.promise;
+  registerGraphStub(win, loadGraphResult);
+  return { graphFitMock, resolveGraphHandle };
 }
 
 /**
@@ -182,11 +253,18 @@ export interface MountResult {
  *
  * @param startHash - Optional initial `location.hash` value (e.g. `"#/graph"`).
  *   Set before scripts run so `main()` sees this hash as the entry route.
+ * @param graphHandle - Resolution mode for the stubbed graph module's
+ *   `loadGraph()` (see `setupGraphStub`). `"present"` (default) resolves
+ *   immediately to a handle backed by the returned `graphFitMock`.
+ *   `"deferred"` leaves the promise pending until the test calls the
+ *   returned `resolveGraphHandle()`, so a test can observe a dashboard
+ *   Fit-style control in its not-yet-resolved state first.
  */
 export async function mountViewerDom(
   pages: EmbeddedPage[],
   responder: FetchResponder,
   startHash?: string,
+  graphHandle: GraphHandleMode = "present",
 ): Promise<MountResult> {
   const [shell, entrySrc, moduleFiles] = await Promise.all([
     readFile(SHELL_PATH, "utf-8"),
@@ -207,22 +285,7 @@ export async function mountViewerDom(
   });
   (dom.window as unknown as { fetch: typeof fetchMock }).fetch = fetchMock;
   dom.window.eval("window.__viewerModules = {};");
-  // D3 is not exercised under JSDOM; stub the graph module before anything imports it.
-  // LEGEND_KINDS is real data (not a D3 call), mirrored verbatim from
-  // viewer-graph.js so the dashboard's compact legend (viewer-dashboard.js)
-  // renders its real four entries under this harness too.
-  dom.window.eval(
-    'window.__viewerModules["./viewer-graph.js"] = {' +
-      " loadGraph: async function () {}," +
-      " staleIdsFromEnvelope: function () { return new Set(); }," +
-      " LEGEND_KINDS: [" +
-      "   { label: 'concept', kind: 'concept' }," +
-      "   { label: 'entity', kind: 'entity' }," +
-      "   { label: 'stale', kind: 'stale' }," +
-      "   { label: 'dangling', kind: 'dangling' }," +
-      " ]" +
-      " };",
-  );
+  const { graphFitMock, resolveGraphHandle } = setupGraphStub(dom.window, graphHandle);
   const themeBoot = await readOptional(THEME_BOOT_SCRIPT);
   if (themeBoot) dom.window.eval(themeBoot);
   for (const name of moduleFiles) {
@@ -233,7 +296,7 @@ export async function mountViewerDom(
   }
   dom.window.eval(rewriteImports(entrySrc));
   await flushMicrotasks();
-  return { dom, fetchMock, flush: flushMicrotasks };
+  return { dom, fetchMock, flush: flushMicrotasks, graphFitMock, resolveGraphHandle };
 }
 
 /** Drop a JSON-escaped page-index blob into the shell template marker. */

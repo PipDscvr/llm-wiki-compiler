@@ -129,18 +129,38 @@ export function renderDashboard(main, envelope, health) {
 }
 
 /**
- * Render the compact graph into the reserved panel surface. Fire-and-forget:
+ * Render the compact graph into the reserved panel surface, then wire the
+ * head's Fit button to the control handle `loadGraph` returns. Fire-and-forget:
  * a graph that fails to load leaves its own error banner inside the panel and
- * must not prevent the rest of the dashboard from rendering.
+ * must not prevent the rest of the dashboard from rendering — the Fit button
+ * simply stays disabled in that case (see `buildGraphPanelControls`).
+ *
+ * `fitButton` is captured synchronously here, alongside `surface`, rather
+ * than re-queried after the `await` (see `wireFitButton`) — `viewer.js`'s
+ * `main()` can call `renderRoute()` twice on first load (an immediate call
+ * plus one after bootstrap data resolves), each replacing `main`'s children
+ * wholesale. A live re-query at that point could resolve to a DIFFERENT
+ * render's button than the one this call started with, wiring two click
+ * listeners onto the surviving button instead of one.
  */
 async function mountGraphPanel(main, envelope) {
   const surface = main.querySelector("[data-graph-panel]");
   if (!surface) return;
+  const fitButton = main.querySelector("[data-graph-fit]");
+  let handle = null;
   try {
-    await loadGraph(surface, { compact: true, staleIds: staleIdsFromEnvelope(envelope) });
+    handle = await loadGraph(surface, { compact: true, staleIds: staleIdsFromEnvelope(envelope) });
   } catch {
-    // loadGraph renders its own inline failure state.
+    // loadGraph renders its own inline failure state; handle stays null.
   }
+  wireFitButton(fitButton, handle);
+}
+
+/** Enable the Fit button and bind it to the handle's fit() action, once the graph has rendered. */
+function wireFitButton(fitButton, handle) {
+  if (!handle || !fitButton) return;
+  fitButton.disabled = false;
+  fitButton.addEventListener("click", () => handle.fit());
 }
 
 /** Derive every number the dashboard renders from the two payloads. */
@@ -374,13 +394,12 @@ function buildGraphPanel(model) {
 }
 
 /**
- * Build the graph panel's head. "Fit" and "⤢" (tree lines 232-235) are
- * rendered as inert visual chips, not wired to real zoom/fullscreen
- * behaviour: the mockup captures no title/onClick on either (the tree
- * labels interactive icons that way — see the theme toggle), and adding a
- * real fit-to-view action would mean exposing zoom control out of
- * viewer-graph.js's `loadGraph`, a feature addition beyond this pass's
- * pixel-fidelity scope.
+ * Build the graph panel's head: title + node/edge caption grouped left
+ * (tree lines 226), Fit/expand chips right (tree lines 232-235). Fit is a
+ * real button, disabled until `mountGraphPanel` wires it to the rendered
+ * graph's control handle (see `wireFitButton`) — there is nothing to fit
+ * before then. ⤢ is a real link to `#/graph`, live from the start since
+ * navigation needs no graph handle.
  */
 function buildGraphPanelHead(model) {
   const head = el("div", "panel-head");
@@ -390,11 +409,32 @@ function buildGraphPanelHead(model) {
     el("span", "panel-caption", `${plural(model.graph.nodeCount, "node")} · ${plural(model.graph.edgeCount, "edge")}`),
   );
   head.appendChild(left);
-  const controls = el("div", "panel-controls");
-  controls.appendChild(el("span", "panel-chip", "Fit"));
-  controls.appendChild(el("span", "panel-chip", "⤢"));
-  head.appendChild(controls);
+  head.appendChild(buildGraphPanelControls());
   return head;
+}
+
+/**
+ * Build the Fit / expand chip pair. Fit starts disabled (see
+ * `buildGraphPanelHead`); the expand link needs no wiring at all — it is a
+ * plain `<a href="#/graph">`, the same navigation the dashboard hero's own
+ * "Explore graph" button uses, and the router already listens for
+ * `hashchange` (viewer.js).
+ */
+function buildGraphPanelControls() {
+  const controls = el("div", "panel-controls");
+  const fit = el("button", "panel-chip", "Fit");
+  fit.type = "button";
+  fit.disabled = true;
+  fit.dataset.graphFit = "";
+  controls.appendChild(fit);
+  const expand = el("a", "panel-chip", "⤢");
+  expand.href = "#/graph";
+  // The glyph alone is not an accessible name (WCAG 4.1.2) — title mirrors
+  // it for a native hover tooltip too.
+  expand.setAttribute("aria-label", "Open the full graph explorer");
+  expand.title = "Open the full graph explorer";
+  controls.appendChild(expand);
+  return controls;
 }
 
 /**

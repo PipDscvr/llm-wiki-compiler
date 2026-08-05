@@ -235,7 +235,29 @@
   border: 1px solid var(--border-chip);
   font: 500 10.5px/1 var(--font-mono);
   color: var(--fg-muted);
+  /* Fit/⤢ are a real <button>/<a> (see buildGraphPanelControls), not the
+   * inert <span> this replaced — reset the UA chrome both bring (button
+   * appearance/margin, link underline) so they still match the mockup's
+   * flat chip geometry pixel-for-pixel. */
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  appearance: none;
+  text-decoration: none;
+  cursor: pointer;
 }
+.panel-chip:hover:not(:disabled) {
+  color: var(--fg-body);
+  border-color: var(--border-strong);
+  text-decoration: none;
+}
+.panel-chip:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+/* Fit only — the expand link is never disabled. Reads as unavailable
+ * rather than merely restyled hover, matching --fg-disabled's existing
+ * "near-invisible, deliberately below contrast floor" role for inactive
+ * controls (viewer-chrome.css .nav-count-zero; WCAG 1.4.3 exempts
+ * disabled components from the contrast minimum). */
+.panel-chip:disabled { color: var(--fg-disabled); cursor: not-allowed; }
 
 .panel-body {
   /* 5px 8px 8px is off the spacing scale — mockup tree line 162. Rows
