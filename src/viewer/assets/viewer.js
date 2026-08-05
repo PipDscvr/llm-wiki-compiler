@@ -27,10 +27,9 @@ import { renderProjectRail, renderSupportRail, clearSupportRail } from "./viewer
 import { loadGraph } from "./viewer-graph.js";
 import { renderHeader } from "./viewer-header.js";
 import { projectTitle } from "./viewer-format.js";
+import { renderConceptsList, renderQueriesList, renderSourcesList } from "./viewer-lists.js";
 
-const PAGE_INDEX_SELECTOR = "#page-index";
 const MAIN_SELECTOR = "[data-main-pane]";
-const EMPTY_INDEX = { pages: [] };
 
 /** Hashes that all map to the home route — `#`, `#/`, and empty/missing. */
 const HOME_HASHES = new Set(["", "#", "#/"]);
@@ -40,6 +39,9 @@ const STATIC_ROUTES = new Map([
   ["#/index", { kind: "index" }],
   ["#/health", { kind: "health" }],
   ["#/graph", { kind: "graph" }],
+  ["#/concepts", { kind: "concepts" }],
+  ["#/queries", { kind: "queries" }],
+  ["#/sources", { kind: "sources" }],
 ]);
 
 /** Pattern matching `#/(concepts|queries)/<slug>` hash routes. */
@@ -87,25 +89,6 @@ async function loadBootstrapData() {
   bootstrapData.pages = pages;
   bootstrapData.health = health;
   return bootstrapData;
-}
-
-/** Parse the server-embedded page-index JSON. Empty list if absent or malformed. */
-function readEmbeddedIndex() {
-  const node = document.querySelector(PAGE_INDEX_SELECTOR);
-  const text = node?.textContent;
-  if (!text) return EMPTY_INDEX;
-  return parsePageIndex(text);
-}
-
-/** Best-effort JSON.parse of the embedded blob. Always returns a `{pages}` shape. */
-function parsePageIndex(text) {
-  try {
-    const data = JSON.parse(text);
-    if (Array.isArray(data?.pages)) return { pages: data.pages };
-  } catch {
-    // Malformed JSON in the embedded blob is not a user-facing error.
-  }
-  return EMPTY_INDEX;
 }
 
 /**
@@ -222,7 +205,21 @@ const ROUTE_RENDERERS = {
   index: (main) => renderIndexPane(main),
   health: (main) => renderHealthPane(main),
   graph: (main) => renderGraphPane(main),
+  concepts: (main) => renderListRoute(main, renderConceptsList),
+  queries: (main) => renderListRoute(main, renderQueriesList),
+  sources: (main) => renderListRoute(main, renderSourcesList),
 };
+
+/** Render a list route from the cached envelope, fetching only if absent. */
+async function renderListRoute(main, render) {
+  clearSupportRail();
+  const envelope = bootstrapData.pages ?? (await loadBootstrapData()).pages;
+  if (!envelope) {
+    renderError("Could not load /api/pages");
+    return;
+  }
+  render(main, envelope);
+}
 
 /** Fetch and render the page at the current hash route. */
 async function renderRoute() {
@@ -498,7 +495,6 @@ async function fetchJson(pathname) {
 /** Bootstrap: first-paint nav, then parallel data fetch, then the router. */
 function main() {
   wireThemeToggle();
-  const embedded = readEmbeddedIndex();
   renderSidebar({});
   wireSearch({ fetchJson });
   void loadBootstrapData().then((data) => {

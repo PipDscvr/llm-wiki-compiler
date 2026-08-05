@@ -75,10 +75,6 @@ export function definitionList(rows) {
  * @param {string} body - Why the surface exists and what would fill it.
  * @param {string} [command] - The exact CLI command, lowercase.
  * @returns {HTMLElement}
- * @expected-unused Not yet called from viewer.js; later render modules
- *   (Tasks 6-9 of the nebula-viewer-ui plan) use this for genuinely-empty
- *   surfaces. Fallow should flag this tag as stale once one does — that is
- *   the intended cue to remove it.
  */
 export function emptyState(title, body, command) {
   const wrap = el("div", "empty-state");

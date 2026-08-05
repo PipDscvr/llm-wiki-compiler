@@ -33,9 +33,6 @@ export function projectTitle(envelope) {
  *
  * @param {unknown} iso - ISO-8601 timestamp.
  * @returns {string}
- * @expected-unused Not yet called on this branch; six later tasks in the
- *   nebula-viewer-ui plan import it. Fallow should flag the tag itself as
- *   stale once one of them does — that is the intended cue to remove it.
  */
 // CRAP is estimated from zero call-graph references at this point in the
 // rollout, not from missing tests (see test/viewer-format.test.ts).
