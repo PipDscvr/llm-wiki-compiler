@@ -127,6 +127,16 @@
    * sidebar. Nudged toward --fg-faint, the next rung up, by the smallest
    * step that clears the floor: 3.03:1. */
   --fg-ghost: #5e5a79;
+  /* Restored (2026-08-05 fidelity pass) — a prior branch deleted this as
+   * "consumed by nothing" after the final review offered "wire it or
+   * delete it"; the wrong branch was taken. The mockup uses it for
+   * zero-valued nav counts (tree: the Queries "—" and Reviews "0" spans),
+   * a deliberately near-invisible "nothing here" treatment. Measured
+   * (test/viewer-contrast.test.ts) at 2.31:1 on --bg-sidebar — well under
+   * 4.5:1, pinned as a known failure like --fg-ghost/--fg-faint above,
+   * not silently made to pass by picking a different colour than the
+   * mockup's. */
+  --fg-disabled: #4d4964;
 
   /* Accent */
   --accent: #8b5cf6;
@@ -205,6 +215,9 @@
    * Nudged toward --fg-faint, the next rung up, by the smallest step
    * that clears the floor: 3.03:1. */
   --fg-ghost: #8f8aa3;
+  /* Restored alongside dark's --fg-disabled above — see that comment.
+   * Measured at 2.08:1 on --bg-sidebar, also pinned as a known failure. */
+  --fg-disabled: #adaabb;
 
   /* Accent */
   --accent: #7c3aed;
@@ -261,6 +274,7 @@
     /* Kept in sync with the :root[data-theme="light"] contrast fix above
      * — same values, this block just serves the no-stored-preference path. */
     --fg-ghost: #8f8aa3;
+    --fg-disabled: #adaabb;
 
     /* Accent */
     --accent: #7c3aed;

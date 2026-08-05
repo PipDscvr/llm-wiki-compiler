@@ -84,7 +84,7 @@ export function renderSidebar(model) {
   for (const section of NAV_SECTIONS) {
     sidebar.appendChild(buildNavSection(section, model));
   }
-  sidebar.appendChild(buildDocsCard());
+  sidebar.appendChild(buildFooterGroup());
   markActive();
 }
 
@@ -113,7 +113,10 @@ function buildLockup() {
 /** Build the PROJECT block: name plus the local/read-only marker. */
 function buildProjectBlock(project) {
   const wrap = el("div", "project-block");
-  wrap.appendChild(el("div", "nav-section-label", "PROJECT"));
+  // PROJECT gets its own label class, not `.nav-section-label` — the
+  // mockup gives it a different colour, margin, and no horizontal padding
+  // compared to the BROWSE/MAINTAIN eyebrows (see viewer-chrome.css).
+  wrap.appendChild(el("div", "project-label", "PROJECT"));
   const name = el("div", "project-name", project?.title || "llmwiki");
   name.dataset.projectName = "";
   wrap.appendChild(name);
@@ -160,10 +163,17 @@ function appendNavMetric(link, item, model) {
   if (item.badge === "lint") appendLintBadge(link, model?.lint);
 }
 
-/** Append the count span, when the model actually carries a value for this item. */
+/**
+ * Append the count span, when the model actually carries a value for this
+ * item. Zero-valued counts get the `nav-count-zero` modifier, which maps
+ * to `--fg-disabled` — a deliberately near-invisible treatment the mockup
+ * uses for both the Queries em dash and the Reviews "0" (viewer-chrome.css).
+ */
 function appendNavCount(link, value) {
   if (value === undefined) return;
-  link.appendChild(el("span", "nav-count", value > 0 ? String(value) : EMPTY_COUNT));
+  const isZero = !(value > 0);
+  const className = isZero ? "nav-count nav-count-zero" : "nav-count";
+  link.appendChild(el("span", className, isZero ? EMPTY_COUNT : String(value)));
 }
 
 /** Append the lint badge, omitting it entirely when lint has never run (see lintTotal). */
@@ -171,6 +181,20 @@ function appendLintBadge(link, lint) {
   const total = lintTotal(lint);
   if (total === null) return;
   link.appendChild(el("span", "nav-badge", String(total)));
+}
+
+/**
+ * Build the sidebar footer: a bottom-pinned column of standing cards
+ * (mockup tree line 59). Only "Read the docs" ships — the mockup's
+ * "Design system ↗" card links between design documents, not a product
+ * surface, so it is deliberately absent (see the fidelity audit). The
+ * group wrapper still exists on its own, matching the mockup's structure,
+ * so a second card would space correctly if this ever grows one.
+ */
+function buildFooterGroup() {
+  const group = el("div", "sidebar-footer");
+  group.appendChild(buildDocsCard());
+  return group;
 }
 
 /** Build the standing "Read the docs" card pinned to the sidebar footer. */

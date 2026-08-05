@@ -193,31 +193,44 @@
 /* ---- Header search control ---- */
 
 /*
- * `.sidebar-search` is the outer 34px control (matches `.chrome-button` /
- * `.github-link` in viewer-chrome.css) and the positioning context for its
- * results dropdown — `position: relative` here is why the ⌘K binding in
- * viewer-search.js can move the whole widget out of the sidebar without
- * the dropdown losing its anchor. The name is a holdover from when the
- * control lived in `.sidebar`; kept because renaming buys nothing and the
- * class still means "the search control," not "a sidebar-only thing."
+ * `.sidebar-search` is the outer fixed-width control (mockup tree line 83)
+ * and the positioning context for its results dropdown — `position:
+ * relative` here is why the ⌘K binding in viewer-search.js can move the
+ * whole widget out of the sidebar without the dropdown losing its anchor.
+ * The name is a holdover from when the control lived in `.sidebar`; kept
+ * because renaming buys nothing and the class still means "the search
+ * control," not "a sidebar-only thing."
  */
 .sidebar-search {
   position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-9);
+  width: 290px;
   height: 34px;
-  padding: 0 8px 0 12px;
+  padding: 0 12px;
   border-radius: var(--radius-control);
   background: var(--bg-inset);
   border: 1px solid var(--border-strong);
 }
+/* Decorative circle standing in for the mockup's search glyph (tree line
+ * 84) — the search affordance itself is the real `<input>` beside it. */
+.search-icon {
+  width: 12px;
+  height: 12px;
+  border: 1.4px solid var(--fg-faint);
+  border-radius: 50%;
+  flex: none;
+}
 .sidebar-search input[type="search"] {
-  width: 140px;
+  flex: 1;
+  min-width: 0;
   border: 0;
   padding: 0;
   background: none;
-  font: var(--type-body);
+  /* 12.5px matches --type-body, but the mockup's search text is line-height
+   * 1, not --type-body's 1.5 (tree line 85) — a literal, not the token. */
+  font: 400 12.5px/1 var(--font-sans);
   color: var(--fg-body);
 }
 .sidebar-search input[type="search"]::placeholder { color: var(--fg-faint); }
@@ -226,14 +239,17 @@
   appearance: none;
 }
 
-/* The ⌘K hint chip — advertises the shortcut wireSearchShortcut() binds. */
+/* The ⌘K hint chip — advertises the shortcut wireSearchShortcut() binds.
+ * `500 10px/1 mono` (mockup tree line 87) has no matching type token —
+ * the closest, --type-metadata, is 400 11px/1 — so it is a literal here,
+ * same pattern as `.project-status` in viewer-chrome.css. */
 .search-kbd {
   flex: none;
-  padding: 2px 6px;
-  border-radius: var(--radius-chip);
+  padding: 3px 5px;
+  border-radius: var(--radius-badge);
   background: var(--bg-chip);
   border: 1px solid var(--border-chip);
-  font: var(--type-metadata);
+  font: 500 10px/1 var(--font-mono);
   color: var(--fg-faint);
 }
 

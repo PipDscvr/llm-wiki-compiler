@@ -27,6 +27,12 @@
  * regression (something gets worse) and a fix (something gets better) are
  * both caught: a "fail" row that starts passing flips this test red,
  * which is the prompt to update that row to "pass".
+ *
+ * `--fg-disabled` joined this file in the 2026-08-05 fidelity pass, when it
+ * was restored to viewer-tokens.css (a prior branch had deleted it as
+ * "consumed by nothing") and wired to zero-valued nav counts. At 10.5px on
+ * --bg-sidebar it is well below 4.5:1 in both themes — a deliberately
+ * near-invisible "disabled" treatment, pinned below like the other three.
  */
 
 import { describe, expect, it } from "vitest";
@@ -85,7 +91,7 @@ const MUTED_TEXT_CASES: [fg: string, bg: string, theme: ThemeName, expected: Exp
   // (viewer-dashboard.css, 11px) -- all card-hosted.
   ["--fg-faint", "--bg-card", "dark", "fail"],
   ["--fg-faint", "--bg-card", "light", "pass"],
-  // .search-kbd (viewer-content.css, 11px), .list-citations
+  // .search-kbd (viewer-content.css, 10px), .list-citations
   // (viewer-content.css, 9.5px), .stat-badge (viewer-dashboard.css, 9.5px).
   ["--fg-faint", "--bg-chip", "dark", "fail"],
   ["--fg-faint", "--bg-chip", "light", "fail"],
@@ -96,8 +102,9 @@ const MUTED_TEXT_CASES: [fg: string, bg: string, theme: ThemeName, expected: Exp
   // background of their own, so this inherits the app shell's.
   ["--fg-faint", "--bg-shell", "dark", "fail"],
   ["--fg-faint", "--bg-shell", "light", "pass"],
-  // .nav-count (viewer-chrome.css), 10.5px, on the sidebar -- this is also
-  // the em-dash colour for a zero count (see viewer-sidebar.js).
+  // .nav-count (viewer-chrome.css), 10.5px, on the sidebar -- non-zero
+  // counts only; zero-valued counts use --fg-disabled instead, tracked
+  // separately below (see viewer-sidebar.js appendNavCount).
   ["--fg-faint", "--bg-sidebar", "dark", "fail"],
   ["--fg-faint", "--bg-sidebar", "light", "fail"],
   // .stat-card.is-warn .stat-sub (viewer-dashboard.css), 12.5px. The one
@@ -105,6 +112,12 @@ const MUTED_TEXT_CASES: [fg: string, bg: string, theme: ThemeName, expected: Exp
   // one was at risk and it was not.
   ["--warn-muted", "--warn-bg", "dark", "pass"],
   ["--warn-muted", "--warn-bg", "light", "pass"],
+  // .nav-count.nav-count-zero (viewer-chrome.css), 10.5px, on the sidebar
+  // -- restored 2026-08-05 (see file header). Deliberately near-invisible
+  // by design (a "disabled" treatment), not a candidate for the same
+  // "smallest step" nudge the other rows above got.
+  ["--fg-disabled", "--bg-sidebar", "dark", "fail"],
+  ["--fg-disabled", "--bg-sidebar", "light", "fail"],
 ];
 
 /** Pairs that were always body-sized text and always clear 4.5:1 — unchanged regression pins. */
@@ -114,7 +127,7 @@ const BODY_TEXT_PAIRS: [string, string][] = [
   ["--fg", "--bg-shell"],
 ];
 
-describe("muted-token contrast — --fg-ghost / --fg-faint / --warn-muted", () => {
+describe("muted-token contrast — --fg-ghost / --fg-faint / --warn-muted / --fg-disabled", () => {
   it.each(MUTED_TEXT_CASES)(
     "%s on %s (%s theme) is expected to %s 4.5:1",
     async (fg, bg, theme, expected) => {

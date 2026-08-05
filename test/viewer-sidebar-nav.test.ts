@@ -73,9 +73,27 @@ describe("sidebar navigation", () => {
     expect(queries?.textContent).toBe("—");
   });
 
+  it("marks a zero count with the nav-count-zero modifier (--fg-disabled)", async () => {
+    const sidebar = await mountSidebar(null);
+    const queries = sidebar.querySelector('a[data-route="queries"] .nav-count');
+    expect(queries?.className).toContain("nav-count-zero");
+  });
+
   it("renders a non-zero count as its number", async () => {
     const sidebar = await mountSidebar(null);
     expect(sidebar.querySelector('a[data-route="concepts"] .nav-count')?.textContent).toBe("7");
+  });
+
+  it("does not mark a non-zero count with the nav-count-zero modifier", async () => {
+    const sidebar = await mountSidebar(null);
+    const concepts = sidebar.querySelector('a[data-route="concepts"] .nav-count');
+    expect(concepts?.className).not.toContain("nav-count-zero");
+  });
+
+  it("gives PROJECT its own label class, distinct from BROWSE/MAINTAIN", async () => {
+    const sidebar = await mountSidebar(null);
+    expect(sidebar.querySelector(".project-label")?.textContent).toBe("PROJECT");
+    expect(sidebar.querySelectorAll(".nav-section-label")).toHaveLength(2);
   });
 
   it("omits the lint badge entirely when lint has never run", async () => {

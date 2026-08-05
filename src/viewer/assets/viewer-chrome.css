@@ -40,7 +40,10 @@
 }
 
 .app-identity { min-width: 0; }
-.app-brand { display: flex; align-items: center; gap: 10px; }
+/* `margin-bottom: 7px` (mockup tree line 73) is the brand row's own space
+ * before `.app-meta` below — `.app-meta` carries no margin of its own, so
+ * the two don't compound into a 14px gap. */
+.app-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
 .app-logo { width: 22px; height: 22px; flex: none; opacity: 0.9; }
 
 .app-title {
@@ -50,7 +53,7 @@
 }
 
 .app-meta {
-  margin: 7px 0 0;
+  margin: 0;
   font: 400 12px/1 var(--font-mono);
   color: var(--fg-dim);
 }
@@ -62,7 +65,10 @@
   font: 500 10px/1 var(--font-mono);
   letter-spacing: 0.06em;
   padding: 5px 8px;
-  border-radius: var(--radius-badge);
+  /* 5px is off the 4/6/8/9/11/12/14 radius scale (nearest token,
+   * --radius-badge, is 4px) — mockup tree line 77, literal per the
+   * fidelity audit's root-cause note. */
+  border-radius: 5px;
 }
 .freshness-pill[hidden] { display: none; }
 .freshness-pill::before {
@@ -152,28 +158,34 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+/*
+ * No gap here (mockup tree line 5) — every child spaces itself via its own
+ * margin-bottom/padding (lockup, project-block, nav-list below) instead of
+ * a uniform flex gap. A gap here would compound with those per-child
+ * margins — see the fidelity audit's root-cause note.
+ */
 .sidebar {
   border-right: 1px solid var(--border-soft);
   background: var(--bg-sidebar);
   padding: 18px 14px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
 }
 
 /*
  * `[data-sidebar]` (`.sidebar-nav` in the markup) is the mount point
- * `renderSidebar()` fills — it sits one level inside `.sidebar`, alongside
- * the search form and results list, not as `.sidebar`'s only child. It
- * needs its own flex column so the 20px rhythm reaches the lockup/
- * project-block/nav-section/docs-card content `renderSidebar()` actually
- * renders, and `flex: 1` so `.docs-card`'s `margin-top: auto` has a
- * flex context to push against, pinning it to the sidebar's bottom edge.
+ * `renderSidebar()` fills — it sits one level inside `.sidebar`, as its
+ * only child (search now lives in the header's `.app-actions`, see
+ * viewer-search.js). It needs its own flex column so `flex: 1` gives
+ * `.sidebar-footer`'s `margin-top: auto` a flex context to push against,
+ * pinning it to the sidebar's bottom edge. No gap here either, for the
+ * same reason as `.sidebar` above — each rendered child supplies its own
+ * spacing (lockup's padding-bottom, project-block/nav-list's
+ * margin-bottom) rather than a uniform gap compounding with them.
  */
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 20px;
   flex: 1;
   min-height: 0;
 }
@@ -185,18 +197,37 @@
  * The mark never sits on a coloured plate, so this carries no background
  * of its own.
  */
-.sidebar-lockup { display: flex; align-items: center; gap: 10px; }
-.sidebar-lockup-mark { width: 34px; height: 34px; flex: none; opacity: 0.9; }
+/* `padding: 0 4px 18px` is the lockup's own space before `.project-block`
+ * (mockup tree line 6) — there is no gap on `.sidebar`/`.sidebar-nav` to
+ * provide it (see those rules above). */
+.sidebar-lockup { display: flex; align-items: center; gap: 11px; padding: 0 4px 18px; }
+/* No opacity here — only the 22px header logo (`.app-logo`) is dimmed. */
+.sidebar-lockup-mark { width: 34px; height: 34px; flex: none; }
 .sidebar-lockup-text { min-width: 0; }
-.sidebar-lockup-name { font: 600 13.5px/1.2 var(--font-sans); color: var(--fg-strong); }
-.sidebar-lockup-tagline { margin-top: 3px; font: 400 11px/1.3 var(--font-sans); color: var(--fg-dim); }
+.sidebar-lockup-name {
+  font: 600 14px/1.15 var(--font-sans);
+  letter-spacing: -0.02em;
+  color: var(--fg-strong);
+}
+/* Mono, not sans — the design system reserves mono for machine facts,
+ * and a tagline like "compile once · reuse forever" reads as one. */
+.sidebar-lockup-tagline { margin-top: 3px; font: 400 10.5px/1.3 var(--font-mono); color: var(--fg-faint); }
 
 .project-block {
   padding: 12px 11px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-control);
   background: var(--bg-inset);
+  margin-bottom: 20px;
 }
+
+/*
+ * PROJECT's own eyebrow label — split from `.nav-section-label` (BROWSE/
+ * MAINTAIN) because the mockup gives it a different colour, no horizontal
+ * padding, and a 8px (not 7px) margin-bottom (tree lines 14 vs 24/44).
+ * Shares the base type treatment via the grouped selector below.
+ */
+.project-label { color: var(--fg-faint); margin-bottom: 8px; }
 .project-name { font: 500 13px/1 var(--font-sans); color: var(--fg-strong); margin-top: 8px; }
 .project-status {
   display: flex; align-items: center; gap: 6px; margin-top: 9px;
@@ -204,19 +235,37 @@
 }
 .status-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ok); }
 
-.nav-section-label {
+/* Shared type treatment for both sidebar eyebrows; colour/spacing diverge
+ * per label (see `.project-label` above and the mockup tree lines 14/24/44). */
+.nav-section-label,
+.project-label {
   font: 500 9.5px/1 var(--font-mono);
   letter-spacing: 0.13em;
+}
+.nav-section-label {
   color: var(--fg-ghost);
   padding: 0 8px;
   margin-bottom: 7px;
 }
 
-.nav-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
+/* `margin-bottom: 20px` (mockup tree lines 26/46) is each list's own space
+ * before the next section — there is no gap on `.sidebar`/`.sidebar-nav`
+ * to provide it (see those rules above). */
+.nav-list {
+  list-style: none; padding: 0; margin: 0 0 20px;
+  display: flex; flex-direction: column; gap: 2px;
+}
 
+/*
+ * `23px` left padding (mockup tree lines 30/34/38/42/47/51/55/57) indents a
+ * resting label to align with an active item's label, which sits past a
+ * 3px accent bar + 10px gap (see `.nav-label::before` below) at the same
+ * effective 23px offset. The active item overrides this back to a plain
+ * `8px 10px` (tree line 27) since its own bar supplies the visual indent.
+ */
 .nav-link {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 8px 10px;
+  padding: 8px 10px 8px 23px;
   border-radius: var(--radius-row);
   border: 1px solid transparent;
   font: 400 12.5px/1 var(--font-sans);
@@ -224,6 +273,7 @@
 }
 .nav-link:hover { background: var(--bg-hover); color: var(--fg-body); text-decoration: none; }
 .nav-link[aria-current="page"] {
+  padding: 8px 10px;
   background: linear-gradient(90deg, var(--accent-a22), var(--accent-a05));
   border-color: var(--accent-a30);
   color: var(--fg-strong);
@@ -233,13 +283,22 @@
   content: "";
   display: inline-block;
   width: 3px; height: 14px;
-  margin-right: 8px;
+  margin-right: 10px;
   vertical-align: -3px;
   border-radius: 2px;
   background: var(--accent-text);
 }
 
 .nav-count { font: 500 10.5px/1 var(--font-mono); color: var(--fg-faint); }
+/*
+ * Zero-valued counts (rendered as an em dash — EMPTY_COUNT in
+ * viewer-sidebar.js) de-emphasise further with --fg-disabled instead of
+ * the --fg-faint non-zero counts use (mockup tree line 40, the Queries
+ * "—"; the mockup's own Reviews "0" at line 53 uses the same colour, even
+ * though it shows the literal digit rather than an em dash — that text
+ * choice is unrelated content, out of scope for this colour fix).
+ */
+.nav-count.nav-count-zero { color: var(--fg-disabled); }
 .nav-badge {
   font: 500 10px/1 var(--font-mono);
   color: var(--warn);
@@ -248,8 +307,22 @@
   border-radius: var(--radius-badge);
 }
 
-.docs-card {
+/*
+ * Bottom-pinned column of standing cards (mockup tree line 59). Only
+ * "Read the docs" ships today — the mockup's "Design system ↗" card links
+ * between design documents, not a product surface, so it is deliberately
+ * absent (fidelity audit, out of scope) — but the group wrapper still
+ * carries `margin-top: auto` rather than `.docs-card` itself, matching the
+ * mockup's structure so a second card would space correctly if ever added.
+ */
+.sidebar-footer {
   margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.docs-card {
   padding: 12px 13px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-control);
