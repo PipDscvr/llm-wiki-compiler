@@ -46,8 +46,20 @@ const THEME_BOOT_SCRIPT = "viewer-theme-boot.js";
  * snapshot-note panels now render through the shared support-rail module
  * instead of a private `.dashboard-rail` column — and "viewer-dashboard.js"
  * still sorts before "viewer-rail.js" alphabetically.
+ *
+ * `viewer-pattern.js` has the same problem again: `viewer-dashboard.js`
+ * imports `buildPatternStrip` from it (the pattern strip's dismiss/
+ * persistence logic was split out to stay under the 400-line file cap —
+ * see that module's own header), and "viewer-dashboard.js" sorts before
+ * "viewer-pattern.js" alphabetically too.
  */
-const MODULE_ORDER = ["viewer-dom.js", "viewer-format.js", "viewer-theme.js", "viewer-rail.js"];
+const MODULE_ORDER = [
+  "viewer-dom.js",
+  "viewer-format.js",
+  "viewer-theme.js",
+  "viewer-rail.js",
+  "viewer-pattern.js",
+];
 
 /** Match `import { a, b } from "./viewer-x.js";` including multi-line forms. */
 const IMPORT_PATTERN = /import\s*\{([\s\S]*?)\}\s*from\s*['"](\.\/[\w.-]+\.js)['"]\s*;/g;
@@ -307,6 +319,22 @@ function embedPageIndex(shell: string, pages: EmbeddedPage[]): string {
     `<script type="application/json" id="page-index">${json}</script>`,
   );
 }
+
+/**
+ * Minimal `/api/pages` envelope for an empty demo project: no pages, no
+ * index. The common starting point for tests that only need a successful
+ * bootstrap fetch and do not care about page content (theme toggle,
+ * pattern-strip dismissal, and similar chrome-only behaviour) — kept here,
+ * rather than copied into each such test file, once duplicating it started
+ * tripping fallow's clone-group check.
+ */
+export const EMPTY_DEMO_ENVELOPE = {
+  project: { title: "demo", rootName: "demo" },
+  counts: {},
+  pages: [],
+  recentPages: [],
+  index: { available: false },
+};
 
 /** Standard JSON 200 helper for fetch responders. */
 export function jsonResponse(body: unknown): Response {

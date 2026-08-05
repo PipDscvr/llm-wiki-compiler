@@ -40,11 +40,18 @@
  * `.dashboard-rail` column. That keeps the dashboard to the mockup's two
  * content columns — see the fidelity audit's A2 note — rather than a
  * third column only the home route ever showed.
+ *
+ * The pattern strip itself — the four-column explainer plus its dismiss
+ * control — is built by `viewer-pattern.js`'s `buildPatternStrip()`, not
+ * here (this file was already at CLAUDE.md's 400-line cap when the
+ * dismiss/persistence logic was added). It returns `null` once dismissed;
+ * `renderDashboard` below skips appending in that case.
  */
 
 import { el, emptyState } from "./viewer-dom.js";
 import { isWarnFreshness, lintTotal, plural, relativeAge } from "./viewer-format.js";
 import { LEGEND_KINDS, loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js";
+import { buildPatternStrip } from "./viewer-pattern.js";
 import { renderDashboardRail } from "./viewer-rail.js";
 
 /**
@@ -101,14 +108,6 @@ const STAT_CARDS = [
   },
 ];
 
-/** The four explainer columns. Static copy — no data behind them. */
-const PATTERN_COLUMNS = [
-  ["01 · COMPILE ONCE", "Knowledge is extracted once into durable pages instead of re-discovered from raw files at query time."],
-  ["02 · TRACEABLE", "Every claim carries a source span you can open at the exact line and verify yourself."],
-  ["03 · AGENT & HUMAN", "The same pages browse well, lint cleanly, and export as retrieval-ready context."],
-  ["04 · PROFILES", "Domain types and workflows arrive as profiles — no domain branches inside the compiler."],
-];
-
 /**
  * Render the Overview dashboard.
  *
@@ -123,7 +122,10 @@ export function renderDashboard(main, envelope, health) {
   main.appendChild(buildStatGrid(model));
   main.appendChild(buildHero(model));
   main.appendChild(buildSplit(model));
-  main.appendChild(buildPatternStrip());
+  // null once the user has dismissed it (viewer-pattern.js) — appending
+  // nothing then, rather than an empty or hidden element.
+  const patternStrip = buildPatternStrip();
+  if (patternStrip) main.appendChild(patternStrip);
   renderDashboardRail([buildReceipt(model), buildNextActions(model), buildSnapshotNote()]);
   void mountGraphPanel(main, envelope);
 }
@@ -623,34 +625,6 @@ function nextActionRows(model) {
   if (!model.lint) rows.push({ glyph: "✓", title: "Run lint", hint: "llmwiki lint" });
   rows.push({ glyph: "⇩", title: "Export for agents", hint: "llmwiki export" });
   return rows;
-}
-
-/**
- * Build the four-column explainer strip. The head's caption ("shown until
- * you dismiss it", mockup tree line 266) is rendered as static text only —
- * the mockup carries no visible dismiss control in the DOM to wire up, so
- * this stops short of adding real dismiss/persistence behaviour.
- */
-function buildPatternStrip() {
-  const strip = el("section", "pattern-strip");
-  strip.appendChild(buildPatternHead());
-  const grid = el("div", "pattern-grid");
-  for (const [eyebrow, body] of PATTERN_COLUMNS) {
-    const column = el("div", "pattern-column");
-    column.appendChild(el("div", "pattern-eyebrow", eyebrow));
-    column.appendChild(el("div", "pattern-body", body));
-    grid.appendChild(column);
-  }
-  strip.appendChild(grid);
-  return strip;
-}
-
-/** Build the pattern strip's head band: title + a small static caption. */
-function buildPatternHead() {
-  const head = el("div", "pattern-head");
-  head.appendChild(el("span", "pattern-title", "The LLM Wiki pattern"));
-  head.appendChild(el("span", "pattern-head-caption", "shown until you dismiss it"));
-  return head;
 }
 
 /**

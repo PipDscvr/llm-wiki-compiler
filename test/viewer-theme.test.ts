@@ -8,18 +8,10 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { jsonResponse, mountViewerDom, type FetchResponder } from "./fixtures/viewer-jsdom.js";
-
-const ENVELOPE = {
-  project: { title: "demo", rootName: "demo" },
-  counts: {},
-  pages: [],
-  recentPages: [],
-  index: { available: false },
-};
+import { EMPTY_DEMO_ENVELOPE, jsonResponse, mountViewerDom, type FetchResponder } from "./fixtures/viewer-jsdom.js";
 
 const responder: FetchResponder = (url) => {
-  if (url.endsWith("/api/pages")) return jsonResponse(ENVELOPE);
+  if (url.endsWith("/api/pages")) return jsonResponse(EMPTY_DEMO_ENVELOPE);
   if (url.endsWith("/api/health")) return jsonResponse({ lint: null });
   return null;
 };
