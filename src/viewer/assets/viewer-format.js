@@ -9,6 +9,23 @@
 /** Milliseconds in a day, for whole-day age arithmetic. */
 const DAY_MS = 86_400_000;
 
+/** Fallback project title shown until a real one is known. */
+const DEFAULT_TITLE = "llmwiki";
+
+/**
+ * Display title for an `/api/pages` envelope, with a stable fallback.
+ *
+ * Shared by viewer.js (dashboard heading) and viewer-header.js (persistent
+ * header identity) so the two surfaces cannot disagree about the title.
+ *
+ * @param {unknown} envelope - The bootstrap envelope; accessed defensively
+ *   since first paint can call this before the fetch settles.
+ * @returns {string}
+ */
+export function projectTitle(envelope) {
+  return envelope?.project?.title || DEFAULT_TITLE;
+}
+
 /**
  * Whole-day age of an ISO timestamp, e.g. "3d". Returns "today" for anything
  * less than a day old and "" when the timestamp is absent or unparseable —

@@ -21,6 +21,7 @@ const REQUIRED_ASSETS = [
   "dist/viewer/assets/viewer.js",
   "dist/viewer/assets/viewer-dom.js",
   "dist/viewer/assets/viewer-format.js",
+  "dist/viewer/assets/viewer-header.js",
   "dist/viewer/assets/viewer-search.js",
   "dist/viewer/assets/viewer-sidebar.js",
   "dist/viewer/assets/viewer-rail.js",
@@ -36,6 +37,7 @@ const REQUIRED_ASSETS = [
   "dist/viewer/assets/fonts/jetbrains-mono-latin-500-normal.woff2",
   "dist/viewer/assets/fonts/jetbrains-mono-latin-600-normal.woff2",
   "dist/viewer/assets/viewer-tokens.css",
+  "dist/viewer/assets/viewer-chrome.css",
   "dist/viewer/assets/viewer-theme-boot.js",
   "dist/viewer/assets/viewer-theme.js",
 ];

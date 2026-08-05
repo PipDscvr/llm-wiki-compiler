@@ -1,0 +1,234 @@
+/**
+ * llmwiki viewer — application chrome.
+ *
+ * The shell frame, header, sidebar navigation, and support rail. Every
+ * colour here is a token from viewer-tokens.css; this file declares no
+ * raw colour literals so both themes stay in sync automatically.
+ *
+ * Layout is the three-region shell from the Nebula Design System reference:
+ * 230px sidebar, fluid main pane, 268px support rail, capped at a 1420px
+ * shell. `.sidebar*` rules here must match the markup `viewer-sidebar.js`
+ * actually emits (`sidebar-lockup`, `project-block`, `nav-section`, …) —
+ * see that file's JSDoc for the render model.
+ */
+
+.app-shell {
+  max-width: 1420px;
+  margin: 0 auto;
+  border: 1px solid var(--border-shell);
+  border-radius: var(--radius-shell);
+  background: var(--bg-shell);
+  overflow: hidden;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-shell);
+}
+
+.app-identity { min-width: 0; }
+.app-brand { display: flex; align-items: center; gap: 10px; }
+.app-logo { width: 22px; height: 22px; flex: none; opacity: 0.9; }
+
+.app-title {
+  font: 600 26px/1 var(--font-sans);
+  color: var(--fg);
+  letter-spacing: -0.03em;
+}
+
+.app-meta {
+  margin: 7px 0 0;
+  font: 400 12px/1 var(--font-mono);
+  color: var(--fg-dim);
+}
+
+.freshness-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  padding: 5px 8px;
+  border-radius: var(--radius-badge);
+}
+.freshness-pill[hidden] { display: none; }
+.freshness-pill::before {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.freshness-pill.is-ok { color: var(--ok); background: var(--ok-a10); border: 1px solid var(--ok-a24); }
+.freshness-pill.is-warn { color: var(--warn); background: var(--warn-a12); border: 1px solid var(--warn-border); }
+
+.app-actions { display: flex; align-items: center; gap: 9px; flex: none; }
+
+.chrome-button {
+  width: 34px; height: 34px;
+  display: grid; place-items: center;
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-strong);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.chrome-button:hover { background: var(--bg-hover); color: var(--fg-body); }
+
+.theme-icon { width: 16px; height: 16px; }
+[data-theme-toggle="dark"] .theme-icon-moon { display: none; }
+[data-theme-toggle="light"] .theme-icon-sun { display: none; }
+
+.github-link {
+  display: flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 13px;
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-strong);
+  font: 500 12px/1 var(--font-sans);
+  color: var(--fg-body);
+}
+.github-link:hover, .github-link:focus-visible { background: var(--bg-hover); text-decoration: none; }
+.github-mark { width: 15px; height: 15px; fill: currentColor; }
+.github-stars { font: 500 11px/1 var(--font-mono); color: var(--fg-dim); }
+
+/*
+ * Three explicit columns: sidebar · fluid main · support rail. The Task 7
+ * brief's draft only declared two (`230px minmax(0, 1fr)`); with three grid
+ * items and no third track, CSS Grid's default row-flow auto-placement
+ * wraps `.support-rail` onto a second row under the sidebar column instead
+ * of beside the main pane. 268px matches the Nebula Design System reference
+ * ("230px sidebar · fluid main · 268px rail · 1420px shell").
+ */
+.app-layout {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr) 268px;
+  min-height: 0;
+}
+
+.sidebar {
+  border-right: 1px solid var(--border-soft);
+  background: var(--bg-sidebar);
+  padding: 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/*
+ * `[data-sidebar]` (`.sidebar-nav` in the markup) is the mount point
+ * `renderSidebar()` fills — it sits one level inside `.sidebar`, alongside
+ * the search form and results list, not as `.sidebar`'s only child. It
+ * needs its own flex column so the 20px rhythm reaches the lockup/
+ * project-block/nav-section/docs-card content `renderSidebar()` actually
+ * renders, and `flex: 1` so `.docs-card`'s `margin-top: auto` has a
+ * flex context to push against, pinning it to the sidebar's bottom edge.
+ */
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  flex: 1;
+  min-height: 0;
+}
+
+/*
+ * Product lockup — the 34px mark beside "LLM Wiki Compiler" /
+ * "compile once · reuse forever" (design system §Component metrics). Not
+ * in the Task 7 draft CSS; added to match the markup `buildLockup()`
+ * actually emits in viewer-sidebar.js. The mark never sits on a coloured
+ * plate, so this carries no background of its own.
+ */
+.sidebar-lockup { display: flex; align-items: center; gap: 10px; }
+.sidebar-lockup-mark { width: 34px; height: 34px; flex: none; opacity: 0.9; }
+.sidebar-lockup-text { min-width: 0; }
+.sidebar-lockup-name { font: 600 13.5px/1.2 var(--font-sans); color: var(--fg-strong); }
+.sidebar-lockup-tagline { margin-top: 3px; font: 400 11px/1.3 var(--font-sans); color: var(--fg-dim); }
+
+.project-block {
+  padding: 12px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+}
+.project-name { font: 500 13px/1 var(--font-sans); color: var(--fg-strong); margin-top: 8px; }
+.project-status {
+  display: flex; align-items: center; gap: 6px; margin-top: 9px;
+  font: 500 10px/1 var(--font-mono); color: var(--ok);
+}
+.status-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ok); }
+
+.nav-section-label {
+  font: 500 9.5px/1 var(--font-mono);
+  letter-spacing: 0.13em;
+  color: var(--fg-ghost);
+  padding: 0 8px;
+  margin-bottom: 7px;
+}
+
+.nav-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
+
+.nav-link {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-row);
+  border: 1px solid transparent;
+  font: 400 12.5px/1 var(--font-sans);
+  color: var(--fg-muted);
+}
+.nav-link:hover { background: var(--bg-hover); color: var(--fg-body); text-decoration: none; }
+.nav-link[aria-current="page"] {
+  background: linear-gradient(90deg, var(--accent-a22), var(--accent-a05));
+  border-color: var(--accent-a30);
+  color: var(--fg-strong);
+  font-weight: 500;
+}
+.nav-link[aria-current="page"] .nav-label::before {
+  content: "";
+  display: inline-block;
+  width: 3px; height: 14px;
+  margin-right: 8px;
+  vertical-align: -3px;
+  border-radius: 2px;
+  background: var(--accent-text);
+}
+
+.nav-count { font: 500 10.5px/1 var(--font-mono); color: var(--fg-faint); }
+.nav-badge {
+  font: 500 10px/1 var(--font-mono);
+  color: var(--warn);
+  background: var(--warn-a12);
+  padding: 3px 6px;
+  border-radius: var(--radius-badge);
+}
+
+.docs-card {
+  margin-top: auto;
+  padding: 12px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+}
+.docs-card:hover { background: var(--bg-hover); text-decoration: none; }
+.docs-card-title { font: 500 12px/1.2 var(--font-sans); color: var(--fg-strong); margin-bottom: 5px; }
+.docs-card-body { font: 400 11px/1.5 var(--font-sans); color: var(--fg-dim); }
+
+.support-rail {
+  padding: 20px 16px;
+  border-left: 1px solid var(--border-soft);
+  font: 400 12px/1.5 var(--font-sans);
+  color: var(--fg-muted);
+}
+.support-rail dt { font: 500 11.5px/1 var(--font-sans); color: var(--fg-dim); margin-top: 0.7rem; }
+.support-rail dd { margin: 0.25rem 0; color: var(--fg-body); }
+
+.placeholder { color: var(--fg-dim); font-style: italic; }
+
+@media (max-width: 900px) {
+  .app-layout { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { border-right: none; border-bottom: 1px solid var(--border-soft); }
+}

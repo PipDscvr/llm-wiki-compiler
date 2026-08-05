@@ -1,4 +1,15 @@
-/* llmwiki viewer — minimal typography + layout. Dark-mode-friendly defaults. */
+/**
+ * llmwiki viewer — base reset and the surfaces not yet migrated to Nebula.
+ *
+ * The application chrome (shell, header, sidebar nav, support rail) moved
+ * to viewer-chrome.css in Task 7 — see that file for the token-driven
+ * styling. This file still owns the legacy `:root` token set (light by
+ * default, dark via `prefers-color-scheme`) that the surfaces below still
+ * read: base reset, main pane, health dashboard, home dashboard, search
+ * results, freshness badges/filter, and the graph pane. Later tasks keep
+ * draining this file toward the same Nebula token system in
+ * viewer-tokens.css until nothing here reads the legacy tokens.
+ */
 
 :root {
   color-scheme: light dark;
@@ -62,88 +73,15 @@ a:hover, a:focus-visible { text-decoration: underline; }
 }
 .skip-link:focus { top: 0; }
 
-.app-header {
-  padding: 0.75rem 1rem; border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-}
-.app-brand {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  gap: 0.6rem;
-}
-.app-logo {
-  width: 2rem;
-  height: 2rem;
-  flex: none;
-  object-fit: contain;
-}
-.app-title { font-size: 1.05rem; }
-.github-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.35rem 0.65rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--fg);
-  background: var(--surface-raised);
-  font-weight: 700;
-  line-height: 1;
-}
-.github-link:hover,
-.github-link:focus-visible {
-  background: var(--accent-soft);
-  text-decoration: none;
-}
-.github-mark {
-  width: 1.25rem;
-  height: 1.25rem;
-  flex: none;
-  fill: currentColor;
-}
-.github-stars {
-  font-size: 0.82rem;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
-.app-layout {
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 260px;
-  gap: 0;
-  min-height: calc(100vh - 3rem);
-}
-
-.sidebar {
-  border-right: 1px solid var(--border);
-  background: var(--bg-muted);
-  padding: 1rem;
-  overflow-y: auto;
-}
+/*
+ * `.app-header`, `.app-brand`, `.app-logo`, `.app-title`, `.github-*`,
+ * `.app-layout`, and the old page-tree `.sidebar` rules moved to
+ * viewer-chrome.css (Task 7) and were rewritten against the Nebula
+ * tokens there. `.sidebar.search-active` stays here: it toggles the
+ * still-active search-results overlay and has no chrome-stylesheet
+ * counterpart yet (the search surfaces move in a later task).
+ */
 .sidebar.search-active [data-sidebar] { display: none; }
-.sidebar h2 {
-  font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
-  color: var(--fg-muted); margin: 1rem 0 0.5rem;
-}
-.sidebar details { margin: 0.65rem 0; }
-.sidebar summary {
-  cursor: pointer;
-  font-weight: 700;
-  color: var(--fg);
-  margin-bottom: 0.35rem;
-}
-.sidebar ul { list-style: none; padding: 0; margin: 0; }
-.sidebar li a {
-  display: block;
-  padding: 0.28rem 0.5rem;
-  border-radius: 6px;
-  color: var(--fg);
-  line-height: 1.35;
-}
-.sidebar li a:hover, .sidebar li a:focus-visible { background: var(--surface); }
-.sidebar li a[aria-current="page"] { background: var(--accent); color: #fff; }
 
 .sidebar-search {
   margin-bottom: 0.75rem;
@@ -214,14 +152,7 @@ a:hover, a:focus-visible { text-decoration: underline; }
 .main-pane code { background: var(--bg-muted); padding: 0.1em 0.3em; border-radius: 3px; }
 .main-pane pre code { background: none; padding: 0; }
 
-.support-rail {
-  border-left: 1px solid var(--border);
-  padding: 1rem; background: var(--bg-muted); font-size: 0.875rem;
-}
-.support-rail dt { font-weight: 700; color: var(--fg-muted); margin-top: 0.7rem; }
-.support-rail dd { margin: 0.25rem 0; }
-
-.placeholder { color: var(--fg-muted); font-style: italic; }
+/* `.support-rail` and `.placeholder` moved to viewer-chrome.css (Task 7). */
 [data-missing="true"] {
   color: var(--missing);
   text-decoration: underline dotted;
@@ -294,21 +225,13 @@ a:hover, a:focus-visible { text-decoration: underline; }
   border-bottom: 1px solid var(--border);
 }
 
+/*
+ * The `.app-layout` / `.sidebar` / `.support-rail` breakpoints that used to
+ * live here moved to viewer-chrome.css's own `@media (max-width: 900px)`
+ * block (Task 7). `.main-pane` isn't chrome and hasn't moved yet, so its
+ * breakpoint stays here.
+ */
 @media (max-width: 800px) {
-  .app-layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto auto;
-  }
-  .sidebar {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    overflow-y: auto;
-    max-height: 16rem;
-  }
-  .support-rail {
-    border-left: none;
-    border-top: 1px solid var(--border);
-  }
   .main-pane {
     padding: 1rem;
   }

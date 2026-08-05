@@ -9,7 +9,8 @@
     "docs/**",
     "src/viewer/assets/index.html",
     "src/viewer/assets/viewer.css",
-    "src/viewer/assets/viewer-tokens.css"
+    "src/viewer/assets/viewer-tokens.css",
+    "src/viewer/assets/viewer-chrome.css"
   ],
   "ignoreDependencies": [
     "@fontsource/space-grotesk",

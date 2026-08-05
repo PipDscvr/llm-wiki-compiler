@@ -25,11 +25,11 @@ import { wireSearch } from "./viewer-search.js";
 import { renderSidebar, markActive } from "./viewer-sidebar.js";
 import { renderProjectRail, renderSupportRail, clearSupportRail } from "./viewer-rail.js";
 import { loadGraph } from "./viewer-graph.js";
+import { renderHeader } from "./viewer-header.js";
+import { projectTitle } from "./viewer-format.js";
 
 const PAGE_INDEX_SELECTOR = "#page-index";
 const MAIN_SELECTOR = "[data-main-pane]";
-const TITLE_SELECTOR = "[data-app-title]";
-const DEFAULT_TITLE = "llmwiki";
 const EMPTY_INDEX = { pages: [] };
 
 /** Hashes that all map to the home route — `#`, `#/`, and empty/missing. */
@@ -171,11 +171,6 @@ function appendRecentBlockIfAny(main, envelope) {
   if (hasRecentPages(envelope)) {
     main.appendChild(buildRecentBlock(envelope.recentPages));
   }
-}
-
-/** Display title for the envelope, with a stable fallback. */
-function projectTitle(envelope) {
-  return envelope?.project?.title || DEFAULT_TITLE;
 }
 
 /** True when the envelope carries at least one recent page. */
@@ -327,8 +322,6 @@ async function loadAndRenderHome() {
 
 /** Apply a successfully fetched /api/pages envelope to the chrome + main pane. */
 function applyHomeEnvelope(envelope) {
-  const titleEl = document.querySelector(TITLE_SELECTOR);
-  titleEl.textContent = projectTitle(envelope);
   renderHome(envelope);
   // Inject into .app-layout (outside <main>) so the banner persists across route changes.
   injectGlobalCorruptBanner(envelope?.stateStatus);
@@ -510,6 +503,7 @@ function main() {
   wireSearch({ fetchJson });
   void loadBootstrapData().then((data) => {
     renderSidebar(sidebarModel(data));
+    renderHeader(data.pages);
     injectGlobalCorruptBanner(data.pages?.stateStatus);
     void renderRoute();
   });
