@@ -186,6 +186,31 @@ describe("dashboard recently-compiled freshness dot", () => {
   });
 });
 
+describe("dashboard recently-compiled citation count", () => {
+  it("renders the page's citation count, joined from pages[] by id", async () => {
+    // recentPages[] carries no citationCount of its own (see snapshot.ts
+    // buildRecentPages) — this joins it from the matching pages[] row by
+    // id, the same way freshness is joined.
+    const main = await mountDashboard(0, 0);
+    const metric = main.querySelector(".recent-row .recent-citations");
+    expect(metric?.textContent).toBe("8");
+  });
+
+  it("renders 0 for an uncited page rather than leaving the cell blank", async () => {
+    // Matches the #/concepts list row's own fallback (viewer-lists.js
+    // buildCitationCount) so the two surfaces agree, and keeps the age
+    // column's alignment instead of collapsing the cell.
+    const base = envelopeWith(0, 0);
+    const envelope = {
+      ...base,
+      pages: [{ ...base.pages[0], citationCount: 0, unresolvedCitationCount: 0 }],
+    };
+    const main = await mountDashboardWithEnvelope(envelope);
+    const metric = main.querySelector(".recent-row .recent-citations");
+    expect(metric?.textContent).toBe("0");
+  });
+});
+
 describe("dashboard rail unification", () => {
   it("renders the receipt, next actions, and snapshot note into the shared support rail, not a second rail inside main", async () => {
     const main = await mountDashboard(0, 0);

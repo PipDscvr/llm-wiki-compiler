@@ -39,9 +39,11 @@
  * `loadGraph()` is the one entry point for two callers — the full `#/graph`
  * route and the dashboard's compact `[data-graph-panel]` — so the panel can
  * never drift into a second, decorative renderer. `options.compact` selects
- * a `MODE_SETTINGS` entry (link distance, charge, radius bounds, drag)
- * rather than forking any code path; the fetch call and the force-simulation
- * builder stay single-instance in both modes.
+ * full vs compact sizing (radius bounds, drag) and, for compact, derives its
+ * link distance/charge from the live panel size and node count rather than
+ * a fixed pair of numbers (see `resolveSettings`/`compactForces`) — the
+ * fetch call and the force-simulation builder stay single-instance in both
+ * modes regardless.
  */
 
 import { emptyState } from "./viewer-dom.js";
@@ -49,16 +51,87 @@ import { emptyState } from "./viewer-dom.js";
 /**
  * Force and sizing parameters per mode. Compact serves the dashboard's
  * `[data-graph-panel]` — a small, fluid-width panel (roughly half the main
- * column, collapsing to full width under 900px) about 296px tall: shorter
- * links and weaker repulsion keep the layout inside that box rather than
- * pushing most nodes out of view.
+ * column, collapsing to full width under 900px) about 296px tall. Its
+ * radius/drag stay fixed here; its linkDistance/charge are derived per
+ * render from the panel's live size and node count instead (`compactForces`
+ * below) — a fixed pair tuned for one viewport left an 8-node graph a tiny
+ * knot in a much bigger panel at every other size (see the fidelity audit).
  */
 const MODE_SETTINGS = {
   full:    { linkDistance: 80, charge: -200, minRadius: 4,   maxRadius: 10, drag: true },
-  compact: { linkDistance: 34, charge: -60,  minRadius: 2.5, maxRadius: 6,  drag: false },
+  compact: { minRadius: 2.5, maxRadius: 6, drag: false },
 };
 const ARROWHEAD_MARKER_ID   = 'llmwiki-arrowhead';
 const HIGH_DEGREE_THRESHOLD = 5;
+
+/**
+ * Compact-force tuning constants (used by `compactForces`, below).
+ * `COMPACT_REF_PER_NODE` is that function's `perNode` for the reference
+ * case this pass measured and tuned against — the demo wiki's 8-node graph
+ * in a ~443×304 panel (sqrt(443 * 296 / 8) ≈ 128). `COMPACT_LINK_DISTANCE_
+ * FACTOR` and `COMPACT_CHARGE_FACTOR` are calibrated at exactly that point;
+ * see `compactForces` for why that calibration holds regardless of
+ * `COMPACT_FALLOFF_EXPONENT`. That exponent steepens how fast the derived
+ * forces shrink for graphs bigger than the reference: exponent 1 (plain
+ * linear-in-perNode scaling) still left an 80-node graph overflowing the
+ * panel by up to ~195px; 2.65 was the smallest value that cleared it,
+ * checked with Playwright against 8/37/80/290-node fixtures (see the
+ * fidelity pass's probe2.mjs).
+ */
+const COMPACT_REF_PER_NODE = 128;
+const COMPACT_FALLOFF_EXPONENT = 2.65;
+const COMPACT_LINK_DISTANCE_FACTOR = 1.39;
+const COMPACT_CHARGE_FACTOR = 4.69;
+
+/**
+ * Derive compact mode's linkDistance/charge from the panel's actual size
+ * and node count, rather than the fixed pair of numbers this replaced (the
+ * root cause of the "tiny knot" bug — see the fidelity audit). `perNode` is
+ * the side of the square each node would own if the panel's area were split
+ * evenly across them: a per-node spacing budget that shrinks as the panel
+ * narrows or the graph grows, so the layout stays fluid instead of tuned to
+ * one viewport.
+ *
+ * Scaling `linkDistance`/`charge` directly off `perNode` (exponent 1) is
+ * not steep enough — a well-connected graph's on-screen footprint does not
+ * shrink linearly with reduced per-node spacing — so `COMPACT_FALLOFF_
+ * EXPONENT` steepens the falloff above the reference graph size. The
+ * exponent cannot move the reference case itself: at
+ * `perNode === COMPACT_REF_PER_NODE`, `(perNode / REF) ** (exponent - 1)`
+ * is always 1, so `scaled === perNode` no matter which exponent is chosen.
+ *
+ * @param {number} width - Panel width in the simulation's own units (the
+ *   container's `clientWidth` at mount).
+ * @param {number} height - Panel height, same units.
+ * @param {number} nodeCount - Node count of the graph being laid out.
+ * @returns {{linkDistance: number, charge: number}}
+ */
+function compactForces(width, height, nodeCount) {
+  const perNode = Math.sqrt((width * height) / Math.max(1, nodeCount));
+  const scaled = perNode * (perNode / COMPACT_REF_PER_NODE) ** (COMPACT_FALLOFF_EXPONENT - 1);
+  return {
+    linkDistance: scaled * COMPACT_LINK_DISTANCE_FACTOR,
+    charge: -scaled * COMPACT_CHARGE_FACTOR,
+  };
+}
+
+/**
+ * Resolve the force/sizing settings for one render. Full mode's numbers are
+ * the fixed `MODE_SETTINGS.full` object, unchanged by this function
+ * (`test/viewer-graph-compact.test.ts` pins its literal source text).
+ * Compact mode keeps `MODE_SETTINGS.compact`'s radius/drag constants but
+ * replaces its old fixed linkDistance/charge with `compactForces`'s
+ * live-sized ones.
+ *
+ * @param {{compact?: boolean}} options - `loadGraph`'s own options.
+ * @param {number} width - Container width (simulation units).
+ * @param {number} height - Container height (simulation units).
+ * @param {number} nodeCount - Node count of the graph being laid out.
+ */
+function resolveSettings(options, width, height, nodeCount) {
+  if (!options.compact) return MODE_SETTINGS.full;
+  return { ...MODE_SETTINGS.compact, ...compactForces(width, height, nodeCount) };
+}
 
 /**
  * Freshness states that colour a node amber. `GraphNode` carries no freshness
@@ -347,11 +420,12 @@ function styleEdges(edgeSel) {
  *   five positional ones.
  * @param {{nodes: object[], edges: object[]}} data - The `/api/graph` payload.
  * @param {{compact?: boolean, staleIds?: Set<string>}} options - `compact` selects
- *   the `MODE_SETTINGS` entry; `staleIds` feeds `nodeClass()` via the render context.
+ *   full vs compact settings (see `resolveSettings`); `staleIds` feeds
+ *   `nodeClass()` via the render context.
  */
 function renderGraph(view, data, options) {
   const d3 = globalThis.d3;
-  const settings = options.compact ? MODE_SETTINGS.compact : MODE_SETTINGS.full;
+  const settings = resolveSettings(options, view.width, view.height, data.nodes.length);
   const maxDegree = Math.max(0, ...data.nodes.map(n => n.degree));
   const ctx = { maxDegree, staleIds: options.staleIds ?? new Set(), settings };
 
@@ -472,7 +546,8 @@ function renderEmptyState(container) {
  * Entry point for both the `#/graph` route (viewer.js) and the dashboard's
  * compact panel (viewer-dashboard.js). Fetches `/api/graph`, builds the SVG,
  * and starts the force simulation — the same fetch call and simulation
- * builder run in both modes; only `MODE_SETTINGS` differs.
+ * builder run in both modes; only the resolved settings differ (see
+ * `resolveSettings`).
  *
  * @param {HTMLElement} container - Element to render into.
  * @param {{compact?: boolean, staleIds?: Set<string>}} [options] - Compact mode

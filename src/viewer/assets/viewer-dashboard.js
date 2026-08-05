@@ -156,7 +156,7 @@ function buildModel(envelope, health) {
     counts: envelope?.counts ?? {},
     graph: envelope?.graph ?? { nodeCount: 0, edgeCount: 0, danglingCount: 0 },
     recentPages: envelope?.recentPages ?? [],
-    freshnessById: freshnessIndex(pages),
+    pageMetaById: pageMetaIndex(pages),
     pageCount: pages.length,
     totalCitations,
     // Concepts-only citation total for the "Concepts" stat card's sub-line —
@@ -181,10 +181,18 @@ function citationsInDirectory(pages, directory) {
   return sumBy(inDirectory, (p) => p.citationCount ?? 0);
 }
 
-/** Index page freshness by page id so recent rows can join against it. */
-function freshnessIndex(pages) {
+/**
+ * Index freshness and citation count by page id so recent rows can join
+ * against both. `recentPages[]` (the envelope's own rows, see snapshot.ts
+ * buildRecentPages) carries only id/title/slug/updatedAt — both figures
+ * live on the matching `pages[]` row instead. One Map keyed by id, widened
+ * to carry both fields, rather than two parallel indexes that could drift.
+ */
+function pageMetaIndex(pages) {
   const index = new Map();
-  for (const page of pages) index.set(page.id, page.freshness);
+  for (const page of pages) {
+    index.set(page.id, { freshness: page.freshness, citationCount: page.citationCount });
+  }
   return index;
 }
 
@@ -291,7 +299,7 @@ function buildRecentPanel(model) {
     );
   }
   for (const page of model.recentPages) {
-    body.appendChild(buildRecentRow(page, model.freshnessById.get(page.id)));
+    body.appendChild(buildRecentRow(page, model.pageMetaById.get(page.id)));
   }
   panel.appendChild(body);
   // The mockup's footer caption ("cited / total claims per page", tree line
@@ -313,9 +321,9 @@ function buildRecentPanel(model) {
 // cyclomatic count for what stays a single flat row builder
 // (cognitive complexity: 3).
 // fallow-ignore-next-line complexity
-function buildRecentRow(page, freshness) {
+function buildRecentRow(page, meta) {
   const row = el("div", "recent-row");
-  const status = freshness?.freshnessStatus ?? "unverified";
+  const status = meta?.freshness?.freshnessStatus ?? "unverified";
   // Same rule as the #/concepts and #/queries list rows (viewer-lists.js) —
   // only stale/orphaned warn. This dot and that one share the .list-dot
   // class and must never disagree about what a given status means.
@@ -326,6 +334,13 @@ function buildRecentRow(page, freshness) {
   const link = el("a", "recent-title", page.title || page.slug);
   link.href = `#/${encodeURIComponent(page.pageDirectory)}/${encodeURIComponent(page.slug)}`;
   row.appendChild(link);
+  // The mockup's "8/8" is cited/total CLAIMS, which this build cannot
+  // produce (no claims inventory — see file header); citationCount is the
+  // approved substitution (design spec §5.3). Renders "0" rather than
+  // nothing for an uncited page — the same fallback the #/concepts list
+  // rows use (viewer-lists.js buildCitationCount) — so the age column
+  // stays aligned and the two surfaces agree on what an uncited page shows.
+  row.appendChild(el("span", "recent-citations", String(meta?.citationCount ?? 0)));
   row.appendChild(el("span", "recent-age", relativeAge(page.updatedAt)));
   return row;
 }

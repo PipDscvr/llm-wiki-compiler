@@ -286,12 +286,21 @@
   color: var(--fg-body);
 }
 
+/* citationCount — the approved substitution for the mockup's "8/8"
+ * cited/total-claims ratio (design spec §5.3; this build has no claims
+ * inventory to back a ratio — see file header). 500 10px/1 mono has no
+ * matching type token — mockup tree line 167. */
+.recent-citations {
+  flex: none;
+  font: 500 10px/1 var(--font-mono);
+  color: var(--accent-text);
+}
+
 .recent-age {
   flex: none;
   /* 10.5px has no matching token — mockup tree line 169. The fixed 50px
-   * width is what right-aligns this column now that the metric column
-   * (the mockup's "8/8"-style ratio — out of scope, see file header) is
-   * omitted. */
+   * width right-aligns this column regardless of the citation count's
+   * digit width. */
   font: 400 10.5px/1 var(--font-mono);
   color: var(--fg-faint);
   width: 50px;
