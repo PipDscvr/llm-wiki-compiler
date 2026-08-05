@@ -121,7 +121,12 @@
   --fg-muted: #a8a3bd;
   --fg-dim: #7d7896;
   --fg-faint: #6f6a89;
-  --fg-ghost: #5c5877;
+  /* Measured (test/viewer-contrast.test.ts): the mockup's #5c5877 on
+   * --bg-sidebar (#0a0912) is 2.94:1, short of the 3:1 AA-large floor —
+   * this token is what section eyebrows (.nav-section-label) use on the
+   * sidebar. Nudged toward --fg-faint, the next rung up, by the smallest
+   * step that clears the floor: 3.03:1. */
+  --fg-ghost: #5e5a79;
   --fg-disabled: #4d4964;
 
   /* Accent */
@@ -193,7 +198,11 @@
   --fg-muted: #54506a;
   --fg-dim: #6d6884;
   --fg-faint: #787391;
-  --fg-ghost: #9793aa;
+  /* Measured (test/viewer-contrast.test.ts): the mockup's #9793aa on
+   * --bg-sidebar (#f5f4fa) is 2.72:1, short of the 3:1 AA-large floor.
+   * Nudged toward --fg-faint, the next rung up, by the smallest step
+   * that clears the floor: 3.03:1. */
+  --fg-ghost: #8f8aa3;
   --fg-disabled: #adaabb;
 
   /* Accent */
@@ -248,7 +257,9 @@
     --fg-muted: #54506a;
     --fg-dim: #6d6884;
     --fg-faint: #787391;
-    --fg-ghost: #9793aa;
+    /* Kept in sync with the :root[data-theme="light"] contrast fix above
+     * — same values, this block just serves the no-stored-preference path. */
+    --fg-ghost: #8f8aa3;
     --fg-disabled: #adaabb;
 
     /* Accent */

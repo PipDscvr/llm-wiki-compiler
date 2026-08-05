@@ -4,7 +4,10 @@
  * Mounts the real shell template + `viewer.js` + `viewer-search.js`
  * into JSDOM via the shared `mountViewerDom` fixture. Asserts the
  * landmark structure, the focus-visible outline rule in the stylesheet,
- * the wired search input, and the `/#/health` dashboard rendering.
+ * the wired search input (including its header ⌘K / Ctrl+K shortcut),
+ * the `/#/health` dashboard rendering, and that colour is never the only
+ * signal — the theme toggle's `aria-pressed` state and every freshness
+ * dot's `aria-label`.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +21,10 @@ import {
   type FetchResponder,
 } from "./fixtures/viewer-jsdom.js";
 
-const STYLESHEET_PATH = path.resolve("src/viewer/assets/viewer.css");
+// The universal `:focus-visible` rule lives in viewer-tokens.css (the
+// global reset/token sheet), not a per-surface stylesheet — viewer.css,
+// which used to own it, was deleted in Task 12.
+const STYLESHEET_PATH = path.resolve("src/viewer/assets/viewer-tokens.css");
 
 interface SearchResultRow {
   id: string;
@@ -56,6 +62,47 @@ function makeResponder(
     if (url.endsWith("/api/health")) return jsonResponse(healthPayload ?? {});
     return null;
   };
+}
+
+/**
+ * One page that is both a "recently compiled" entry and stale, so
+ * mounting the default (home) route paints at least one real
+ * `.list-dot` — the dashboard's recent-pages panel shares that dot
+ * with the list routes (see viewer-dashboard.css). Without a page
+ * here, the freshness-dot accessibility test below would iterate an
+ * empty NodeList and pass vacuously.
+ */
+function defaultViewerResponder(): FetchResponder {
+  const page = {
+    id: "concepts/alpha",
+    pageDirectory: "concepts" as const,
+    slug: "alpha",
+    title: "Alpha",
+    updatedAt: "2026-05-01T00:00:00.000Z",
+    citationCount: 1,
+    unresolvedCitationCount: 0,
+    freshness: { freshnessStatus: "stale", contradicted: false, archived: false },
+  };
+  return (url) => {
+    if (url.endsWith("/api/pages")) {
+      return jsonResponse({
+        project: { title: "demo", rootName: "demo" },
+        counts: { concepts: 1, queries: 0, sourceFiles: 0, pendingReviews: 0 },
+        index: { available: false, href: "/#/index" },
+        recentPages: [page],
+        pages: [page],
+        updatedAt: "2026-05-12T00:00:00.000Z",
+      });
+    }
+    if (url.endsWith("/api/health")) return jsonResponse({ lint: null });
+    return null;
+  };
+}
+
+/** Mount the shell at its default (home) route and return the document. */
+async function mountDefaultViewer(): Promise<Document> {
+  const { dom } = await mountViewerDom([], defaultViewerResponder());
+  return dom.window.document;
 }
 
 afterEach(() => {
@@ -240,6 +287,30 @@ describe("search UI — input wires up and renders results", () => {
     const results = dom.window.document.querySelector("[data-search-results]") as HTMLElement;
     expect(results.hidden).toBe(true);
   });
+
+  it("focuses and selects the search input on Ctrl+K, without leaking the shortcut to other fields", async () => {
+    const { dom } = await mountViewerDom([], makeResponder([]));
+    const doc = dom.window.document;
+    const input = doc.querySelector("[data-search-input]") as HTMLInputElement;
+    input.value = "stale query";
+    // A keydown on an unrelated element must not trigger the shortcut —
+    // the chip's binding is global, but typing "k" into other fields is not.
+    const elsewhere = doc.createElement("input");
+    doc.body.appendChild(elsewhere);
+    elsewhere.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
+    );
+    expect(doc.activeElement).not.toBe(input);
+    const event = new dom.window.KeyboardEvent("keydown", {
+      key: "k",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    doc.dispatchEvent(event);
+    expect(doc.activeElement).toBe(input);
+    expect(event.defaultPrevented).toBe(true);
+  });
 });
 
 describe("/#/health route — dashboard renders from /api/health", () => {
@@ -296,5 +367,23 @@ describe("sidebar — Health entry routes to #/health", () => {
     ) as HTMLAnchorElement | null;
     expect(link).not.toBeNull();
     expect(link!.getAttribute("href")).toBe("#/health");
+  });
+});
+
+describe("header + freshness dots — colour is never the only signal", () => {
+  it("gives the theme toggle an accessible name and pressed state", async () => {
+    const doc = await mountDefaultViewer();
+    const button = doc.querySelector("[data-theme-toggle]");
+    expect(button?.getAttribute("aria-label")).toBeTruthy();
+    expect(button?.getAttribute("aria-pressed")).toMatch(/true|false/);
+  });
+
+  it("labels freshness dots so colour is never the only signal", async () => {
+    const doc = await mountDefaultViewer();
+    const dots = doc.querySelectorAll(".list-dot");
+    expect(dots.length).toBeGreaterThan(0);
+    for (const dot of dots) {
+      expect(dot.getAttribute("aria-label")).toBeTruthy();
+    }
   });
 });

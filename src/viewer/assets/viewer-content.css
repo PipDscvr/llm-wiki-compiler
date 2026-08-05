@@ -1,0 +1,376 @@
+/**
+ * llmwiki viewer — page content, search, health route, and list routes.
+ *
+ * Everything no earlier stylesheet claimed: the main pane itself, rendered
+ * markdown (`.rendered-body`), the header search control and its results
+ * dropdown, citation chips (`src/viewer/citation-rule.ts`), freshness
+ * badges/caption, the support rail's warnings block, the warning/corrupt
+ * banners, the health route, and the list routes from Task 8
+ * (`#/concepts`, `#/queries`, `#/sources`). Every colour here is a token
+ * from viewer-tokens.css — no raw colour literals — so both themes stay
+ * correct automatically. This file replaces the legacy viewer.css, which
+ * carried its own theme-unaware `:root` token set; deleting it also
+ * retires that shadow system and the stray rules that read it (the
+ * `body` background, the focus ring, `.skip-link`), letting the
+ * Nebula-token versions already declared in viewer-tokens.css take over.
+ *
+ * Loads directly after viewer-tokens.css and before viewer-chrome.css,
+ * viewer-dashboard.css, and viewer-graph.css — the same position
+ * viewer.css held. `.dashboard`, `.graph-pane`, and `.list-pane` below all
+ * override `.main-pane`'s prose-width cap from a later-loaded sheet or
+ * later in this same file; moving this file's `<link>` would silently
+ * break those overrides (see each file's own header for the mechanism).
+ */
+
+/* ---- Main pane ---- */
+
+.main-pane {
+  padding: 32px;
+  width: min(100%, var(--max-content-width));
+  overflow-x: auto;
+}
+.main-pane:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+
+/* Page-level title shared by every route (page view, list routes, health,
+ * index) — the routes that don't use this heading put it inside their own
+ * wrapper instead (e.g. `.rendered-body`'s own headings, below). */
+.main-pane > h1 { margin: 0 0 var(--space-16); color: var(--fg-strong); }
+
+@media (max-width: 800px) {
+  .main-pane { padding: 16px; }
+}
+
+/* ---- Rendered markdown body ---- */
+
+.rendered-body h1, .rendered-body h2, .rendered-body h3,
+.rendered-body h4, .rendered-body h5, .rendered-body h6 {
+  margin: var(--space-24) 0 var(--space-12);
+  color: var(--fg-strong);
+  line-height: 1.3;
+}
+.rendered-body > :first-child { margin-top: 0; }
+
+.rendered-body p { margin: 0 0 var(--space-16); color: var(--fg-body); }
+
+.rendered-body ul, .rendered-body ol {
+  margin: 0 0 var(--space-16);
+  padding-left: 1.4em;
+  color: var(--fg-body);
+}
+.rendered-body li { margin-bottom: var(--space-6); }
+
+.rendered-body pre {
+  margin: 0 0 var(--space-16);
+  padding: var(--space-12) var(--space-16);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-sunken);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.rendered-body code {
+  padding: 0.15em 0.4em;
+  border-radius: var(--radius-badge);
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  color: var(--fg-body);
+}
+.rendered-body pre code { padding: 0; background: none; }
+
+/* Dangling wikilink — `src/viewer/wikilink-rule.ts` renders an unresolved
+ * `[[slug]]` as this span. Shares the graph's dangling-node colour
+ * (`--danger`, see viewer-graph.css) so "this reference doesn't resolve"
+ * reads the same way everywhere in the viewer. */
+[data-missing="true"] {
+  color: var(--danger);
+  text-decoration: underline dotted;
+  text-decoration-color: var(--danger);
+  text-underline-offset: 0.18em;
+}
+
+/* Citation chip — `src/viewer/citation-rule.ts` renders one per parsed
+ * `^[source.md]` span. `[data-resolved="false"]` flips it to the warn
+ * family so an unresolvable source stands out inline, not just on hover. */
+.citation-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  margin-left: 2px;
+  border-radius: var(--radius-chip);
+  background: var(--bg-chip);
+  border: 1px solid var(--border-chip);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-dim);
+  vertical-align: 0.05em;
+}
+.citation-chip[data-resolved="false"] {
+  background: var(--warn-a12);
+  border-color: var(--warn-border);
+  color: var(--warn);
+}
+
+/* ---- Query question banner (#/queries/<slug> pages) ---- */
+
+.query-question {
+  margin: 0 0 var(--space-16);
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--bg-card);
+  font: 500 13px/1.5 var(--font-sans);
+  font-style: italic;
+  color: var(--fg-body);
+}
+
+/* ---- Warning / corrupt-state banners ---- */
+
+.warning-banner,
+.corrupt-state-banner {
+  margin: 0 0 var(--space-16);
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius-control);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font: var(--type-body);
+}
+
+/* ---- Freshness badges (support rail: STALE / ORPHANED / CONTRADICTED / ARCHIVED) ---- */
+
+.freshness-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  margin-bottom: var(--space-9);
+}
+.freshness-badge {
+  display: inline-block;
+  padding: 3px 7px;
+  border-radius: var(--radius-badge);
+  font: var(--type-badge);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+/* Source-freshness axis: stale (ageing) vs orphaned (nothing points here) —
+ * orphaned reads as the more severe of the two, so it takes the danger tone. */
+.badge-stale       { background: var(--warn-a12);    color: var(--warn); border: 1px solid var(--warn-border); }
+.badge-orphaned    { background: var(--danger-a12);  color: var(--danger); }
+/* Provenance axis: contradicted borrows the accent family (an editorial
+ * flag, not a freshness problem); archived is neutral, matching .stat-badge. */
+.badge-contradicted { background: var(--accent-a12); color: var(--accent-text); border: 1px solid var(--accent-a30); }
+.badge-archived     { background: var(--bg-chip);    color: var(--fg-dim); border: 1px solid var(--border-chip); }
+
+.freshness-caption {
+  margin-top: var(--space-9);
+  font: var(--type-metadata);
+  font-style: italic;
+  color: var(--fg-dim);
+}
+
+/* ---- Support rail: warnings block ---- */
+
+.support-rail-warnings {
+  margin-top: var(--space-16);
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--border-soft);
+}
+.support-rail-warnings h2 {
+  font: var(--type-label);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  margin: 0 0 var(--space-9);
+}
+.support-rail-warnings ul { list-style: none; margin: 0; padding: 0; }
+.support-rail-warnings li { margin-bottom: var(--space-6); color: var(--fg-body); }
+.support-rail-reason { color: var(--fg-dim); }
+
+/* ---- Header search control ---- */
+
+/*
+ * `.sidebar-search` is the outer 34px control (matches `.chrome-button` /
+ * `.github-link` in viewer-chrome.css) and the positioning context for its
+ * results dropdown — `position: relative` here is why the ⌘K binding in
+ * viewer-search.js can move the whole widget out of the sidebar without
+ * the dropdown losing its anchor. The name is a holdover from when the
+ * control lived in `.sidebar`; kept because renaming buys nothing and the
+ * class still means "the search control," not "a sidebar-only thing."
+ */
+.sidebar-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-9);
+  height: 34px;
+  padding: 0 8px 0 12px;
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-strong);
+}
+.sidebar-search input[type="search"] {
+  width: 140px;
+  border: 0;
+  padding: 0;
+  background: none;
+  font: var(--type-body);
+  color: var(--fg-body);
+}
+.sidebar-search input[type="search"]::placeholder { color: var(--fg-faint); }
+.sidebar-search input[type="search"]::-webkit-search-decoration,
+.sidebar-search input[type="search"]::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+/* The ⌘K hint chip — advertises the shortcut wireSearchShortcut() binds. */
+.search-kbd {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: var(--radius-chip);
+  background: var(--bg-chip);
+  border: 1px solid var(--border-chip);
+  font: var(--type-metadata);
+  color: var(--fg-faint);
+}
+
+/*
+ * Results dropdown: absolutely positioned against `.sidebar-search` (see
+ * above) so it overlays page content instead of pushing the header's other
+ * actions sideways — the sidebar-column layout this used to share space
+ * with no longer exists once search lives in the header.
+ */
+.search-results {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  width: 320px;
+  max-height: min(70vh, 420px);
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-card);
+}
+.search-results[hidden] { display: none; }
+.search-results .empty {
+  padding: var(--space-9) var(--space-12);
+  font: var(--type-body);
+  font-style: italic;
+  color: var(--fg-dim);
+}
+.search-results a {
+  display: block;
+  padding: var(--space-9) var(--space-12);
+  border-radius: var(--radius-row);
+  color: var(--fg-body);
+}
+.search-results a:hover, .search-results a:focus-visible {
+  background: var(--bg-hover);
+  text-decoration: none;
+}
+.result-kind {
+  display: block;
+  font: var(--type-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+.result-title { display: block; font: 500 13px/1.35 var(--font-sans); color: var(--fg-strong); }
+.result-snippet { display: block; margin-top: 2px; font: var(--type-body); color: var(--fg-dim); }
+
+/* ---- Health route ---- */
+
+.health-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+.health-dashboard dt { font: var(--type-body); color: var(--fg-dim); }
+.health-dashboard dd { margin: 0; color: var(--fg-body); font-variant-numeric: tabular-nums; }
+.health-dashboard h2 { font: var(--type-panel-title); color: var(--fg-strong); }
+
+.metric-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: var(--space-16);
+  row-gap: var(--space-6);
+  margin: 0;
+}
+.metric-list .metric { display: contents; }
+
+/* ---- List routes (#/concepts, #/queries, #/sources — Task 8) ---- */
+
+/*
+ * `.list-pane` shares its element with `.main-pane` (viewer-lists.js sets
+ * `className = "main-pane list-pane"`), whose `width: min(100%, 72ch)`
+ * caps prose width. A list row (dot + title + citation chip + age) needs
+ * the full pane width for the same reason `.dashboard` and `.graph-pane`
+ * do — same specificity, later in this file, so `width: 100%` here wins
+ * back the full pane without touching the prose rule other routes rely on.
+ */
+.list-pane { width: 100%; }
+
+.list-body { display: flex; flex-direction: column; }
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-9);
+  padding: var(--space-12) 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.list-row:last-child { border-bottom: none; }
+
+.list-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--type-row);
+  color: var(--fg-body);
+}
+a.list-title:hover, a.list-title:focus-visible { color: var(--accent-hover); text-decoration: underline; }
+
+.list-citations {
+  flex: none;
+  font: var(--type-badge);
+  color: var(--fg-faint);
+  background: var(--bg-chip);
+  border: 1px solid var(--border-chip);
+  padding: 3px 6px;
+  border-radius: var(--radius-badge);
+}
+.list-citations.is-warn { color: var(--warn); background: var(--warn-a12); border-color: var(--warn-border); }
+
+.list-age { flex: none; font: var(--type-metadata); color: var(--fg-faint); }
+
+.list-caption { margin: 0 0 var(--space-12); font: var(--type-body); color: var(--fg-dim); }
+
+.list-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-9);
+  margin: 0 0 var(--space-16);
+}
+.list-filter-label {
+  font: var(--type-label);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.list-filter-select {
+  padding: 6px 10px;
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-strong);
+  font: var(--type-body);
+  color: var(--fg-body);
+}

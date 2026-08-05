@@ -7,7 +7,7 @@
     <link rel="icon" type="image/png" href="/assets/llmwiki-logo-64.png" />
     <script src="/assets/viewer-theme-boot.js"></script>
     <link rel="stylesheet" href="/assets/viewer-tokens.css" />
-    <link rel="stylesheet" href="/assets/viewer.css" />
+    <link rel="stylesheet" href="/assets/viewer-content.css" />
     <link rel="stylesheet" href="/assets/viewer-chrome.css" />
     <link rel="stylesheet" href="/assets/viewer-dashboard.css" />
     <link rel="stylesheet" href="/assets/viewer-graph.css" />
@@ -32,8 +32,25 @@
           <p class="app-meta" data-app-meta></p>
         </div>
         <div class="app-actions">
-          <!-- search form moves here from the sidebar in Task 8; leave the
-               existing sidebar search markup in place until then -->
+          <form class="sidebar-search" role="search" data-search-form autocomplete="off">
+            <label for="search-input" class="visually-hidden">Search wiki</label>
+            <input
+              id="search-input"
+              type="search"
+              placeholder="Search…"
+              aria-controls="search-results"
+              data-search-input
+            />
+            <span class="search-kbd" aria-hidden="true">⌘K</span>
+            <ul
+              id="search-results"
+              class="search-results"
+              role="listbox"
+              aria-label="Search results"
+              data-search-results
+              hidden
+            ></ul>
+          </form>
           <button
             class="chrome-button"
             type="button"
@@ -71,24 +88,6 @@
       </header>
       <div class="app-layout">
         <nav class="sidebar" aria-label="Wiki navigation">
-          <form class="sidebar-search" role="search" data-search-form autocomplete="off">
-            <label for="search-input" class="visually-hidden">Search wiki</label>
-            <input
-              id="search-input"
-              type="search"
-              placeholder="Search…"
-              aria-controls="search-results"
-              data-search-input
-            />
-          </form>
-          <ul
-            id="search-results"
-            class="search-results"
-            role="listbox"
-            aria-label="Search results"
-            data-search-results
-            hidden
-          ></ul>
           <div class="sidebar-nav" data-sidebar></div>
         </nav>
         <main id="main-pane" class="main-pane" tabindex="-1" data-main-pane>
