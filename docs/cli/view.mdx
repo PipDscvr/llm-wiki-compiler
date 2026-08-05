@@ -33,23 +33,43 @@ Press `Ctrl+C` to stop the server.
 | `--host <host>` | Bind to a specific network interface IP (e.g. `192.168.1.10`). **Must be used together with `--allow-lan`.** See the security note below. |
 | `--allow-lan` | Permit binding beyond the loopback interface. **Must be used together with `--host <host>`.** |
 
+## Routes
+
+Every view in the viewer has its own hash route, so you can bookmark or reload any of them directly:
+
+| Route | Shows |
+|---|---|
+| `#/` | Overview dashboard |
+| `#/concepts` | Concept pages, with the freshness filter |
+| `#/queries` | Saved query pages |
+| `#/sources` | Source files, and how many are compiled |
+| `#/index` | The compiled `wiki/index.md` |
+| `#/health` | Lint results and project counts |
+| `#/graph` | Full graph explorer |
+
+Individual pages open at `#/concepts/<slug>` or `#/queries/<slug>`.
+
 ## What the viewer includes
 
-**Sidebar navigation.** All compiled pages are listed in the sidebar, grouped by kind (`concept`, `entity`, `comparison`, `overview`) and sorted alphabetically. Click any page to navigate to it instantly.
+**Overview dashboard.** The `#/` route opens on a dashboard: four counters (concepts, sources, needs attention, and awaiting review), your most recently compiled pages, a compact version of the knowledge graph, a compile receipt (root, profile, state, index availability, lint status, and the percentage of citations that resolve to a source file), and a list of suggested next actions. The needs-attention counter is dangling links plus unresolved citations, not lint findings, so it always has a value even when lint has never run. Next actions are informational - the viewer is read-only and cannot act on them for you - so each row names a CLI command where one applies (`llmwiki compile` for stale pages, `llmwiki lint` if lint has never run, `llmwiki export` to export for agents) or the manual fix otherwise, such as creating the missing pages or correcting the targets behind dangling links.
 
-**Full-text search.** The search bar queries page titles and summaries across your entire compiled wiki. Results appear inline as you type.
+**Sidebar navigation.** The sidebar no longer lists every compiled page - that listing grew with the size of the wiki, so it moved to `#/concepts`, beside the freshness filter that narrows it. What's left is a fixed set of links in two sections: **BROWSE** (Overview, Concepts, Sources, Queries, Graph explorer - with Concepts, Sources, and Queries each carrying a live count) and **MAINTAIN** (Lint, which carries a badge once a lint run exists, and Reviews, which carries the pending-review count). Click any entry to navigate instantly.
+
+**Header freshness badge.** The header carries one freshness indicator for the whole wiki: `ALL PAGES FRESH` when nothing is stale or orphaned, otherwise the counts that need attention - for example `3 STALE · 1 ORPHANED`. To narrow the concept list by freshness (stale, orphaned, contradicted, or archived), use the filter on `#/concepts`, beside the list it narrows.
+
+**Light and dark themes.** A toggle in the header switches between light and dark and remembers your choice for the next visit. Until you pick one, the viewer follows your operating system's colour scheme, defaulting to dark if that preference isn't available.
+
+**Full-text search.** The search field lives in the header next to the theme toggle rather than in the sidebar, so it reads as a global action rather than page navigation. It matches page titles and body text across your compiled concept and query pages - the compiled `wiki/index.md` is not included - and results appear inline as you type. Press `⌘K` on macOS or `Ctrl+K` on Windows and Linux to jump to the field from anywhere in the viewer.
 
 **Markdown rendering.** Pages are rendered with full Markdown formatting, including headers, code blocks, tables, and `[[wikilink]]` resolution. Wikilinks are clickable and resolve to any page that matches either the linked title or an entry in the page's `aliases` frontmatter.
 
-**Page metadata.** Each page shows its frontmatter fields - kind, contributing sources, confidence score, provenance state, creation and update timestamps - in a collapsible metadata panel.
-
-**Health counts.** The sidebar header shows the current count of `STALE`, `ORPHANED`, `CONTRADICTED`, and `ARCHIVED` pages from the most recent lint run, giving you an at-a-glance freshness signal without leaving the viewer.
+**Page metadata.** Each page shows its frontmatter fields - kind, contributing sources, confidence score, provenance state, creation and update timestamps - in the metadata rail on the right of the page.
 
 **Freshness badges.** Pages whose underlying sources have changed since the last compile are labelled `STALE`. Pages whose sources were all deleted are labelled `ORPHANED`. Pages that declare contradictions in their frontmatter are labelled `CONTRADICTED`. Archived candidates show an `ARCHIVED` badge.
 
 **Provenance and citation chips.** Each paragraph's `^[source.md]` citation renders as a clickable chip. On loopback (`127.0.0.1`), citation chips include an editor link that opens the source file at the relevant line range directly in your default editor. Specific claim citations (`^[source.md:42-58]`) pin to the exact line range.
 
-**Force-directed graph.** Navigate to `#/graph` to see a live, interactive force-directed graph of all your wiki pages and the `[[wikilink]]` edges between them. Hover over a node to highlight its connections; click to navigate to that page.
+**Force-directed graph.** The full explorer lives at `#/graph`; a compact version of the same graph sits on the Overview dashboard. The canvas is label-free - hover a node for a tooltip with its title, kind, and connection count, and click a node to open that page. Node colour reflects one property at a time: **dangling** for a linked page that doesn't exist yet, **stale** for a page whose source has changed since the last compile (stale takes priority over kind), and otherwise **concept** or **entity** by kind. The hovered node takes a halo ring so it stays visible while everything else dims - colouring nodes by staleness is new, since earlier versions of the graph carried no freshness signal at all. Scroll to zoom and drag to pan; the full explorer also lets you drag individual nodes and shows a legend for colours, edge types, and node size.
 
 ## Security model
 
@@ -93,9 +113,10 @@ llmwiki lint
 # Repair stale pages
 llmwiki refresh --stale
 
-# Reload the viewer - it serves the latest compiled state on each page load
+# The viewer's snapshot is frozen at startup - stop it (Ctrl+C) and run
+# llmwiki view --open again to see the refreshed pages
 ```
 
 <Note>
-The viewer is read-only. If you want to add sources, compile new pages, approve review candidates, or run queries, use the CLI commands or the MCP server. The viewer reflects the current state of `wiki/` on disk; there is no "save" or "edit" function inside the browser UI.
+The viewer is read-only. If you want to add sources, compile new pages, approve review candidates, or run queries, use the CLI commands or the MCP server. It serves a frozen snapshot of `wiki/` taken when it started, not a live view of disk - restart `llmwiki view` to pick up pages compiled since, and there is no "save" or "edit" function inside the browser UI.
 </Note>
