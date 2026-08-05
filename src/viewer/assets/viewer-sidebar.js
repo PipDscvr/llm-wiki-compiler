@@ -48,7 +48,7 @@ const NAV_SECTIONS = [
     label: "MAINTAIN",
     zeroCountDisplay: "digit",
     items: [
-      { route: "health", href: "#/health", label: "Lint", badge: "lint" },
+      { route: "health", href: "#/health", label: "Health & lint", badge: "lint" },
       { route: "reviews", href: "#/health", label: "Reviews", count: "pendingReviews" },
     ],
   },

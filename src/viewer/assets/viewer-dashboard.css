@@ -52,19 +52,6 @@
   gap: var(--space-12);
 }
 
-/*
- * Health route only (viewer.js buildHealthStatGrid): five cards, not the
- * dashboard's four — repeat(4) above would strand a lone quarter-width card
- * on its own second row. auto-fit wraps sensibly at any width with no
- * breakpoint of its own. Compound selector so this always outranks the
- * plain `.stat-grid` rule above (including its @media override below)
- * regardless of source order, without editing that rule or its four-column
- * grid, which the Overview dashboard still relies on unchanged.
- */
-.stat-grid.stat-grid-health {
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-}
-
 .stat-card {
   /* 15px is off the 6/9/12/16/24 spacing scale — mockup tree lines
    * 104/114/124/134. No flex/gap here: the head's margin-bottom and the

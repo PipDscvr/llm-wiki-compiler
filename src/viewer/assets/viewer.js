@@ -19,8 +19,7 @@
  * `'self'`. The search-input wiring lives in `viewer-search.js`.
  */
 
-import { definitionList, el, heading, placeholder } from "./viewer-dom.js";
-import { plural } from "./viewer-format.js";
+import { el, heading, placeholder } from "./viewer-dom.js";
 import { wireThemeToggle } from "./viewer-theme.js";
 import { wireSearch } from "./viewer-search.js";
 import { renderSidebar, markActive } from "./viewer-sidebar.js";
@@ -29,7 +28,7 @@ import { loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js";
 import { renderHeader } from "./viewer-header.js";
 import { renderConceptsList, renderQueriesList, renderSourcesList } from "./viewer-lists.js";
 import { renderDashboard } from "./viewer-dashboard.js";
-import { buildStatCard } from "./viewer-stat-card.js";
+import { buildHealthView } from "./viewer-health.js";
 
 const MAIN_SELECTOR = "[data-main-pane]";
 
@@ -48,87 +47,6 @@ const STATIC_ROUTES = new Map([
 
 /** Pattern matching `#/(concepts|queries)/<slug>` hash routes. */
 const PAGE_HASH_PATTERN = /^#\/(concepts|queries)\/(.+)$/;
-
-/**
- * Cards for the /api/health metrics grid, rendered through the same
- * `buildStatCard` (viewer-stat-card.js) the Overview dashboard's own stat
- * grid uses. Value/sub-line derivations read the flat `/api/health` payload
- * directly — unlike the dashboard's STAT_CARDS, which project the nested
- * `/api/pages` envelope — so the two lists cannot be shared as one.
- *
- * Five cards carry all seven health numbers without dropping any: Sources
- * folds `sources`/`sourceFiles` into one value/sub-line pair, mirroring the
- * dashboard's own "Sources" card exactly (value = sourceFiles, sub = "N
- * compiled · M on disk"); Freshness folds `stale`/`orphaned` the same way,
- * mirroring the dashboard's "Needs attention" dangling/unresolved split.
- */
-// Each card's value()/sub() reads a plain, guaranteed-object `h` — never the
-// raw (possibly null) /api/health payload directly; buildHealthStatGrid
-// below normalizes it once via `health ?? {}` before any card runs, the
-// same one-time-default shape buildModel gives STAT_CARDS in
-// viewer-dashboard.js. That is what keeps every accessor here down to a
-// single `?? 0` per field instead of a second `?.` guard on `h` itself.
-const HEALTH_STAT_CARDS = [
-  {
-    key: "concepts",
-    label: "Concepts",
-    badge: "PAGES",
-    value: (h) => h.concepts ?? 0,
-    sub: (h) => {
-      const concepts = h.concepts ?? 0;
-      return concepts === 0
-        ? "no concept pages yet"
-        : `${concepts + (h.queries ?? 0)} pages in the wiki`;
-    },
-  },
-  {
-    key: "queries",
-    label: "Saved queries",
-    badge: "QUERIES",
-    value: (h) => h.queries ?? 0,
-    sub: (h) => {
-      const queries = h.queries ?? 0;
-      return queries === 0 ? "none saved yet" : plural(queries, "saved answer");
-    },
-  },
-  {
-    key: "sources",
-    label: "Sources",
-    badge: "INPUT",
-    value: (h) => h.sourceFiles ?? 0,
-    sub: (h) => `${h.sources ?? 0} compiled · ${h.sourceFiles ?? 0} on disk`,
-  },
-  {
-    key: "freshness",
-    label: "Freshness",
-    badge: "SYNC",
-    badgeWhenCalm: "IN SYNC",
-    warnWhenNonZero: true,
-    calmWhenZero: true,
-    value: (h) => (h.stale ?? 0) + (h.orphaned ?? 0),
-    sub: (h) => `${h.stale ?? 0} stale · ${h.orphaned ?? 0} orphaned`,
-  },
-  {
-    key: "reviews",
-    label: "Awaiting review",
-    badge: "QUEUE",
-    badgeWhenCalm: "CLEAR",
-    warnWhenNonZero: true,
-    calmWhenZero: true,
-    value: (h) => h.pendingReviews ?? 0,
-    sub: (h) => {
-      const pendingReviews = h.pendingReviews ?? 0;
-      return pendingReviews === 0 ? "queue is empty" : plural(pendingReviews, "candidate");
-    },
-  },
-];
-
-/** Rows for the lint block: `[label, key, fallback]`. */
-const LINT_METRIC_ROWS = [
-  ["Warnings", "warnings", 0],
-  ["Errors", "errors", 0],
-  ["Last run", "at", ""],
-];
 
 /**
  * Bootstrap payloads shared by the sidebar, dashboard, and health route.
@@ -215,47 +133,27 @@ async function renderRoute() {
   return renderPagePane(main, route.directory, route.slug);
 }
 
-/** Render the health pane from the cached payload, fetching only if absent. */
+/**
+ * Render the health pane from the cached payloads, fetching only if absent.
+ * Both are needed: `/api/health` carries the counts and the lint cache,
+ * `/api/pages` the per-page freshness and citation totals the right-hand
+ * column projects. `health-pane` opts the pane out of `.main-pane`'s
+ * prose-width cap so the two-column grid gets the full content width.
+ */
 async function renderHealthPane(main) {
-  const health = bootstrapData.health ?? (await loadBootstrapData()).health;
-  if (!health) {
+  const data = bootstrapData.health ? bootstrapData : await loadBootstrapData();
+  if (!data.health) {
     renderError("Could not load /api/health");
     return;
   }
+  main.className = "main-pane health-pane";
   main.innerHTML = "";
-  main.appendChild(heading("h1", "Health"));
-  main.appendChild(buildHealthDashboard(health));
-  clearSupportRail();
-}
-
-/** Build the health dashboard DOM from the `/api/health` payload. */
-function buildHealthDashboard(health) {
-  const wrap = document.createElement("section");
-  wrap.className = "health-dashboard";
   // The global banner (injected at bootstrap) covers every route including health;
   // only add it here if bootstrap didn't already inject one (e.g. if /api/pages
   // was not yet fetched when navigating directly to #/health).
-  prependBannerIfNeeded(wrap, health?.stateStatus);
-  wrap.appendChild(buildHealthStatGrid(health));
-  wrap.appendChild(buildLintBlock(health?.lint));
-  return wrap;
-}
-
-/**
- * Build the health route's five-card stat grid (see HEALTH_STAT_CARDS).
- * `stat-grid-health` is an additional modifier class, not a replacement —
- * it overrides just the column count for five cards instead of the
- * dashboard's four (viewer-dashboard.css); the card markup itself is
- * identical between the two routes.
- *
- * `health ?? {}` here is the one place that normalizes a possibly-null
- * payload — every card's value()/sub() can then assume a plain object.
- */
-function buildHealthStatGrid(health) {
-  const grid = el("div", "stat-grid stat-grid-health");
-  const model = health ?? {};
-  for (const card of HEALTH_STAT_CARDS) grid.appendChild(buildStatCard(card, model));
-  return grid;
+  prependBannerIfNeeded(main, data.health.stateStatus);
+  main.appendChild(buildHealthView(data.health, data.pages));
+  clearSupportRail();
 }
 
 /** state.json classifications that surface a user-visible warning banner. */
@@ -288,19 +186,6 @@ function buildStateStatusBanner(stateStatus) {
   banner.setAttribute("role", "alert");
   banner.textContent = STATE_BANNER_MESSAGES[stateStatus];
   return banner;
-}
-
-/** Render the lint summary, or a "lint has not been run yet" placeholder. */
-function buildLintBlock(lint) {
-  const wrap = document.createElement("section");
-  wrap.appendChild(heading("h2", "Lint"));
-  if (!lint) {
-    wrap.appendChild(placeholder("No cached lint summary yet — run `llmwiki lint`."));
-    return wrap;
-  }
-  const rows = LINT_METRIC_ROWS.map(([label, key, fallback]) => [label, lint[key] ?? fallback]);
-  wrap.appendChild(definitionList(rows));
-  return wrap;
 }
 
 /** Render the home dashboard from the cached bootstrap payloads. */

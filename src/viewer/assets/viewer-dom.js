@@ -1,7 +1,7 @@
 /**
  * llmwiki viewer — shared DOM element builders.
  *
- * Every render module builds its DOM through these five helpers rather than
+ * Every render module builds its DOM through these four helpers rather than
  * hand-rolling `document.createElement` chains. Centralising them keeps the
  * render modules short and, more importantly, keeps text insertion on
  * `textContent` — the server is the only component permitted to produce
@@ -45,22 +45,6 @@ export function heading(tag, text) {
  */
 export function placeholder(text) {
   return el("p", "placeholder", text);
-}
-
-/**
- * Build a `<dl>` from `[label, value]` pairs. Values are stringified, so
- * numeric counts can be passed directly.
- *
- * @param {Array<[string, unknown]>} rows - Label/value pairs.
- * @returns {HTMLElement}
- */
-export function definitionList(rows) {
-  const list = el("dl");
-  for (const [label, value] of rows) {
-    list.appendChild(el("dt", undefined, label));
-    list.appendChild(el("dd", undefined, String(value)));
-  }
-  return list;
 }
 
 /**

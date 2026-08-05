@@ -44,7 +44,7 @@ Every view in the viewer has its own hash route, so you can bookmark or reload a
 | `#/queries` | Saved query pages |
 | `#/sources` | Source files, and how many are compiled |
 | `#/index` | The compiled `wiki/index.md` |
-| `#/health` | Lint results and project counts |
+| `#/health` | Wiki health: lint findings by rule, freshness, and traceability |
 | `#/graph` | Full graph explorer |
 
 Individual pages open at `#/concepts/<slug>` or `#/queries/<slug>`.
@@ -53,7 +53,13 @@ Individual pages open at `#/concepts/<slug>` or `#/queries/<slug>`.
 
 **Overview dashboard.** The `#/` route opens on a dashboard: four counters (concepts, sources, needs attention, and awaiting review), your most recently compiled pages, a compact version of the knowledge graph, a compile receipt (root, profile, state, index availability, lint status, and the percentage of citations that resolve to a source file), and a list of suggested next actions. The needs-attention counter is dangling links plus unresolved citations, not lint findings, so it always has a value even when lint has never run. Next actions are informational - the viewer is read-only and cannot act on them for you - so each row names a CLI command where one applies (`llmwiki compile` for stale pages, `llmwiki lint` if lint has never run, `llmwiki export` to export for agents) or the manual fix otherwise, such as creating the missing pages or correcting the targets behind dangling links.
 
-**Sidebar navigation.** The sidebar no longer lists every compiled page - that listing grew with the size of the wiki, so it moved to `#/concepts`, beside the freshness filter that narrows it. What's left is a fixed set of links in two sections: **BROWSE** (Overview, Concepts, Sources, Queries, Graph explorer - with Concepts, Sources, and Queries each carrying a live count) and **MAINTAIN** (Lint, which carries a badge once a lint run exists, and Reviews, which carries the pending-review count). Click any entry to navigate instantly.
+**Health screen.** The `#/health` route opens on a whole-wiki verdict - `NEEDS ATTENTION` when lint reports errors or any page is stale or orphaned, `ALL CLEAR` otherwise - beside the time of the last lint run. Below it, a CONTENTS strip counts what the wiki holds (concepts, sources, citations, saved queries, and pages awaiting review); a count of zero renders as a dim dash rather than a bold `0`, so an empty column does not read as a figure worth acting on.
+
+The Lint panel breaks the cached findings down by rule: the error and warning totals, a stacked bar showing each rule's share of the problems, and a table naming every rule, where its findings land, and how many there are. The FIX column links to the most affected page when that file is one the viewer can open - lint rules that flag files which are not wiki pages have nowhere to navigate, and show a dash instead. The footer names the rule with the most leverage and links to the graph explorer, where dangling link targets render as ghost nodes. If lint has never run, the panel says so instead of showing an empty table; run `llmwiki lint` and restart the viewer to populate it.
+
+Alongside it, **Freshness** draws one bar per concept page coloured by that page's status, and **Traceability** reports the share of citations that resolve to a real source span. The viewer is read-only, so nothing on this screen changes your wiki - re-run `llmwiki lint` and restart the viewer to refresh the cached findings.
+
+**Sidebar navigation.** The sidebar no longer lists every compiled page - that listing grew with the size of the wiki, so it moved to `#/concepts`, beside the freshness filter that narrows it. What's left is a fixed set of links in two sections: **BROWSE** (Overview, Concepts, Sources, Queries, Graph explorer - with Concepts, Sources, and Queries each carrying a live count) and **MAINTAIN** (Health & lint, which carries a badge once a lint run exists, and Reviews, which carries the pending-review count). Click any entry to navigate instantly.
 
 **Header freshness badge.** The header carries one freshness indicator for the whole wiki: `ALL PAGES FRESH` when nothing is stale or orphaned, otherwise the counts that need attention - for example `3 STALE · 1 ORPHANED`. To narrow the concept list by freshness (stale, orphaned, contradicted, or archived), use the filter on `#/concepts`, beside the list it narrows.
 

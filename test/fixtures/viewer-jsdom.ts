@@ -53,13 +53,18 @@ const THEME_BOOT_SCRIPT = "viewer-theme-boot.js";
  * see that module's own header), and "viewer-dashboard.js" sorts before
  * "viewer-pattern.js" alphabetically too.
  *
- * `viewer-stat-card.js` has the same problem a third time, on both of its
- * importers at once: `viewer-dashboard.js` AND `viewer.js` both import
- * `buildStatCard` from it (extracted so the health route's five-card grid
- * and the dashboard's four-card grid share one implementation — see that
- * module's own header), and "viewer-dashboard.js" sorts alphabetically
- * before "viewer-stat-card.js" — directory order alone would evaluate that
- * importer first and crash destructuring an undefined registry entry.
+ * `viewer-stat-card.js` has the same problem a third time, on the Overview
+ * dashboard: `viewer-dashboard.js` imports `buildStatCard` from it, and
+ * "viewer-dashboard.js" sorts alphabetically before "viewer-stat-card.js" —
+ * directory order alone would evaluate that importer first and crash
+ * destructuring an undefined registry entry.
+ *
+ * `viewer-health-lint.js` is pinned for the same class of reason even
+ * though it happens to sort correctly today ("-" precedes "." so it already
+ * lands before its importer "viewer-health.js"): the health screen's Lint
+ * panel is imported by `viewer-health.js`, and leaving that dependency to
+ * an incidental property of ASCII ordering is exactly the bet this list
+ * exists to stop the repo making a fourth time.
  */
 const MODULE_ORDER = [
   "viewer-dom.js",
@@ -68,6 +73,7 @@ const MODULE_ORDER = [
   "viewer-rail.js",
   "viewer-pattern.js",
   "viewer-stat-card.js",
+  "viewer-health-lint.js",
 ];
 
 /** Match `import { a, b } from "./viewer-x.js";` including multi-line forms. */

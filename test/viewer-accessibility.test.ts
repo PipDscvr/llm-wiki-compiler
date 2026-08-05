@@ -337,11 +337,11 @@ describe("/#/health route — dashboard renders from /api/health", () => {
     expect(main.textContent).toContain("Concepts");
     expect(main.textContent).toContain("3");
     expect(main.textContent).toContain("Saved queries");
-    // Compiled sources/Source files are now one "Sources" stat card whose
-    // sub-line names both counts (see test/viewer-health-dashboard.test.ts).
+    // The five stat cards are now one CONTENTS strip whose Sources column
+    // carries sourceFiles with the compiled count as its suffix (see
+    // test/viewer-health-dashboard.test.ts for the strip's own assertions).
     expect(main.textContent).toContain("Sources");
     expect(main.textContent).toContain("1 compiled");
-    expect(main.textContent).toContain("5 on disk");
     expect(main.textContent).toContain("Awaiting review");
     expect(main.textContent).toContain("4");
     expect(main.textContent).toContain("No cached lint summary");
@@ -358,11 +358,13 @@ describe("/#/health route — dashboard renders from /api/health", () => {
     dom.window.location.hash = "#/health";
     await flushMicrotasks();
     const main = dom.window.document.querySelector("[data-main-pane]") as HTMLElement;
-    expect(main.textContent).toContain("Warnings");
-    expect(main.textContent).toContain("2");
-    expect(main.textContent).toContain("Errors");
-    expect(main.textContent).toContain("1");
-    expect(main.textContent).toContain("2026-05-12T00:00:00.000Z");
+    // The lint cache now drives the Lint panel's chip and figures rather
+    // than a definition list, and the run time moved to the page head's
+    // caption in the viewer's own UTC format.
+    expect(main.textContent).toContain("3 PROBLEMS");
+    expect(main.textContent).toContain("warnings");
+    expect(main.textContent).toContain("error");
+    expect(main.textContent).toContain("lint last run 2026-05-12 00:00Z");
   });
 });
 

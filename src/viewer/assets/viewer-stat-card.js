@@ -5,18 +5,18 @@
  * built by `buildStatCard` from a plain "card" descriptor (`key`, `label`,
  * `badge`, `value(model)`, `sub(model)`, plus the optional `warnWhenNonZero`
  * / `calmWhenZero` / `badgeWhenCalm` state flags) and a `model` object the
- * two functions read from. The shape of `model` is entirely the caller's
- * choice — the Overview dashboard (`viewer-dashboard.js`) projects the
- * `/api/pages` envelope into a nested `{ counts, graph, ... }` object; the
- * health route (`viewer.js`) reads the flat `/api/health` payload directly.
- * Neither caller needs to agree on that shape, only on the descriptor
- * contract above.
+ * two functions read from. The shape of `model` is the caller's choice —
+ * the Overview dashboard (`viewer-dashboard.js`) projects the `/api/pages`
+ * envelope into a nested `{ counts, graph, ... }` object — and a caller
+ * only has to honour the descriptor contract above.
  *
- * Extracted out of `viewer-dashboard.js` (which owned it exclusively until
- * the health route grew a second, five-card user) so both callers share one
- * implementation of the warn/calm state logic rather than the health route
- * re-deriving it — see the `is-warn`/`is-calm` CSS rules in
- * viewer-dashboard.css, which both surfaces' cards rely on identically.
+ * The Overview dashboard is the sole caller. This lives in its own module
+ * rather than back inside viewer-dashboard.js because that file is already
+ * at the project's file-size budget, and because the warn/calm state logic
+ * is a self-contained rule with its own `is-warn`/`is-calm` CSS
+ * counterparts in viewer-dashboard.css. (The health route was the second
+ * caller until the Nebula health screen replaced its five stat cards with
+ * the CONTENTS strip — see viewer-health.js.)
  *
  * `warn` and `calm` are mutually exclusive per card: a card opts into
  * `warnWhenNonZero`, `calmWhenZero`, both, or neither, and `statCardState`

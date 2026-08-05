@@ -14,7 +14,7 @@
  * never have happened at that moment.
  */
 
-import { projectTitle } from "./viewer-format.js";
+import { formatUtcTimestamp, freshnessBadgeText, projectTitle } from "./viewer-format.js";
 
 const TITLE_SELECTOR = "[data-app-title]";
 const META_SELECTOR = "[data-app-meta]";
@@ -46,15 +46,7 @@ function renderFreshnessBadge(counts) {
   const orphaned = counts.orphaned ?? 0;
   badge.hidden = false;
   badge.className = `freshness-pill ${stale + orphaned === 0 ? "is-ok" : "is-warn"}`;
-  badge.textContent = freshnessBadgeText(stale, orphaned);
-}
-
-/** Compose the badge label from the two actionable freshness counts. */
-function freshnessBadgeText(stale, orphaned) {
-  const parts = [];
-  if (stale > 0) parts.push(`${stale} STALE`);
-  if (orphaned > 0) parts.push(`${orphaned} ORPHANED`);
-  return parts.length === 0 ? "ALL PAGES FRESH" : parts.join(" · ");
+  badge.textContent = freshnessBadgeText(stale, orphaned, "ALL PAGES FRESH");
 }
 
 /**
@@ -69,15 +61,9 @@ function renderHeaderMeta(envelope) {
   const meta = document.querySelector(META_SELECTOR);
   if (!meta) return;
   const parts = [
-    `snapshot ${formatTimestamp(envelope?.updatedAt)}`,
+    `snapshot ${formatUtcTimestamp(envelope?.updatedAt)}`,
     `profile ${envelope?.profileId ?? "default"}`,
     `state ${envelope?.stateStatus ?? "unknown"}`,
   ];
   meta.textContent = parts.join(" · ");
-}
-
-/** Render an ISO timestamp as `YYYY-MM-DD HH:MM`, or "unknown" when absent. */
-function formatTimestamp(iso) {
-  if (typeof iso !== "string" || iso.length < 16) return "unknown";
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
 }

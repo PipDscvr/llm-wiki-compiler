@@ -16,7 +16,6 @@ interface DomHelpers {
   el(tag: string, className?: string, text?: string): HTMLElement;
   heading(tag: string, text: string): HTMLElement;
   placeholder(text: string): HTMLElement;
-  definitionList(rows: [string, string][]): HTMLElement;
   emptyState(title: string, body: string, command?: string): HTMLElement;
 }
 
@@ -28,7 +27,7 @@ beforeEach(async () => {
   dom = new JSDOM("<!doctype html><body></body>", { runScripts: "outside-only" });
   const body = source.replace(/export\s+function\s+/g, "function ");
   dom.window.eval(
-    `${body}\nwindow.__helpers = { el, heading, placeholder, definitionList, emptyState };`,
+    `${body}\nwindow.__helpers = { el, heading, placeholder, emptyState };`,
   );
   helpers = (dom.window as unknown as { __helpers: DomHelpers }).__helpers;
 });
@@ -49,13 +48,6 @@ describe("viewer-dom helpers", () => {
     const node = helpers.el("div", undefined, "<b>x</b>");
     expect(node.querySelector("b")).toBeNull();
     expect(node.textContent).toBe("<b>x</b>");
-  });
-
-  it("builds a definition list with one row per pair", () => {
-    const list = helpers.definitionList([["Root", "/tmp/wiki"], ["State", "ok"]]);
-    expect(list.querySelectorAll("dt")).toHaveLength(2);
-    expect(list.querySelectorAll("dd")).toHaveLength(2);
-    expect(list.querySelector("dd")?.textContent).toBe("/tmp/wiki");
   });
 
   it("builds a placeholder paragraph", () => {

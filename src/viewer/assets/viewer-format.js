@@ -9,6 +9,13 @@
 /** Milliseconds in a day, for whole-day age arithmetic. */
 const DAY_MS = 86_400_000;
 
+/** Milliseconds in a minute and an hour, for sub-day recency arithmetic. */
+const MINUTE_MS = 60_000;
+const HOUR_MS = 3_600_000;
+
+/** Shortest elapsed time worth naming; anything below reads as "moments". */
+const MOMENTS = "moments";
+
 /** Fallback project title shown until a real one is known. */
 const DEFAULT_TITLE = "llmwiki";
 
@@ -50,6 +57,70 @@ export function relativeAge(iso) {
   const days = Math.floor((Date.now() - then) / DAY_MS);
   if (days <= 0) return "today";
   return `${days}d`;
+}
+
+/**
+ * Render an ISO timestamp as `YYYY-MM-DD HH:MM`, or "unknown" when absent.
+ *
+ * Shared by the persistent header's meta line and the health screen's
+ * lint-last-run caption so the two cannot disagree about how a snapshot
+ * time is spelled. Slicing the ISO string keeps the value in UTC — the
+ * timestamps this renders are produced in UTC, and `toLocaleString` would
+ * silently shift them into the reader's zone without saying so.
+ *
+ * @param {unknown} iso - ISO-8601 timestamp.
+ * @returns {string}
+ */
+export function formatUtcTimestamp(iso) {
+  if (typeof iso !== "string" || iso.length < 16) return "unknown";
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
+}
+
+/**
+ * Elapsed time since an ISO timestamp in the largest unit that still reads
+ * as a whole number — "28 min", "3 h", "2 d" — or "" when the timestamp is
+ * absent or unparseable, so a caller can drop the phrase rather than print
+ * "NaN ago".
+ *
+ * Distinct from {@link relativeAge}, which answers a different question:
+ * that one buckets page edits into whole days ("today", "3d") for list
+ * rows, where sub-day precision is noise. A lint run minutes old needs the
+ * minutes, so this reports them.
+ *
+ * @param {unknown} iso - ISO-8601 timestamp.
+ * @returns {string}
+ */
+// Same call-graph blind spot as relativeAge below — see that function's comment.
+// fallow-ignore-next-line complexity
+export function relativeSince(iso) {
+  if (typeof iso !== "string" || iso.length === 0) return "";
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const elapsed = Date.now() - then;
+  if (elapsed < MINUTE_MS) return MOMENTS;
+  if (elapsed < HOUR_MS) return `${Math.floor(elapsed / MINUTE_MS)} min`;
+  if (elapsed < DAY_MS) return `${Math.floor(elapsed / HOUR_MS)} h`;
+  return `${Math.floor(elapsed / DAY_MS)} d`;
+}
+
+/**
+ * Compose a freshness badge label from the two actionable counts, e.g.
+ * "2 STALE · 1 ORPHANED". `calmLabel` is what the badge reads when neither
+ * count has anything to report — the persistent header says "ALL PAGES
+ * FRESH", the health screen's Freshness panel says "IN SYNC" — so the
+ * wording stays each surface's own choice while the composition rule stays
+ * shared.
+ *
+ * @param {number} stale
+ * @param {number} orphaned
+ * @param {string} calmLabel
+ * @returns {string}
+ */
+export function freshnessBadgeText(stale, orphaned, calmLabel) {
+  const parts = [];
+  if (stale > 0) parts.push(`${stale} STALE`);
+  if (orphaned > 0) parts.push(`${orphaned} ORPHANED`);
+  return parts.length === 0 ? calmLabel : parts.join(" · ");
 }
 
 /**

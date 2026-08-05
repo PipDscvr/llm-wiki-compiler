@@ -1,60 +1,150 @@
 /**
- * DOM-level tests for the health dashboard pane rendered by viewer.js.
+ * DOM-level tests for the `#/health` page head and CONTENTS strip.
  *
- * Navigates to `#/health` via the JSDOM harness and asserts against the
- * five-card `.stat-grid` the route renders through the shared `buildStatCard`
- * component (viewer-stat-card.js) — the same one the Overview dashboard's
- * stat grid uses. Card values/sub-lines are read by `data-stat` key, mirroring
- * `statValue` in test/viewer-dashboard.test.ts.
+ * The Nebula health screen replaced the route's five stat cards with one
+ * bordered CONTENTS strip of five rule-divided columns, and gave the page a
+ * whole-wiki verdict pill of its own. Both are asserted here; the Lint panel
+ * and the right-hand column have their own files (viewer-health-lint,
+ * viewer-health-panels) so no file approaches the 400-line cap.
+ *
+ * The state-status banner block stays here because the banner is injected by
+ * viewer.js around the health view rather than by the view itself.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { flushMicrotasks, jsonResponse, mountViewerDom, type FetchResponder } from "./fixtures/viewer-jsdom.js";
 import {
-  flushMicrotasks,
-  jsonResponse,
-  mountViewerDom,
-  type EmbeddedPage,
-  type FetchResponder,
-} from "./fixtures/viewer-jsdom.js";
-
-const EMPTY_PAGES: EmbeddedPage[] = [];
-
-/** Build a fetch responder that serves the given health payload. */
-function healthResponder(health: Record<string, unknown>): FetchResponder {
-  return (url) => {
-    if (url.endsWith("/api/pages")) {
-      return jsonResponse({ project: { title: "demo" }, counts: {}, pages: [], recentPages: [], index: { available: false } });
-    }
-    if (url.endsWith("/api/health")) return jsonResponse(health);
-    return null;
-  };
-}
-
-/** Mount the viewer, navigate to #/health, and return the main pane element. */
-async function renderHealthPane(health: Record<string, unknown>): Promise<HTMLElement> {
-  const { dom } = await mountViewerDom(EMPTY_PAGES, healthResponder(health));
-  dom.window.location.hash = "#/health";
-  await flushMicrotasks();
-  return dom.window.document.querySelector("[data-main-pane]") as HTMLElement;
-}
+  conceptPage,
+  pagesEnvelope,
+  renderHealthRoute,
+  textOf,
+  type Payload,
+} from "./fixtures/viewer-health-fixture.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Read one CONTENTS column's big figure by its data-contents key. */
+function figure(main: HTMLElement, key: string): string {
+  return textOf(main, `[data-contents="${key}"] .contents-value`);
+}
+
+/** Read one CONTENTS column's small mono suffix by its data-contents key. */
+function suffix(main: HTMLElement, key: string): string {
+  return textOf(main, `[data-contents="${key}"] .contents-suffix`);
+}
+
+/**
+ * Five distinct primes, one per CONTENTS column, so no two figures can share
+ * a rendered digit — a textContent assertion on one can never accidentally
+ * pass because a different column printed it.
+ */
+const FULL_HEALTH: Payload = {
+  concepts: 11, queries: 13, sources: 17, sourceFiles: 19,
+  stale: 0, orphaned: 0, pendingReviews: 23,
+  lint: { warnings: 1, errors: 2, at: "2026-08-05T19:01:00.000Z", rules: [] },
+};
+
+describe("health head — title, verdict pill, lint run caption", () => {
+  it("renders the Health title and the lint last-run caption", async () => {
+    const main = await renderHealthRoute(FULL_HEALTH);
+    expect(textOf(main, ".health-title")).toBe("Health");
+    expect(textOf(main, ".health-lint-run")).toContain("lint last run 2026-08-05 19:01Z");
+  });
+
+  it("says lint has never run when the cache is absent", async () => {
+    const main = await renderHealthRoute({ ...FULL_HEALTH, lint: null });
+    expect(textOf(main, ".health-lint-run")).toBe("lint has never run");
+  });
+});
+
+describe("health verdict pill — derived from errors, stale and orphaned", () => {
+  it("warns when lint reports errors", async () => {
+    const main = await renderHealthRoute({ ...FULL_HEALTH, lint: { warnings: 0, errors: 3 } });
+    const pill = main.querySelector("[data-verdict]");
+    expect(pill?.className).toContain("is-warn");
+    expect(pill?.textContent).toBe("NEEDS ATTENTION");
+  });
+
+  it("warns when pages are stale or orphaned even with a clean lint run", async () => {
+    const health = { ...FULL_HEALTH, stale: 1, lint: { warnings: 0, errors: 0 } };
+    const main = await renderHealthRoute(health);
+    expect(main.querySelector("[data-verdict]")?.className).toContain("is-warn");
+  });
+
+  it("stays calm when nothing is stale, orphaned, or an error", async () => {
+    const health = { ...FULL_HEALTH, lint: { warnings: 4, errors: 0 } };
+    const main = await renderHealthRoute(health);
+    const pill = main.querySelector("[data-verdict]");
+    expect(pill?.className).toContain("is-ok");
+    expect(pill?.textContent).toBe("ALL CLEAR");
+  });
+
+  it("stays calm when lint has never run and freshness is clean", async () => {
+    const main = await renderHealthRoute({ ...FULL_HEALTH, lint: null });
+    expect(main.querySelector("[data-verdict]")?.className).toContain("is-ok");
+  });
+});
+
+describe("CONTENTS strip — one divided panel, five columns", () => {
+  it("renders exactly five columns inside one strip, not five cards", async () => {
+    const main = await renderHealthRoute(FULL_HEALTH);
+    expect(main.querySelectorAll(".contents-strip")).toHaveLength(1);
+    expect(main.querySelectorAll(".contents-cell")).toHaveLength(5);
+    expect(main.querySelectorAll(".stat-card")).toHaveLength(0);
+  });
+
+  it("renders the concepts, sources and saved-query figures from /api/health", async () => {
+    const main = await renderHealthRoute(FULL_HEALTH);
+    expect(figure(main, "concepts")).toBe("11");
+    expect(figure(main, "sources")).toBe("19");
+    expect(figure(main, "queries")).toBe("13");
+  });
+
+  it("names the compiled-source count and the page noun in the suffixes", async () => {
+    const main = await renderHealthRoute(FULL_HEALTH);
+    expect(suffix(main, "concepts")).toBe("pages");
+    expect(suffix(main, "sources")).toBe("17 compiled");
+  });
+
+  it("renders the awaiting-review figure and its queue-clear suffix at zero", async () => {
+    const main = await renderHealthRoute({ ...FULL_HEALTH, pendingReviews: 0 });
+    expect(figure(main, "reviews")).toBe("—");
+    expect(suffix(main, "reviews")).toBe("queue clear");
+  });
+
+  it("totals citations across pages and names how many resolve", async () => {
+    const pages = pagesEnvelope([
+      conceptPage("alpha", { citationCount: 5, unresolvedCitationCount: 2 }),
+      conceptPage("beta", { citationCount: 4, unresolvedCitationCount: 0 }),
+    ]);
+    const main = await renderHealthRoute(FULL_HEALTH, pages);
+    expect(figure(main, "citations")).toBe("9");
+    expect(suffix(main, "citations")).toBe("7 cited");
+  });
+});
+
+describe("CONTENTS strip — zero renders as a dim dash, not a bold 0", () => {
+  it("renders a dash carrying the zero modifier for every empty count", async () => {
+    const main = await renderHealthRoute({ concepts: 0, queries: 0, sourceFiles: 0, pendingReviews: 0 });
+    for (const key of ["concepts", "sources", "citations", "queries", "reviews"]) {
+      expect(figure(main, key), key).toBe("—");
+      expect(main.querySelector(`[data-contents="${key}"] .contents-value`)?.className).toContain("is-zero");
+    }
+  });
+
+  it("drops the zero modifier as soon as a count has something to report", async () => {
+    const main = await renderHealthRoute({ ...FULL_HEALTH, queries: 0 });
+    expect(main.querySelector('[data-contents="concepts"] .contents-value')?.className).not.toContain("is-zero");
+    expect(suffix(main, "queries")).toBe("none yet");
+  });
+});
+
 /** Build a /api/pages responder carrying a given stateStatus, plus /api/health. */
 function pagesResponder(stateStatus: string): FetchResponder {
   return (url) => {
-    if (url.endsWith("/api/pages")) {
-      return jsonResponse({
-        project: { title: "demo" },
-        counts: {},
-        pages: [],
-        recentPages: [],
-        index: { available: false },
-        stateStatus,
-      });
-    }
+    if (url.endsWith("/api/pages")) return jsonResponse(pagesEnvelope([], { stateStatus }));
     if (url.endsWith("/api/health")) return jsonResponse({ stateStatus });
     return null;
   };
@@ -62,21 +152,20 @@ function pagesResponder(stateStatus: string): FetchResponder {
 
 /** Mount the viewer with a given bootstrap stateStatus and return its document. */
 async function mountWithStateStatus(stateStatus: string): Promise<Document> {
-  const { dom } = await mountViewerDom(EMPTY_PAGES, pagesResponder(stateStatus));
+  const { dom } = await mountViewerDom([], pagesResponder(stateStatus));
+  await flushMicrotasks();
   return dom.window.document;
 }
 
 describe("state-status banner — corrupt and too-new", () => {
   it("renders the corrupt banner when stateStatus is corrupt", async () => {
-    const doc = await mountWithStateStatus("corrupt");
-    const banner = doc.querySelector(".corrupt-state-banner");
+    const banner = (await mountWithStateStatus("corrupt")).querySelector(".corrupt-state-banner");
     expect(banner).not.toBeNull();
     expect(banner?.textContent).toContain("corrupt");
   });
 
   it("renders the too-new banner when stateStatus is too-new", async () => {
-    const doc = await mountWithStateStatus("too-new");
-    const banner = doc.querySelector(".corrupt-state-banner");
+    const banner = (await mountWithStateStatus("too-new")).querySelector(".corrupt-state-banner");
     expect(banner).not.toBeNull();
     expect(banner?.textContent).toContain("newer version of llmwiki");
   });
@@ -84,116 +173,5 @@ describe("state-status banner — corrupt and too-new", () => {
   it("renders no banner when stateStatus is ok", async () => {
     const doc = await mountWithStateStatus("ok");
     expect(doc.querySelector(".corrupt-state-banner")).toBeNull();
-  });
-});
-
-/** Read a health stat card's value by its data-stat key. */
-function statValue(main: HTMLElement, key: string): string {
-  return main.querySelector(`[data-stat="${key}"] .stat-value`)?.textContent ?? "";
-}
-
-/** Read a health stat card's sub-line by its data-stat key. */
-function statSub(main: HTMLElement, key: string): string {
-  return main.querySelector(`[data-stat="${key}"] .stat-sub`)?.textContent ?? "";
-}
-
-/** Read a health stat card's badge text by its data-stat key. */
-function statBadge(main: HTMLElement, key: string): string {
-  return main.querySelector(`[data-stat="${key}"] .stat-badge`)?.textContent ?? "";
-}
-
-/**
- * Seven distinct primes, one per /api/health field, so no two metrics can
- * share a rendered digit — a textContent-substring assertion on one number
- * can never accidentally pass because a different card printed it.
- */
-const FULL_HEALTH = {
-  concepts: 11, queries: 13, sources: 17, sourceFiles: 19,
-  stale: 23, orphaned: 29, pendingReviews: 31,
-};
-
-describe("health dashboard — stat cards", () => {
-  it("renders five stat cards on #/health", async () => {
-    const main = await renderHealthPane(FULL_HEALTH);
-    expect(main.querySelectorAll(".stat-card")).toHaveLength(5);
-  });
-
-  it("surfaces all seven /api/health numbers across the five cards", async () => {
-    const main = await renderHealthPane(FULL_HEALTH);
-    const text = main.textContent ?? "";
-    for (const n of Object.values(FULL_HEALTH)) {
-      expect(text).toContain(String(n));
-    }
-  });
-
-  it("renders the concepts and saved-queries card values directly from the payload", async () => {
-    const main = await renderHealthPane(FULL_HEALTH);
-    expect(statValue(main, "concepts")).toBe("11");
-    expect(statValue(main, "queries")).toBe("13");
-  });
-
-  it("shows conditional copy on the concepts and saved-queries sub-lines at zero", async () => {
-    const main = await renderHealthPane({ concepts: 0, queries: 0 });
-    expect(statSub(main, "concepts")).toBe("no concept pages yet");
-    expect(statSub(main, "queries")).toBe("none saved yet");
-  });
-
-  it("counts concepts+queries and pluralizes saved answers once either is non-zero", async () => {
-    const main = await renderHealthPane({ concepts: 5, queries: 2 });
-    expect(statSub(main, "concepts")).toBe("7 pages in the wiki");
-    expect(statSub(main, "queries")).toBe("2 saved answers");
-  });
-
-  it("mirrors the dashboard's sources card: value is sourceFiles, sub-line names both counts", async () => {
-    const main = await renderHealthPane(FULL_HEALTH);
-    expect(statValue(main, "sources")).toBe("19");
-    const sub = statSub(main, "sources");
-    expect(sub).toContain("17 compiled");
-    expect(sub).toContain("19 on disk");
-  });
-
-  it("sums stale and orphaned into the freshness card's value and sub-line", async () => {
-    const main = await renderHealthPane(FULL_HEALTH);
-    expect(statValue(main, "freshness")).toBe("52");
-    const sub = statSub(main, "freshness");
-    expect(sub).toContain("23 stale");
-    expect(sub).toContain("29 orphaned");
-  });
-
-  it("flags the freshness card as a warning when stale or orphaned is non-zero", async () => {
-    const main = await renderHealthPane({ stale: 1, orphaned: 0 });
-    expect(main.querySelector('[data-stat="freshness"]')?.className).toContain("is-warn");
-  });
-
-  it("shows the freshness card's calm IN SYNC badge when both stale and orphaned are zero", async () => {
-    const main = await renderHealthPane({ stale: 0, orphaned: 0 });
-    const card = main.querySelector('[data-stat="freshness"]');
-    expect(card?.className).not.toContain("is-warn");
-    expect(card?.className).toContain("is-calm");
-    expect(statBadge(main, "freshness")).toBe("IN SYNC");
-  });
-
-  it("flags the awaiting-review card as a warning and pluralizes candidates when non-zero", async () => {
-    const main = await renderHealthPane({ pendingReviews: 2 });
-    expect(main.querySelector('[data-stat="reviews"]')?.className).toContain("is-warn");
-    expect(statSub(main, "reviews")).toBe("2 candidates");
-  });
-
-  it("shows the awaiting-review card's calm CLEAR badge and empty-queue sub-line at zero", async () => {
-    const main = await renderHealthPane({ pendingReviews: 0 });
-    const card = main.querySelector('[data-stat="reviews"]');
-    expect(card?.className).not.toContain("is-warn");
-    expect(card?.className).toContain("is-calm");
-    expect(statBadge(main, "reviews")).toBe("CLEAR");
-    expect(statSub(main, "reviews")).toBe("queue is empty");
-  });
-
-  it("defaults every card's value to 0 when the health payload has no metrics", async () => {
-    const main = await renderHealthPane({});
-    expect(statValue(main, "concepts")).toBe("0");
-    expect(statValue(main, "queries")).toBe("0");
-    expect(statValue(main, "sources")).toBe("0");
-    expect(statValue(main, "freshness")).toBe("0");
-    expect(statValue(main, "reviews")).toBe("0");
   });
 });

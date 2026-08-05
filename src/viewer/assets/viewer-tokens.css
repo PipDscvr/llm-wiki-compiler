@@ -151,6 +151,13 @@
   --warn: #fb923c;
   --warn-bg: #171120;
   --warn-border: #3a2a1c;
+  /* The warm Lint panel's internal rules and its raised footer band (health
+   * mockup tree lines 209/218/254). Warm-tinted counterparts to --border-soft
+   * and --bg-card, one step apart from each other: --warn-divider frames the
+   * panel's bands, --warn-divider-soft separates table rows inside them. */
+  --warn-divider: #2b2130;
+  --warn-divider-soft: #221a29;
+  --warn-surface: #1a1322;
   --warn-muted: #a1876b;
   --danger: #f87171;
 
@@ -227,6 +234,9 @@
   --warn: #c2610a;
   --warn-bg: #fff8f0;
   --warn-border: #efd6b6;
+  --warn-divider: #f3e0c8;
+  --warn-divider-soft: #f8ecda;
+  --warn-surface: #fdf1e1;
   --warn-muted: #8d6440;
   --danger: #dc2626;
 
@@ -282,6 +292,9 @@
     --warn: #c2610a;
     --warn-bg: #fff8f0;
     --warn-border: #efd6b6;
+    --warn-divider: #f3e0c8;
+    --warn-divider-soft: #f8ecda;
+    --warn-surface: #fdf1e1;
     --warn-muted: #8d6440;
     --danger: #dc2626;
 
