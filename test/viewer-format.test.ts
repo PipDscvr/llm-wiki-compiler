@@ -16,6 +16,7 @@ const MODULE_PATH = path.resolve("src/viewer/assets/viewer-format.js");
 interface Format {
   relativeAge(iso: unknown): string;
   lintTotal(lint: unknown): number | null;
+  plural(count: number, noun: string): string;
 }
 
 let format: Format;
@@ -25,7 +26,7 @@ beforeEach(async () => {
   const dom = new JSDOM("<!doctype html><body></body>", { runScripts: "outside-only" });
   dom.window.eval(
     `${source.replace(/export\s+function\s+/g, "function ")}
-     window.__format = { relativeAge, lintTotal };`,
+     window.__format = { relativeAge, lintTotal, plural };`,
   );
   format = (dom.window as unknown as { __format: Format }).__format;
 });
@@ -66,5 +67,21 @@ describe("lintTotal", () => {
 
   it("treats missing counts as zero", () => {
     expect(format.lintTotal({ warnings: 4 })).toBe(4);
+  });
+});
+
+describe("plural", () => {
+  // The bug this guards: a hardcoded "s" suffix reads fine at the example
+  // count a mockup happens to show (e.g. "11 dangling targets") and wrong
+  // at exactly 1 ("1 dangling targets") — the boundary a fixed literal
+  // never gets tested against.
+  it("keeps the noun singular at exactly one", () => {
+    expect(format.plural(1, "dangling target")).toBe("1 dangling target");
+  });
+
+  it("pluralises for any count other than one, including zero", () => {
+    expect(format.plural(0, "dangling target")).toBe("0 dangling targets");
+    expect(format.plural(2, "dangling target")).toBe("2 dangling targets");
+    expect(format.plural(11, "dangling target")).toBe("11 dangling targets");
   });
 });

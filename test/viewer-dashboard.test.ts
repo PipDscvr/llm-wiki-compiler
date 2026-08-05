@@ -117,7 +117,9 @@ describe("dashboard stat cards", () => {
     };
     const main = await mountDashboardWithEnvelope(envelope);
     const sub = main.querySelector('[data-stat="concepts"] .stat-sub')?.textContent ?? "";
-    expect(sub).toBe("5 citations · 1 pages");
+    // "1 page", not "1 pages" — plural() keeps the noun singular at exactly
+    // one (see test/viewer-format.test.ts).
+    expect(sub).toBe("5 citations · 1 page");
   });
 });
 
@@ -125,6 +127,15 @@ describe("dashboard panels", () => {
   it("renders the recently-compiled list", async () => {
     const main = await mountDashboard(0, 0);
     expect(main.querySelector(".recent-row")).toBeTruthy();
+  });
+
+  it("shows the recently-compiled footer's 'All N concepts' link with correct singular/plural", async () => {
+    const singular = envelopeWith(0, 0);
+    singular.counts.concepts = 1;
+    const main = await mountDashboardWithEnvelope(singular);
+    const footer = main.querySelector(".panel:not(.graph-panel) .panel-footer");
+    expect(footer?.textContent).toContain("All 1 concept →");
+    expect(footer?.textContent).not.toContain("All 1 concepts");
   });
 
   it("renders a citations-resolved bar in the compile receipt", async () => {
@@ -145,10 +156,38 @@ describe("dashboard panels", () => {
     expect(nextActions?.textContent).toContain("11 dangling");
   });
 
+  it("pluralises the dangling-link next action, singular at exactly one", async () => {
+    const main = await mountDashboard(1, 0);
+    const nextActions = main.ownerDocument!.querySelector("[data-next-actions]");
+    expect(nextActions?.textContent).toContain("Resolve 1 dangling link");
+    expect(nextActions?.textContent).not.toContain("dangling links");
+  });
+
   it("omits the dangling next action when nothing dangles", async () => {
     const main = await mountDashboard(0, 0);
     const nextActions = main.ownerDocument!.querySelector("[data-next-actions]");
     expect(nextActions?.textContent).not.toContain("dangling");
+  });
+
+  it("pluralises the graph panel's dangling-target count, singular at exactly one", async () => {
+    // Regression guard for the "1 dangling targets" bug: the footer used to
+    // hardcode a plural "targets" suffix regardless of count.
+    const one = await mountDashboard(1, 0);
+    const oneFooter = one.querySelector(".graph-panel .panel-footer");
+    expect(oneFooter?.textContent).toContain("1 dangling target");
+    expect(oneFooter?.textContent).not.toContain("1 dangling targets");
+
+    const two = await mountDashboard(2, 0);
+    const twoFooter = two.querySelector(".graph-panel .panel-footer");
+    expect(twoFooter?.textContent).toContain("2 dangling targets");
+  });
+
+  it("pluralises the graph panel's node/edge caption at exactly one of either", async () => {
+    const base = envelopeWith(0, 0);
+    const envelope = { ...base, graph: { ...base.graph, nodeCount: 1, edgeCount: 1 } };
+    const main = await mountDashboardWithEnvelope(envelope);
+    const caption = main.querySelector(".graph-panel .panel-caption")?.textContent ?? "";
+    expect(caption).toBe("1 node · 1 edge");
   });
 
   it("reserves a container for the graph panel", async () => {
@@ -183,6 +222,23 @@ describe("dashboard recently-compiled freshness dot", () => {
     const dot = main.querySelector(".recent-row .list-dot");
     expect(dot?.className).toContain("is-ok");
     expect(dot?.className).not.toContain("is-warn");
+  });
+
+  it("tints the citation figure to match the dot for a warn-freshness row", async () => {
+    // Both derive from the same isWarnFreshness() predicate (viewer-format.js)
+    // so a stale/orphaned row can never show a violet figure beside an amber
+    // dot — the two disagreeing about one page's freshness is the bug this
+    // guards against.
+    const base = envelopeWith(0, 0);
+    const envelope = {
+      ...base,
+      pages: [{ ...base.pages[0], freshness: { freshnessStatus: "stale", contradicted: false, archived: false } }],
+    };
+    const main = await mountDashboardWithEnvelope(envelope);
+    const dot = main.querySelector(".recent-row .list-dot");
+    const figure = main.querySelector(".recent-row .recent-citations");
+    expect(dot?.className).toContain("is-warn");
+    expect(figure?.className).toContain("is-warn");
   });
 });
 

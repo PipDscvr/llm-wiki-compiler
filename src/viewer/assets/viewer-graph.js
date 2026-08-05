@@ -47,6 +47,7 @@
  */
 
 import { emptyState } from "./viewer-dom.js";
+import { plural } from "./viewer-format.js";
 
 /**
  * Force and sizing parameters per mode. Compact serves the dashboard's
@@ -325,11 +326,6 @@ function attachDrag(nodeSel, sim) {
       d.fy = null;
     })
   );
-}
-
-/** Pluralize a noun by appending 's' when count !== 1. */
-function plural(count, noun) {
-  return count + ' ' + noun + (count !== 1 ? 's' : '');
 }
 
 /** Build the tooltip meta-line text for a node datum. */

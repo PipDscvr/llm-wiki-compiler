@@ -295,6 +295,11 @@
   font: 500 10px/1 var(--font-mono);
   color: var(--accent-text);
 }
+/* Tinted to match the row's freshness dot (mockup tree line 183 — the
+ * Andrej Karpathy row's "9/10" is --warn beside a --warn dot) — driven by
+ * the same isWarnFreshness predicate as .list-dot.is-warn above, so the
+ * figure and the dot can never disagree about one page's freshness. */
+.recent-citations.is-warn { color: var(--warn); }
 
 .recent-age {
   flex: none;

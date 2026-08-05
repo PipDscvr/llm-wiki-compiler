@@ -98,3 +98,21 @@ const WARN_FRESHNESS_STATUSES = new Set(["stale", "orphaned"]);
 export function isWarnFreshness(status) {
   return WARN_FRESHNESS_STATUSES.has(status);
 }
+
+/**
+ * Pluralise a noun by count, e.g. `plural(1, "dangling target")` → "1
+ * dangling target", `plural(11, "dangling target")` → "11 dangling
+ * targets". Every count-bearing string in the viewer routes through this —
+ * originally the graph explorer's node tooltip had its own private copy,
+ * and the dashboard wrote several counts as hardcoded-plural template
+ * literals that read wrong at exactly 1 (e.g. "1 dangling targets"); both
+ * now call this instead of a second pluraliser that could disagree with it
+ * at the n=1 boundary.
+ *
+ * @param {number} count
+ * @param {string} noun - Singular form of the noun.
+ * @returns {string}
+ */
+export function plural(count, noun) {
+  return `${count} ${noun}${count !== 1 ? "s" : ""}`;
+}

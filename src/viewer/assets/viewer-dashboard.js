@@ -43,7 +43,7 @@
  */
 
 import { el, emptyState } from "./viewer-dom.js";
-import { isWarnFreshness, lintTotal, relativeAge } from "./viewer-format.js";
+import { isWarnFreshness, lintTotal, plural, relativeAge } from "./viewer-format.js";
 import { LEGEND_KINDS, loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js";
 import { renderDashboardRail } from "./viewer-rail.js";
 
@@ -67,7 +67,7 @@ const STAT_CARDS = [
     // Scoped to concept pages only (not envelope-wide totalCitations/pageCount,
     // which also include queries) — the card is named "Concepts", so its
     // sub-line must describe concepts, not the whole envelope.
-    sub: (m) => `${m.conceptsCitations} citations · ${m.counts.concepts ?? 0} pages`,
+    sub: (m) => `${plural(m.conceptsCitations, "citation")} · ${plural(m.counts.concepts ?? 0, "page")}`,
   },
   {
     key: "sources",
@@ -82,7 +82,9 @@ const STAT_CARDS = [
     badge: "LINT",
     warnWhenNonZero: true,
     value: (m) => m.attention,
-    sub: (m) => `${m.dangling} dangling · ${m.unresolved} unresolved citations`,
+    // "dangling" alone is elliptical (short for "dangling [links]") and
+    // never takes a plural suffix, so only the second half needs plural().
+    sub: (m) => `${m.dangling} dangling · ${plural(m.unresolved, "unresolved citation")}`,
   },
   {
     key: "reviews",
@@ -95,7 +97,7 @@ const STAT_CARDS = [
     sub: (m) =>
       (m.counts.pendingReviews ?? 0) === 0
         ? "queue is empty"
-        : `${m.counts.pendingReviews} candidates`,
+        : plural(m.counts.pendingReviews, "candidate"),
   },
 ];
 
@@ -256,7 +258,8 @@ function buildHero(model) {
   copy.appendChild(el("div", "hero-title", "Your knowledge base is ready."));
   copy.appendChild(
     el("div", "hero-body",
-      `${model.counts.concepts ?? 0} pages, ${model.totalCitations} citations traced to source spans.`),
+      `${plural(model.counts.concepts ?? 0, "page")}, ` +
+        `${plural(model.totalCitations, "citation")} traced to source spans.`),
   );
   hero.appendChild(copy);
   const actions = el("div", "hero-actions");
@@ -310,7 +313,7 @@ function buildRecentPanel(model) {
   panel.appendChild(
     buildPanelFooter(
       "cited pages, most recent first",
-      buildTrailingLink(`All ${model.counts.concepts ?? 0} concepts →`, "#/concepts"),
+      buildTrailingLink(`All ${plural(model.counts.concepts ?? 0, "concept")} →`, "#/concepts"),
     ),
   );
   return panel;
@@ -327,7 +330,8 @@ function buildRecentRow(page, meta) {
   // Same rule as the #/concepts and #/queries list rows (viewer-lists.js) —
   // only stale/orphaned warn. This dot and that one share the .list-dot
   // class and must never disagree about what a given status means.
-  const dot = el("span", `list-dot ${isWarnFreshness(status) ? "is-warn" : "is-ok"}`);
+  const warn = isWarnFreshness(status);
+  const dot = el("span", `list-dot ${warn ? "is-warn" : "is-ok"}`);
   dot.title = status;
   dot.setAttribute("aria-label", status);
   row.appendChild(dot);
@@ -340,7 +344,11 @@ function buildRecentRow(page, meta) {
   // nothing for an uncited page — the same fallback the #/concepts list
   // rows use (viewer-lists.js buildCitationCount) — so the age column
   // stays aligned and the two surfaces agree on what an uncited page shows.
-  row.appendChild(el("span", "recent-citations", String(meta?.citationCount ?? 0)));
+  // Tinted by the SAME `warn` predicate as the dot above (mockup tree line
+  // 183 — the Andrej Karpathy row's "9/10" is --warn beside a --warn dot),
+  // so the figure and the dot can never disagree about one page's freshness.
+  const citations = el("span", `recent-citations${warn ? " is-warn" : ""}`, String(meta?.citationCount ?? 0));
+  row.appendChild(citations);
   row.appendChild(el("span", "recent-age", relativeAge(page.updatedAt)));
   return row;
 }
@@ -379,7 +387,7 @@ function buildGraphPanelHead(model) {
   const left = el("div", "panel-head-group");
   left.appendChild(el("span", "panel-title", "Knowledge graph"));
   left.appendChild(
-    el("span", "panel-caption", `${model.graph.nodeCount} nodes · ${model.graph.edgeCount} edges`),
+    el("span", "panel-caption", `${plural(model.graph.nodeCount, "node")} · ${plural(model.graph.edgeCount, "edge")}`),
   );
   head.appendChild(left);
   const controls = el("div", "panel-controls");
@@ -397,11 +405,14 @@ function buildGraphPanelHead(model) {
  * names whichever node is currently hovered; reproducing that would mean
  * wiring this footer to viewer-graph.js's hover state, so the footer's
  * caption instead names the real, always-available interaction (see
- * buildGraphPanel's "hover a node to inspect").
+ * buildGraphPanel's "hover a node to inspect"). The count text runs through
+ * the shared `plural()` (viewer-format.js, also used by the graph
+ * explorer's node tooltip) rather than a hardcoded "targets" suffix, which
+ * used to read "1 dangling targets" at exactly one dangling target.
  */
 function buildDanglingNote(graph) {
   const className = graph.danglingCount > 0 ? "footer-danger" : undefined;
-  return el("span", className, `${graph.danglingCount} dangling targets`);
+  return el("span", className, plural(graph.danglingCount, "dangling target"));
 }
 
 /**
@@ -484,7 +495,7 @@ function receiptRows(model) {
     ["State", model.envelope?.stateStatus ?? "unknown"],
     ["Index", model.envelope?.index?.available ? "available" : "not compiled"],
   ];
-  rows.push(["Lint", model.lint ? `${lintTotal(model.lint)} findings` : "never run"]);
+  rows.push(["Lint", model.lint ? plural(lintTotal(model.lint), "finding") : "never run"]);
   return rows;
 }
 
@@ -558,12 +569,16 @@ function nextActionRows(model) {
   if (model.dangling > 0) {
     rows.push({
       glyph: "⌗",
-      title: `Resolve ${model.dangling} dangling links`,
+      title: `Resolve ${plural(model.dangling, "dangling link")}`,
       hint: "create the pages or fix the targets",
     });
   }
   if ((model.counts.stale ?? 0) > 0) {
-    rows.push({ glyph: "↻", title: `Recompile ${model.counts.stale} stale pages`, hint: "llmwiki compile" });
+    rows.push({
+      glyph: "↻",
+      title: `Recompile ${plural(model.counts.stale, "stale page")}`,
+      hint: "llmwiki compile",
+    });
   }
   if (!model.lint) rows.push({ glyph: "✓", title: "Run lint", hint: "llmwiki lint" });
   rows.push({ glyph: "⇩", title: "Export for agents", hint: "llmwiki export" });
