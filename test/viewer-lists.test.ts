@@ -3,7 +3,9 @@
  *
  * The freshness filter moved here from the sidebar, so its behaviour is
  * pinned on the concepts route. The sources route reads the snapshot's
- * sourceFilenames and marks which entries have been compiled.
+ * sourceFilenames; there is no per-file compiled flag anywhere in the
+ * snapshot, so rows carry no status dot — the compiled-versus-on-disk
+ * fact is pinned once, in the caption.
  */
 
 import { describe, expect, it } from "vitest";
@@ -112,6 +114,13 @@ describe("#/sources", () => {
   it("lists every source filename", async () => {
     const main = await mountAt("#/sources");
     expect(main.querySelectorAll(".list-row")).toHaveLength(2);
+  });
+
+  it("renders a row as just the filename — no per-row status dot exists to show", async () => {
+    const main = await mountAt("#/sources");
+    const row = main.querySelector(".list-row") as HTMLElement;
+    expect(row.querySelector(".list-title")?.textContent).toBe("karpathy.md");
+    expect(row.querySelector(".list-dot")).toBeNull();
   });
 
   it("renders the design system's empty state, with the real CLI command", async () => {

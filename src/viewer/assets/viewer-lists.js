@@ -62,10 +62,12 @@ export function renderQueriesList(main, envelope) {
 }
 
 /**
- * Render the sources route: every filename under `sources/`, marked with
- * whether the compiler has a state entry for it. The snapshot carries a
- * compiled COUNT rather than per-file state, so the marker is shown only
- * when the counts make it unambiguous — all compiled, or none.
+ * Render the sources route: every filename under `sources/`, in the order
+ * the snapshot lists them. Rows carry no per-file compiled/pending status —
+ * the snapshot exposes a compiled COUNT (`counts.compiledSources`), not
+ * per-file state, so there is no data to mark an individual row with. The
+ * compiled-versus-on-disk fact is stated once, in the caption above the
+ * list (see `buildSourcesCaption`).
  */
 // Optional chaining on sourceFilenames/counts plus the empty-vs-populated
 // branch inflates cyclomatic count for what is a linear render (cognitive
@@ -103,10 +105,13 @@ function buildSourcesCaption(counts) {
   return el("p", "list-caption", `${compiled} compiled · ${onDisk} on disk`);
 }
 
-/** Build one source row. */
+/**
+ * Build one source row: just the filename. No status dot — see
+ * `renderSourcesList` for why per-row status is not something this route
+ * can show.
+ */
 function buildSourceRow(name) {
   const row = el("div", "list-row");
-  row.appendChild(el("span", "list-dot"));
   row.appendChild(el("span", "list-title", name));
   return row;
 }
