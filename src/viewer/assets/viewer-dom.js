@@ -18,10 +18,6 @@
  * @param {string} [className] - Class attribute; omitted entirely when absent.
  * @param {string} [text] - Text content, inserted via textContent.
  * @returns {HTMLElement}
- * @expected-unused Primitive the other four helpers build on; not yet
- *   called directly outside this file. Later render modules (Tasks 6-9 of
- *   the nebula-viewer-ui plan) call it for one-off elements the other
- *   helpers don't cover. Fallow should flag this tag as stale once one does.
  */
 export function el(tag, className, text) {
   const node = document.createElement(tag);

@@ -2,11 +2,11 @@
  * llmwiki viewer — vanilla-JS client.
  *
  * Three responsibilities, kept deliberately small:
- *   1. First paint from the server-embedded `<script type="application/json"
- *      id="page-index">` blob so the sidebar shows pages before any fetch.
- *   2. Full data from `/api/pages` once the page loads — replaces the
- *      first-paint sidebar with grouped concepts/queries, and renders
- *      the dashboard home.
+ *   1. First paint renders the sidebar nav from an empty model
+ *      (`renderSidebar({})`) so the chrome appears before any fetch settles.
+ *   2. `/api/pages` and `/api/health`, fetched once in parallel via
+ *      `loadBootstrapData()` and cached in `bootstrapData` — fill in the
+ *      sidebar's counts and lint badge, and render the dashboard home.
  *   3. Hash router (`#/`, `#/concepts/<slug>`, `#/queries/<slug>`,
  *      `#/index`, `#/health`) that fetches `/api/page/...`,
  *      `/api/index`, or `/api/health` and drops the result into the
@@ -70,6 +70,24 @@ const LINT_METRIC_ROWS = [
   ["Errors", "errors", 0],
   ["Last run", "at", ""],
 ];
+
+/**
+ * Bootstrap payloads shared by the sidebar, dashboard, and health route.
+ * Fetched once in parallel at startup; each entry stays null if its fetch
+ * failed, so one failing endpoint degrades only the surfaces that need it.
+ */
+const bootstrapData = { pages: null, health: null };
+
+/** Fetch both bootstrap endpoints in parallel, tolerating either failing. */
+async function loadBootstrapData() {
+  const [pages, health] = await Promise.all([
+    fetchJson("/api/pages").catch(() => null),
+    fetchJson("/api/health").catch(() => null),
+  ]);
+  bootstrapData.pages = pages;
+  bootstrapData.health = health;
+  return bootstrapData;
+}
 
 /** Parse the server-embedded page-index JSON. Empty list if absent or malformed. */
 function readEmbeddedIndex() {
@@ -223,17 +241,17 @@ async function renderRoute() {
   return renderPagePane(main, route.directory, route.slug);
 }
 
-/** Fetch /api/health and render the dashboard. */
+/** Render the health pane from the cached payload, fetching only if absent. */
 async function renderHealthPane(main) {
-  try {
-    const health = await fetchJson("/api/health");
-    main.innerHTML = "";
-    main.appendChild(heading("h1", "Health"));
-    main.appendChild(buildHealthDashboard(health));
-    clearSupportRail();
-  } catch (err) {
-    renderError(`Could not load /api/health: ${err.message}`);
+  const health = bootstrapData.health ?? (await loadBootstrapData()).health;
+  if (!health) {
+    renderError("Could not load /api/health");
+    return;
   }
+  main.innerHTML = "";
+  main.appendChild(heading("h1", "Health"));
+  main.appendChild(buildHealthDashboard(health));
+  clearSupportRail();
 }
 
 /** Build the health dashboard DOM from the `/api/health` payload. */
@@ -297,21 +315,20 @@ function buildLintBlock(lint) {
   return wrap;
 }
 
-/** Fetch /api/pages and render the dashboard. */
+/** Render the home dashboard from the cached bootstrap payloads. */
 async function loadAndRenderHome() {
-  try {
-    const envelope = await fetchJson("/api/pages");
-    applyHomeEnvelope(envelope);
-  } catch (err) {
-    renderError(`Could not load /api/pages: ${err.message}`);
+  const data = bootstrapData.pages ? bootstrapData : await loadBootstrapData();
+  if (!data.pages) {
+    renderError("Could not load /api/pages");
+    return;
   }
+  applyHomeEnvelope(data.pages);
 }
 
 /** Apply a successfully fetched /api/pages envelope to the chrome + main pane. */
 function applyHomeEnvelope(envelope) {
   const titleEl = document.querySelector(TITLE_SELECTOR);
   titleEl.textContent = projectTitle(envelope);
-  renderSidebar(envelope?.pages || []);
   renderHome(envelope);
   // Inject into .app-layout (outside <main>) so the banner persists across route changes.
   injectGlobalCorruptBanner(envelope?.stateStatus);
@@ -485,22 +502,33 @@ async function fetchJson(pathname) {
   return res.json();
 }
 
-/** Bootstrap: first-paint from embedded blob, then full fetch + router. */
+/** Bootstrap: first-paint nav, then parallel data fetch, then the router. */
 function main() {
   wireThemeToggle();
   const embedded = readEmbeddedIndex();
-  renderSidebar(embedded.pages);
+  renderSidebar({});
   wireSearch({ fetchJson });
-  // Ensure the corrupt-state banner appears on every entry route, not just home.
-  // injectGlobalCorruptBanner is idempotent, so the home route's own /api/pages
-  // fetch won't double-render if both settle.
-  void fetchJson("/api/pages")
-    .then((env) => injectGlobalCorruptBanner(env?.stateStatus))
-    .catch(() => {});
+  void loadBootstrapData().then((data) => {
+    renderSidebar(sidebarModel(data));
+    injectGlobalCorruptBanner(data.pages?.stateStatus);
+    void renderRoute();
+  });
   window.addEventListener("hashchange", () => {
     void renderRoute();
   });
   void renderRoute();
+}
+
+/** Project the bootstrap payloads into the sidebar's render model. */
+// Optional chaining on three independent fields inflates cyclomatic count for
+// what is a straight-line projection (cognitive complexity: 1).
+// fallow-ignore-next-line complexity
+function sidebarModel(data) {
+  return {
+    project: data.pages?.project,
+    counts: data.pages?.counts,
+    lint: data.health?.lint ?? null,
+  };
 }
 
 if (document.readyState === "loading") {

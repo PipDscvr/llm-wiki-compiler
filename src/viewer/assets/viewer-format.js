@@ -1,10 +1,3 @@
-// fallow-ignore-file unused-file
-// This module ships ahead of its consumers (extract-before-use, per Task 5
-// of the nebula-viewer-ui plan): viewer-lists.js, viewer-dashboard.js, and
-// viewer-sidebar.js import relativeAge/lintTotal in later tasks. Nothing on
-// this branch imports the file yet, which fallow's static graph reads as
-// dead. See test/viewer-format.test.ts for the real, already-written tests.
-
 /**
  * llmwiki viewer — shared value formatting and derivation.
  *
@@ -49,9 +42,6 @@ export function relativeAge(iso) {
  *
  * @param {unknown} lint - The `/api/health` lint cache entry, or null.
  * @returns {number|null}
- * @expected-unused Not yet called on this branch; six later tasks in the
- *   nebula-viewer-ui plan import it. Fallow should flag the tag itself as
- *   stale once one of them does — that is the intended cue to remove it.
  */
 // CRAP is estimated from zero call-graph references at this point in the
 // rollout, not from missing tests (see test/viewer-format.test.ts).

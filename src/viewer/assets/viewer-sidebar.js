@@ -1,332 +1,215 @@
 /**
- * llmwiki viewer — sidebar renderer.
+ * llmwiki viewer — sidebar navigation.
  *
- * Renders the standing project links first, then concept pages grouped
- * by frontmatter `kind` (defaulting to "concept" when absent — spec
- * line 347), then a "Saved Queries" group. Groups use native
- * `<details><summary>` so keyboard users get Enter/Space collapse for
- * free without bespoke ARIA wiring.
+ * The Nebula sidebar is pure navigation: a project block, a BROWSE section,
+ * a MAINTAIN section, and a docs card. The page tree and freshness filter
+ * that used to live here now belong to the #/concepts list route, so the
+ * sidebar stays a fixed height regardless of wiki size.
  *
- * First paint runs against the embedded page-index blob (which now
- * includes `kind` so the grouping is correct from the first byte);
- * the full `/api/pages` envelope replaces the contents once it
- * arrives.
+ * Counts are advisory: every field of the render model is optional so first
+ * paint can render the nav before /api/pages settles, and a failed
+ * /api/health drops only the lint badge rather than blanking the nav.
  *
- * A per-axis freshness filter (all / stale / orphaned / contradicted /
- * archived) narrows the page list client-side over the already-loaded
- * `/api/pages` rows. No new endpoint is needed — the filter is pure
- * DOM manipulation over the in-memory page list.
+ * Entries whose surface does not exist in a read-only viewer (Settings,
+ * Compile & export) are deliberately absent — see the design spec §2.3.
  */
+
+import { el } from "./viewer-dom.js";
+import { lintTotal } from "./viewer-format.js";
 
 const SIDEBAR_SELECTOR = "[data-sidebar]";
-const DEFAULT_KIND = "concept";
-const EMPTY_PLACEHOLDER_TEXT = "No pages yet — run `llmwiki compile`.";
+
+/** Rendered when a count is present and zero. */
+const EMPTY_COUNT = "—";
 
 /**
- * CSS class on the standing "Project" section. Shared between
- * `buildProjectSection` (which sets it) and `reRenderSidebarGroups`
- * (whose keep-selector preserves it across filter re-renders) so a
- * rename can't silently break the re-render keep-list.
+ * Nav entries per section. `count` names the `counts` key whose value is
+ * shown; entries without one render no count. `route` doubles as the
+ * `data-route` value `markActive` matches on.
  */
-const PROJECT_SECTION_CLASS = "sidebar-health";
-
-/** The active freshness filter. "all" means no narrowing. */
-let activeFreshnessFilter = "all";
-
-/** Available filter values and their human labels. */
-const FRESHNESS_FILTER_OPTIONS = [
-  { value: "all", label: "All" },
-  { value: "stale", label: "Stale" },
-  { value: "orphaned", label: "Orphaned" },
-  { value: "contradicted", label: "Contradicted" },
-  { value: "archived", label: "Archived" },
+const NAV_SECTIONS = [
+  {
+    label: "BROWSE",
+    items: [
+      { route: "home", href: "#/", label: "Overview" },
+      { route: "concepts", href: "#/concepts", label: "Concepts", count: "concepts" },
+      { route: "sources", href: "#/sources", label: "Sources", count: "sourceFiles" },
+      { route: "queries", href: "#/queries", label: "Queries", count: "queries" },
+      { route: "graph", href: "#/graph", label: "Graph explorer" },
+    ],
+  },
+  {
+    label: "MAINTAIN",
+    items: [
+      { route: "health", href: "#/health", label: "Lint", badge: "lint" },
+      { route: "reviews", href: "#/health", label: "Reviews", count: "pendingReviews" },
+    ],
+  },
 ];
 
 /**
- * Static (non-page) hash routes that have a dedicated sidebar link.
- * `markActive` highlights the entry via `a[data-route="<route>"]`
- * without needing to parse the route descriptor.
+ * Page routes mark their parent nav entry. `#/concepts/alpha` highlights
+ * the Concepts entry rather than leaving the nav with nothing current.
  */
-const STATIC_ROUTE_LINK_SELECTORS = new Map([
-  ["#/graph", 'a[data-route="graph"]'],
-  ["#/health", 'a[data-route="health"]'],
+const PAGE_ROUTE_PARENTS = new Map([
+  ["concepts", "concepts"],
+  ["queries", "queries"],
 ]);
 
-/** Full page list captured at the last renderSidebar call for filter re-renders. */
-let lastPages = [];
+/** Hashes that resolve to the home route. */
+const HOME_HASHES = new Set(["", "#", "#/"]);
 
-/** Render the sidebar groups + standing Health entry, then mark active. */
-export function renderSidebar(pages) {
-  lastPages = pages;
+/** Exact-hash to nav route mapping for the static routes. */
+const STATIC_ROUTE_FOR_HASH = new Map([
+  ["#/concepts", "concepts"],
+  ["#/queries", "queries"],
+  ["#/sources", "sources"],
+  ["#/graph", "graph"],
+  ["#/health", "health"],
+  ["#/index", "home"],
+]);
+
+/**
+ * Render the sidebar navigation.
+ *
+ * @param {{project?: {title?: string}, counts?: Record<string, number>,
+ *          lint?: {warnings?: number, errors?: number} | null}} model
+ */
+export function renderSidebar(model) {
   const sidebar = document.querySelector(SIDEBAR_SELECTOR);
   if (!sidebar) return;
   sidebar.innerHTML = "";
-  sidebar.appendChild(buildProjectSection());
-  sidebar.appendChild(buildFreshnessFilter());
-  renderFilteredGroups(sidebar, pages);
+  sidebar.appendChild(buildLockup());
+  sidebar.appendChild(buildProjectBlock(model?.project));
+  for (const section of NAV_SECTIONS) {
+    sidebar.appendChild(buildNavSection(section, model));
+  }
+  sidebar.appendChild(buildDocsCard());
   markActive();
 }
 
-/** Re-render only the page groups using the stored lastPages + active filter. */
-function reRenderSidebarGroups() {
-  const sidebar = document.querySelector(SIDEBAR_SELECTOR);
-  if (!sidebar) return;
-  // Remove everything after the project section and filter control.
-  const keep = sidebar.querySelectorAll(`section.${PROJECT_SECTION_CLASS}, .freshness-filter`);
-  const keepSet = new Set(Array.from(keep));
-  Array.from(sidebar.children).forEach((child) => {
-    if (!keepSet.has(child)) child.remove();
-  });
-  renderFilteredGroups(sidebar, lastPages);
-  markActive();
-}
-
-/** Append the filtered concept/query groups and the empty placeholder if needed. */
-function renderFilteredGroups(sidebar, pages) {
-  const filtered = applyFreshnessFilter(pages, activeFreshnessFilter);
-  const concepts = filterByDirectory(filtered, "concepts");
-  const queries = filterByDirectory(filtered, "queries");
-  appendConceptGroups(sidebar, concepts);
-  appendQueryGroup(sidebar, queries);
-  appendEmptyPlaceholderIfNeeded(sidebar, concepts, queries);
-}
-
-/** Filter pages to those whose `pageDirectory` matches the given bucket. */
-function filterByDirectory(pages, directory) {
-  return pages.filter((p) => p.pageDirectory === directory);
-}
-
-/** Append one collapsible `<details>` group per concept kind. */
-function appendConceptGroups(sidebar, concepts) {
-  for (const [kind, groupPages] of groupConceptsByKind(concepts)) {
-    sidebar.appendChild(buildCollapsibleGroup(formatKindLabel(kind), groupPages, "kind", kind));
-  }
-}
-
-/** Append the Saved Queries group when at least one query page exists. */
-function appendQueryGroup(sidebar, queries) {
-  if (queries.length === 0) return;
-  sidebar.appendChild(buildCollapsibleGroup("Saved Queries", queries, "kind", "query"));
-}
-
-/** Render the "No pages yet" placeholder when both buckets are empty. */
-function appendEmptyPlaceholderIfNeeded(sidebar, concepts, queries) {
-  if (concepts.length > 0 || queries.length > 0) return;
-  const empty = document.createElement("p");
-  empty.className = "placeholder";
-  empty.textContent = EMPTY_PLACEHOLDER_TEXT;
-  sidebar.appendChild(empty);
-}
-
 /**
- * Mark the sidebar entry matching the current hash route as
- * `aria-current="page"` and clear it from every other entry. Exported
- * so `viewer.js` can call it after route changes without duplicating
- * the parsing logic. Reads `location.hash` directly so the call site
- * doesn't need to thread the route descriptor through.
+ * Build the product lockup: the 34px mark beside the product name and tagline.
+ * The design system requires the mark never sit on a coloured plate, so this
+ * renders directly on the sidebar surface with no background of its own.
  */
-export function markActive() {
-  const hash = location.hash;
-  const links = document.querySelectorAll(`${SIDEBAR_SELECTOR} a`);
-  clearCurrentAttribute(links);
-  if (markStaticRoute(hash)) return;
-  markPageRoute(links, parseExpectedPageId(hash));
+function buildLockup() {
+  const wrap = el("div", "sidebar-lockup");
+  const mark = document.createElement("img");
+  mark.className = "sidebar-lockup-mark";
+  mark.src = "/assets/llmwiki-logo-64.png";
+  mark.width = 34;
+  mark.height = 34;
+  mark.alt = "";
+  mark.setAttribute("aria-hidden", "true");
+  wrap.appendChild(mark);
+  const text = el("div", "sidebar-lockup-text");
+  text.appendChild(el("div", "sidebar-lockup-name", "LLM Wiki Compiler"));
+  text.appendChild(el("div", "sidebar-lockup-tagline", "compile once · reuse forever"));
+  wrap.appendChild(text);
+  return wrap;
 }
 
-/** Remove `aria-current` from every sidebar link in `links`. */
-function clearCurrentAttribute(links) {
-  for (const link of links) link.removeAttribute("aria-current");
+/** Build the PROJECT block: name plus the local/read-only marker. */
+function buildProjectBlock(project) {
+  const wrap = el("div", "project-block");
+  wrap.appendChild(el("div", "nav-section-label", "PROJECT"));
+  const name = el("div", "project-name", project?.title || "llmwiki");
+  name.dataset.projectName = "";
+  wrap.appendChild(name);
+  const status = el("div", "project-status");
+  status.appendChild(el("span", "status-dot"));
+  status.appendChild(el("span", undefined, "LOCAL · READ ONLY"));
+  wrap.appendChild(status);
+  return wrap;
 }
 
-/**
- * Apply `aria-current="page"` to the static-route link for `hash`,
- * if the hash names a known static route. Returns true when handled
- * so the page-route fallback can be skipped.
- */
-function markStaticRoute(hash) {
-  const selector = STATIC_ROUTE_LINK_SELECTORS.get(hash);
-  if (!selector) return false;
-  document.querySelector(selector)?.setAttribute("aria-current", "page");
-  return true;
-}
-
-/** Apply `aria-current="page"` to the link whose pageId matches `expectedId`. */
-function markPageRoute(links, expectedId) {
-  if (!expectedId) return;
-  for (const link of links) {
-    if (link.dataset.pageId === expectedId) {
-      link.setAttribute("aria-current", "page");
-      return;
-    }
+/** Build one labelled nav section with its entries. */
+function buildNavSection(section, model) {
+  const wrap = el("section", "nav-section");
+  wrap.appendChild(el("div", "nav-section-label", section.label));
+  const list = el("ul", "nav-list");
+  for (const item of section.items) {
+    list.appendChild(buildNavItem(item, model));
   }
-}
-
-/**
- * Group concept pages by their `kind` field. Missing/non-string kinds
- * fall back to `"concept"` per spec §Sidebar. Group order is stable
- * by kind name (locale-aware), with the default `concept` bucket
- * floated to the top so a typical wiki shows "Concept" first.
- */
-function groupConceptsByKind(concepts) {
-  const byKind = new Map();
-  for (const page of concepts) {
-    addPageToKindBucket(byKind, page);
-  }
-  const kinds = Array.from(byKind.keys()).sort(compareKinds);
-  return kinds.map((kind) => /** @type {[string, Array]} */ ([kind, byKind.get(kind)]));
-}
-
-/** Push `page` onto the bucket for its resolved kind, creating it if needed. */
-function addPageToKindBucket(byKind, page) {
-  const kind = resolveKind(page);
-  if (!byKind.has(kind)) byKind.set(kind, []);
-  byKind.get(kind).push(page);
-}
-
-/** Read `page.kind` defensively, falling back to DEFAULT_KIND when absent. */
-function resolveKind(page) {
-  if (typeof page.kind === "string" && page.kind.length > 0) return page.kind;
-  return DEFAULT_KIND;
-}
-
-/** Sort comparator that floats DEFAULT_KIND first, then locale-orders the rest. */
-function compareKinds(a, b) {
-  if (a === DEFAULT_KIND) return -1;
-  if (b === DEFAULT_KIND) return 1;
-  return a.localeCompare(b);
-}
-
-/** Title-case a kind for the group heading. */
-function formatKindLabel(kind) {
-  if (kind === DEFAULT_KIND) return "Concepts";
-  return kind.charAt(0).toUpperCase() + kind.slice(1);
-}
-
-/** Build a collapsible `<details>` group with a flat link list of pages. */
-function buildCollapsibleGroup(label, pages, datasetKey, datasetValue) {
-  const wrap = document.createElement("details");
-  wrap.open = true;
-  if (datasetKey) wrap.dataset[datasetKey] = datasetValue;
-  const summary = document.createElement("summary");
-  summary.textContent = label;
-  wrap.appendChild(summary);
-  const list = document.createElement("ul");
-  for (const page of pages) list.appendChild(buildPageListItem(page));
   wrap.appendChild(list);
   return wrap;
 }
 
-/** Build one `<li><a>` entry for a sidebar page list. */
-function buildPageListItem(page) {
-  const li = document.createElement("li");
-  const a = document.createElement("a");
-  a.href = `#/${encodeURIComponent(page.pageDirectory)}/${encodeURIComponent(page.slug)}`;
-  a.dataset.pageId = page.id;
-  a.textContent = page.title || page.slug;
-  li.appendChild(a);
+/** Build one nav `<li><a>` with its optional count or badge. */
+function buildNavItem(item, model) {
+  const li = el("li");
+  const link = el("a", "nav-link");
+  link.href = item.href;
+  link.dataset.route = item.route;
+  link.appendChild(el("span", "nav-label", item.label));
+  appendNavMetric(link, item, model);
+  li.appendChild(link);
   return li;
 }
 
-/** Build the standing "Project" sidebar section with Health and Graph links. */
-function buildProjectSection() {
-  const wrap = document.createElement("section");
-  wrap.className = PROJECT_SECTION_CLASS;
-  const heading = document.createElement("h2");
-  heading.textContent = "Project";
-  wrap.appendChild(heading);
-  const list = document.createElement("ul");
-  list.appendChild(buildProjectRouteItem("#/health", "health", "Health"));
-  list.appendChild(buildProjectRouteItem("#/graph", "graph", "Graph"));
-  wrap.appendChild(list);
-  return wrap;
+/** Append the count or lint badge to a nav link, when one applies. */
+// Optional chaining in the two delegated lookups inflates cyclomatic count
+// for what is a two-way dispatch (cognitive complexity: 2).
+// fallow-ignore-next-line complexity
+function appendNavMetric(link, item, model) {
+  if (item.count) {
+    appendNavCount(link, model?.counts?.[item.count]);
+    return;
+  }
+  if (item.badge === "lint") appendLintBadge(link, model?.lint);
 }
 
-/** Build one `<li><a>` entry for the standing Project section. */
-function buildProjectRouteItem(href, route, label) {
-  const item = document.createElement("li");
-  const link = document.createElement("a");
-  link.href = href;
-  link.dataset.route = route;
-  link.textContent = label;
-  item.appendChild(link);
-  return item;
+/** Append the count span, when the model actually carries a value for this item. */
+function appendNavCount(link, value) {
+  if (value === undefined) return;
+  link.appendChild(el("span", "nav-count", value > 0 ? String(value) : EMPTY_COUNT));
+}
+
+/** Append the lint badge, omitting it entirely when lint has never run (see lintTotal). */
+function appendLintBadge(link, lint) {
+  const total = lintTotal(lint);
+  if (total === null) return;
+  link.appendChild(el("span", "nav-badge", String(total)));
+}
+
+/** Build the standing "Read the docs" card pinned to the sidebar footer. */
+function buildDocsCard() {
+  const card = el("a", "docs-card");
+  card.href = "https://github.com/atomicstrata/llm-wiki-compiler#readme";
+  card.target = "_blank";
+  card.rel = "noopener noreferrer";
+  card.appendChild(el("div", "docs-card-title", "Read the docs"));
+  card.appendChild(el("div", "docs-card-body", "Profiles, lint rules, export formats."));
+  return card;
 }
 
 /**
- * Read `location.hash` and return the namespaced `<dir>/<slug>` that
- * should carry `aria-current` — or null if the route is not a page
- * route. Malformed percent-encoding falls through to null rather than
- * throwing.
+ * Mark the nav entry matching the current hash as `aria-current="page"`.
+ * Exported so viewer.js can call it after route changes without
+ * duplicating the hash-parsing rules.
  */
-function parseExpectedPageId(hash) {
-  const match = hash.match(/^#\/(concepts|queries)\/(.+)$/);
+export function markActive() {
+  const links = document.querySelectorAll(`${SIDEBAR_SELECTOR} a[data-route]`);
+  for (const link of links) link.removeAttribute("aria-current");
+  const active = activeRouteName(location.hash);
+  if (!active) return;
+  const match = document.querySelector(`${SIDEBAR_SELECTOR} a[data-route="${active}"]`);
+  match?.setAttribute("aria-current", "page");
+}
+
+/** Resolve a hash to the nav route that should be marked current. */
+function activeRouteName(hash) {
+  const key = hash ?? "";
+  if (HOME_HASHES.has(key)) return "home";
+  const staticRoute = STATIC_ROUTE_FOR_HASH.get(key);
+  if (staticRoute) return staticRoute;
+  return pageRouteParent(key);
+}
+
+/** Resolve a `#/(concepts|queries)/<slug>` hash to its parent nav route, or null. */
+function pageRouteParent(key) {
+  const match = key.match(/^#\/(concepts|queries)\/.+$/);
   if (!match) return null;
-  let slug;
-  try {
-    slug = decodeURIComponent(match[2]);
-  } catch {
-    return null;
-  }
-  return `${match[1]}/${slug}`;
-}
-
-/**
- * Build the freshness-filter `<div>` with a `<select>` control. The
- * filter is client-side over the already-loaded page rows — no new
- * endpoint, no query params.
- */
-function buildFreshnessFilter() {
-  const wrap = document.createElement("div");
-  wrap.className = "freshness-filter";
-  const label = document.createElement("label");
-  label.className = "freshness-filter-label";
-  label.setAttribute("for", "freshness-filter-select");
-  label.textContent = "Filter by freshness";
-  const select = document.createElement("select");
-  select.id = "freshness-filter-select";
-  select.className = "freshness-filter-select";
-  for (const { value, label: optLabel } of FRESHNESS_FILTER_OPTIONS) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = optLabel;
-    if (value === activeFreshnessFilter) option.selected = true;
-    select.appendChild(option);
-  }
-  select.addEventListener("change", onFreshnessFilterChange);
-  wrap.appendChild(label);
-  wrap.appendChild(select);
-  return wrap;
-}
-
-/** Handle freshness filter selection change — update state and re-render. */
-function onFreshnessFilterChange(event) {
-  activeFreshnessFilter = event.target.value;
-  reRenderSidebarGroups();
-}
-
-/**
- * Lookup table: filter value → predicate over a freshness object.
- * Keeps `matchesFreshnessFilter` branch-free.
- */
-const FRESHNESS_PREDICATES = {
-  stale:       (f) => f.freshnessStatus === "stale",
-  orphaned:    (f) => f.freshnessStatus === "orphaned",
-  contradicted:(f) => f.contradicted === true,
-  archived:    (f) => f.archived === true,
-};
-
-/**
- * Apply the active freshness filter to the page list. "all" returns all
- * pages; other values match the corresponding freshness flag on each page.
- */
-function applyFreshnessFilter(pages, filter) {
-  if (filter === "all") return pages;
-  return pages.filter((page) => matchesFreshnessFilter(page, filter));
-}
-
-/** True when the page's freshness satisfies the active filter. */
-function matchesFreshnessFilter(page, filter) {
-  const f = page.freshness;
-  const predicate = FRESHNESS_PREDICATES[filter];
-  return f != null && predicate != null && predicate(f);
+  return PAGE_ROUTE_PARENTS.get(match[1]) ?? null;
 }
