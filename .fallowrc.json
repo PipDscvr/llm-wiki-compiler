@@ -19,8 +19,7 @@
     "@fontsource/jetbrains-mono"
   ],
   "ignoreExports": [
-    { "file": "src/utils/output.ts", "exports": ["getQuiet"] },
-    { "file": "src/viewer/assets/viewer-graph.js", "exports": ["staleIdsFromEnvelope"] }
+    { "file": "src/utils/output.ts", "exports": ["getQuiet"] }
   ],
   "overrides": [
     {

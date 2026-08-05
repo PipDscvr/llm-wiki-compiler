@@ -1,8 +1,16 @@
 /**
  * llmwiki viewer — Overview dashboard.
  *
- * Four stat cards, a hero banner, the recently-compiled list, a graph panel
- * container, a compile receipt, and a next-actions list.
+ * Four stat cards, a hero banner, the recently-compiled list, a compact
+ * knowledge graph, a compile receipt, and a next-actions list.
+ *
+ * The graph panel is a real render, not a decorative picture: `mountGraphPanel`
+ * calls the same `loadGraph()` the full `#/graph` route uses, with
+ * `{ compact: true }` — one fetch path and one simulation builder for both,
+ * so the panel can never show structure the full explorer disagrees with. It
+ * mounts after the synchronous DOM build below returns, and fire-and-forgets
+ * its own failures so a slow or broken `/api/graph` never blocks the rest of
+ * the dashboard from painting.
  *
  * The cards keep the design's inventory/signal split: two report what the
  * wiki HAS, two report what needs a human. "Needs attention" is derived from
@@ -18,6 +26,7 @@
 
 import { el, emptyState } from "./viewer-dom.js";
 import { lintTotal, relativeAge } from "./viewer-format.js";
+import { loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js";
 
 /** Stat card definitions: key, label, badge, and value/sub-line derivations. */
 const STAT_CARDS = [
@@ -82,6 +91,22 @@ export function renderDashboard(main, envelope, health) {
   primary.appendChild(buildPatternStrip());
   main.appendChild(primary);
   main.appendChild(buildRail(model));
+  void mountGraphPanel(main, envelope);
+}
+
+/**
+ * Render the compact graph into the reserved panel surface. Fire-and-forget:
+ * a graph that fails to load leaves its own error banner inside the panel and
+ * must not prevent the rest of the dashboard from rendering.
+ */
+async function mountGraphPanel(main, envelope) {
+  const surface = main.querySelector("[data-graph-panel]");
+  if (!surface) return;
+  try {
+    await loadGraph(surface, { compact: true, staleIds: staleIdsFromEnvelope(envelope) });
+  } catch {
+    // loadGraph renders its own inline failure state.
+  }
 }
 
 /** Derive every number the dashboard renders from the two payloads. */
@@ -215,8 +240,9 @@ function buildRecentRow(page, freshness) {
 }
 
 /**
- * Build the graph panel shell. Task 11 renders a compact graph into
- * `[data-graph-panel]`; until then it holds the counts and legend only.
+ * Build the graph panel shell: caption, the `[data-graph-panel]` surface
+ * `mountGraphPanel` renders the compact graph into, and a footer link to
+ * the full `#/graph` explorer.
  */
 function buildGraphPanel(model) {
   const panel = buildPanel("Knowledge graph");

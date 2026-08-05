@@ -24,7 +24,7 @@ import { wireThemeToggle } from "./viewer-theme.js";
 import { wireSearch } from "./viewer-search.js";
 import { renderSidebar, markActive } from "./viewer-sidebar.js";
 import { renderProjectRail, renderSupportRail, clearSupportRail } from "./viewer-rail.js";
-import { loadGraph } from "./viewer-graph.js";
+import { loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js";
 import { renderHeader } from "./viewer-header.js";
 import { renderConceptsList, renderQueriesList, renderSourcesList } from "./viewer-lists.js";
 import { renderDashboard } from "./viewer-dashboard.js";
@@ -397,7 +397,7 @@ async function renderGraphPane(main) {
   clearSupportRail();
   main.innerHTML = "";
   main.className = "main-pane graph-pane";
-  await loadGraph(main);
+  await loadGraph(main, { staleIds: staleIdsFromEnvelope(bootstrapData.pages) });
 }
 
 /** Promise-returning fetch helper that surfaces non-2xx statuses as errors. */

@@ -15,7 +15,8 @@
  * target has no backing page at all; a stale page outranks its kind because
  * "the source moved on" is the more urgent fact). `GraphNode` carries no
  * freshness field, so `staleIdsFromEnvelope()` joins it client-side from the
- * `/api/pages` envelope the caller already holds; Task 11 wires that call in.
+ * `/api/pages` envelope the caller already holds — both `#/graph` (viewer.js)
+ * and the dashboard's compact panel (viewer-dashboard.js) pass it in.
  *
  * The canvas is deliberately label-free — no per-node `<text>` — because at
  * 128 nodes the labels overlapped into noise. Identification lives in the
@@ -23,15 +24,32 @@
  * header). Each node group holds two circles: a halo (`.graph-halo`, drawn
  * first so it sits behind the node, invisible until hot) and the node
  * itself (`.graph-node`). Node radius and stroke width stay data-driven
- * `.attr()` calls because they come from degree, not from the theme.
+ * `.attr()` calls because they come from degree and the active mode's
+ * settings, not from the theme.
  *
  * Typed relation edges get the `graph-edge--relation` class and carry the
  * `relationType` as a tooltip title. Symmetric relation edges have no
  * arrowhead; directed and wikilink edges use the arrowhead marker.
+ *
+ * `loadGraph()` is the one entry point for two callers — the full `#/graph`
+ * route and the dashboard's compact `[data-graph-panel]` — so the panel can
+ * never drift into a second, decorative renderer. `options.compact` selects
+ * a `MODE_SETTINGS` entry (link distance, charge, radius bounds, drag)
+ * rather than forking any code path; the fetch call and the force-simulation
+ * builder stay single-instance in both modes.
  */
 
-const MIN_RADIUS = 4;
-const MAX_RADIUS = 10;
+import { emptyState } from "./viewer-dom.js";
+
+/**
+ * Force and sizing parameters per mode. Compact serves the ~268px dashboard
+ * panel: shorter links and weaker repulsion keep the layout inside a small
+ * box that would otherwise push most nodes out of view.
+ */
+const MODE_SETTINGS = {
+  full:    { linkDistance: 80, charge: -200, minRadius: 4,   maxRadius: 10, drag: true },
+  compact: { linkDistance: 34, charge: -60,  minRadius: 2.5, maxRadius: 6,  drag: false },
+};
 const ARROWHEAD_MARKER_ID   = 'llmwiki-arrowhead';
 const HIGH_DEGREE_THRESHOLD = 5;
 
@@ -88,9 +106,10 @@ export function staleIdsFromEnvelope(envelope) {
 }
 
 /** Map a node's degree to a circle radius using a linear scale. */
-function radiusForDegree(degree, maxDegree) {
-  if (maxDegree === 0) return MIN_RADIUS;
-  return MIN_RADIUS + (degree / maxDegree) * (MAX_RADIUS - MIN_RADIUS);
+function radiusForDegree(degree, maxDegree, settings) {
+  const { minRadius, maxRadius } = settings;
+  if (maxDegree === 0) return minRadius;
+  return minRadius + (degree / maxDegree) * (maxRadius - minRadius);
 }
 
 /** Build the tooltip DOM element and append it to the container. */
@@ -263,23 +282,22 @@ function attachHover(nodeSel, edgeSel, tooltip, svg) {
 }
 
 /**
- * Append the circle for each node group. Labels are deliberately absent: the
- * design system keeps the canvas label-free and moves identification to the
- * hover tooltip, which already reports title, kind, and degree.
+ * Append the circle for each node group. Labels are absent in both modes —
+ * Task 10 removed them per the design system's label-free canvas.
  *
  * @param {object} nodeSel - D3 selection of node groups.
- * @param {{maxDegree: number, staleIds: Set<string>}} ctx - Render context.
+ * @param {{maxDegree: number, staleIds: Set<string>, settings: object}} ctx - Render context.
  */
 function appendNodeVisuals(nodeSel, ctx) {
   // Halo ring, drawn first so it sits behind the node. Invisible until the
   // node is hot — the design system's "focus · halo ring" semantic.
   nodeSel.append('circle')
     .attr('class', 'graph-halo')
-    .attr('r',     d => radiusForDegree(d.degree, ctx.maxDegree) + 9);
+    .attr('r',     d => radiusForDegree(d.degree, ctx.maxDegree, ctx.settings) + 9);
 
   nodeSel.append('circle')
     .attr('class',            d => nodeClass(d, ctx.staleIds))
-    .attr('r',                d => radiusForDegree(d.degree, ctx.maxDegree))
+    .attr('r',                d => radiusForDegree(d.degree, ctx.maxDegree, ctx.settings))
     .attr('stroke-dasharray', d => d.isDangling ? '3,2' : null)
     .attr('stroke-width',     d => d.degree > HIGH_DEGREE_THRESHOLD ? 2.5 : d.degree > 0 ? 2 : 1);
 }
@@ -317,39 +335,41 @@ function styleEdges(edgeSel) {
 /**
  * Build and run the D3 simulation; append edges, nodes, and interactions.
  *
- * @param {{staleIds?: Set<string>}} [options] - Threaded through from
- *   `loadGraph`; `staleIds` feeds `nodeClass()` via the render context.
+ * @param {{svg: object, g: object, width: number, height: number, tooltip: HTMLElement}} view -
+ *   The object `initGraph()` returns — collapsed into one argument rather than
+ *   five positional ones.
+ * @param {{nodes: object[], edges: object[]}} data - The `/api/graph` payload.
+ * @param {{compact?: boolean, staleIds?: Set<string>}} options - `compact` selects
+ *   the `MODE_SETTINGS` entry; `staleIds` feeds `nodeClass()` via the render context.
  */
-function renderGraph(svg, g, data, tooltip, width, height, options = {}) {
+function renderGraph(view, data, options) {
   const d3 = globalThis.d3;
+  const settings = options.compact ? MODE_SETTINGS.compact : MODE_SETTINGS.full;
   const maxDegree = Math.max(0, ...data.nodes.map(n => n.degree));
+  const ctx = { maxDegree, staleIds: options.staleIds ?? new Set(), settings };
 
-  appendArrowheadDef(svg);
+  appendArrowheadDef(view.svg);
 
   const sim = d3.forceSimulation(data.nodes)
-    .force('link',   d3.forceLink(data.edges).id(d => d.id).distance(80))
-    .force('charge', d3.forceManyBody().strength(-200))
-    .force('center', d3.forceCenter(width / 2, height / 2));
+    .force('link',   d3.forceLink(data.edges).id(d => d.id).distance(settings.linkDistance))
+    .force('charge', d3.forceManyBody().strength(settings.charge))
+    .force('center', d3.forceCenter(view.width / 2, view.height / 2));
 
-  const edgeSel = styleEdges(g.append('g')
-    .selectAll('line')
-    .data(data.edges)
-    .join('line'));
+  const edgeSel = styleEdges(view.g.append('g').selectAll('line').data(data.edges).join('line'));
 
-  const nodeSel = g.append('g')
+  const nodeSel = view.g.append('g')
     .selectAll('g')
     .data(data.nodes)
     .join('g')
     .style('cursor', d => d.isDangling ? 'default' : 'pointer');
 
-  const ctx = { maxDegree, staleIds: options.staleIds ?? new Set() };
   appendNodeVisuals(nodeSel, ctx);
-  attachDrag(nodeSel, sim);
-  attachHover(nodeSel, edgeSel, tooltip, svg);
+  if (settings.drag) attachDrag(nodeSel, sim);
+  attachHover(nodeSel, edgeSel, view.tooltip, view.svg);
 
-  // Stop the simulation when the SVG is removed from the document (e.g. navigating away from #/graph).
+  // Stop the simulation when the SVG leaves the document (route change).
   sim.on('tick', () => {
-    if (!svg.node().isConnected) { sim.stop(); return; }
+    if (!view.svg.node().isConnected) { sim.stop(); return; }
     onTick(edgeSel, nodeSel);
   });
 
@@ -419,34 +439,42 @@ function buildLegend(container) {
   container.appendChild(legend);
 }
 
-/** Show a placeholder message when the wiki has no pages yet. */
+/** True once `/api/graph` returned at least one node to draw. */
+function hasRenderableNodes(data) {
+  return Boolean(data?.nodes?.length);
+}
+
+/** Show the design system empty state when the wiki has no pages yet. */
 function renderEmptyState(container) {
-  const p = document.createElement('p');
-  p.className = 'placeholder';
-  p.textContent = 'No pages yet — run `llmwiki compile`.';
-  container.appendChild(p);
+  container.appendChild(
+    emptyState(
+      "Nothing to graph yet",
+      "The graph draws links between compiled pages. Compile at least two pages that reference each other to see structure here.",
+      "$ llmwiki compile",
+    ),
+  );
 }
 
 /**
- * Entry point called by viewer.js when the `#/graph` route is active.
- * Fetches `/api/graph`, builds the SVG, and starts the force simulation.
+ * Entry point for both the `#/graph` route (viewer.js) and the dashboard's
+ * compact panel (viewer-dashboard.js). Fetches `/api/graph`, builds the SVG,
+ * and starts the force simulation — the same fetch call and simulation
+ * builder run in both modes; only `MODE_SETTINGS` differs.
  *
- * @param {HTMLElement} container - The `.graph-pane` element to render into.
- * @param {{staleIds?: Set<string>}} [options] - Render options. `staleIds`
- *   comes from `staleIdsFromEnvelope()` over the already-fetched `/api/pages`
- *   envelope; a caller that omits it gets kind-only colouring (no stale
- *   nodes highlighted).
+ * @param {HTMLElement} container - Element to render into.
+ * @param {{compact?: boolean, staleIds?: Set<string>}} [options] - Compact mode
+ *   drops the legend and drag and tightens the forces for a small panel.
+ *   `staleIds` comes from `staleIdsFromEnvelope()` over the already-fetched
+ *   `/api/pages` envelope; a caller that omits it gets kind-only colouring
+ *   (no stale nodes highlighted).
+ * @returns {Promise<void>}
  */
 export async function loadGraph(container, options = {}) {
   const data = await fetchGraphData(container);
   if (!data) return;
-  if (!data.nodes || data.nodes.length === 0) {
-    renderEmptyState(container);
-    return;
-  }
-  const { svg, g, width, height, tooltip } = initGraph(container);
-  renderGraph(svg, g, data, tooltip, width, height, options);
-  buildLegend(container);
+  if (!hasRenderableNodes(data)) return renderEmptyState(container);
+  renderGraph(initGraph(container), data, options);
+  if (!options.compact) buildLegend(container);
 }
 
 /** Fetch /api/graph and parse JSON; render an inline error banner and return null on failure. */

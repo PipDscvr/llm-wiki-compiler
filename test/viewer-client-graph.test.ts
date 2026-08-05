@@ -22,11 +22,18 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  * Eval viewer-graph.js in a JSDOM window, rewriting its two `export`
  * declarations (`loadGraph`, `staleIdsFromEnvelope`) to plain ones and
  * exposing module-scoped helpers on `window.__vg`.
+ *
+ * The module's `import { emptyState } from "./viewer-dom.js";` line (added
+ * for the design-system empty state) is dropped rather than rewired: this
+ * raw `win.eval` has no module loader — unlike `mountViewerDom`'s
+ * `rewriteImports`, which only runs for modules mounted through the JSDOM
+ * harness — and none of the four functions under test here call `emptyState`.
  */
 async function loadGraphHelpers(win: Window & typeof globalThis) {
   const src = await readFile(GRAPH_SCRIPT, "utf8");
   const rewritten =
     src
+      .replace(/^import\s*\{[^}]*\}\s*from\s*['"][^'"]+['"]\s*;\s*$/gm, "")
       .replace(/^export async function loadGraph\(/m, "async function loadGraph(")
       .replace(/^export function staleIdsFromEnvelope\(/m, "function staleIdsFromEnvelope(") +
     `\nwindow.__vg = { nodeClass, staleIdsFromEnvelope, buildLegend, styleEdges };\n`;

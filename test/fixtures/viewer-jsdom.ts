@@ -196,7 +196,10 @@ export async function mountViewerDom(
   dom.window.eval("window.__viewerModules = {};");
   // D3 is not exercised under JSDOM; stub the graph module before anything imports it.
   dom.window.eval(
-    'window.__viewerModules["./viewer-graph.js"] = { loadGraph: async function () {} };',
+    'window.__viewerModules["./viewer-graph.js"] = {' +
+      " loadGraph: async function () {}," +
+      " staleIdsFromEnvelope: function () { return new Set(); }" +
+      " };",
   );
   const themeBoot = await readOptional(THEME_BOOT_SCRIPT);
   if (themeBoot) dom.window.eval(themeBoot);
