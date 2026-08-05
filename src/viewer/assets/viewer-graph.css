@@ -9,13 +9,13 @@
  * Node geometry (radius, stroke width, dash pattern) stays in JS because it
  * is derived from node degree, not from the theme.
  *
- * `.graph-pane` carries the pane's sizing rules (migrated from viewer.css,
- * which is draining toward this token system one route at a time — see its
- * file header). `viewer.js` sets `className = "main-pane graph-pane"`, so
- * this rule shares its element with `.main-pane`, whose `width: min(100%,
- * 72ch)` caps prose width; same specificity, later in the cascade (this
- * sheet loads last), so `width: 100%` here wins back the full pane for the
- * graph canvas.
+ * `.graph-pane` carries the pane's sizing rules. `viewer.js` sets
+ * `className = "main-pane graph-pane"`, so this rule shares its element
+ * with `.main-pane` (viewer-content.css), whose `width: min(100%, 72ch)`
+ * caps prose width; same specificity, later in the cascade (this sheet
+ * loads last), so `width: 100%` here wins back the full pane for the
+ * graph canvas. `.dashboard` and `.list-pane` override the same rule the
+ * same way, for their own routes.
  */
 
 .graph-pane {

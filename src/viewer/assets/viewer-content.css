@@ -8,18 +8,16 @@
  * banners, the health route, and the list routes from Task 8
  * (`#/concepts`, `#/queries`, `#/sources`). Every colour here is a token
  * from viewer-tokens.css — no raw colour literals — so both themes stay
- * correct automatically. This file replaces the legacy viewer.css, which
- * carried its own theme-unaware `:root` token set; deleting it also
- * retires that shadow system and the stray rules that read it (the
- * `body` background, the focus ring, `.skip-link`), letting the
- * Nebula-token versions already declared in viewer-tokens.css take over.
+ * correct automatically. The base reset (`body`, `:focus-visible`,
+ * `.skip-link`) already lives in viewer-tokens.css and is not repeated
+ * here.
  *
  * Loads directly after viewer-tokens.css and before viewer-chrome.css,
- * viewer-dashboard.css, and viewer-graph.css — the same position
- * viewer.css held. `.dashboard`, `.graph-pane`, and `.list-pane` below all
- * override `.main-pane`'s prose-width cap from a later-loaded sheet or
- * later in this same file; moving this file's `<link>` would silently
- * break those overrides (see each file's own header for the mechanism).
+ * viewer-dashboard.css, and viewer-graph.css. `.dashboard`, `.graph-pane`,
+ * and `.list-pane` below all override `.main-pane`'s prose-width cap from
+ * a later-loaded sheet or later in this same file; moving this file's
+ * `<link>` would silently break those overrides (see each file's own
+ * header for the mechanism).
  */
 
 /* ---- Main pane ---- */

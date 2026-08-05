@@ -16,11 +16,14 @@
  *     renders it, not a decorative frame) and is a positioned container, not
  *     just a styled box — see the rule's own comment for why that matters.
  *
- * `.main-pane` (viewer.css) caps prose width at `min(100%, 72ch)`, which is
- * far too narrow for a 4-column stat grid plus a 268px rail. `.dashboard`
- * overrides `width` back to 100% — same selector specificity, later in the
- * cascade (this sheet loads after viewer.css) — without editing the legacy
- * rule other routes still rely on.
+ * `.main-pane` (viewer-content.css) caps prose width at `min(100%, 72ch)`,
+ * which is far too narrow for a 4-column stat grid plus a 268px rail.
+ * `.dashboard` overrides `width` back to 100% — same selector specificity,
+ * later in the cascade (this sheet loads after viewer-content.css) —
+ * without editing the shared rule the page/index routes still rely on.
+ * `.graph-pane` (viewer-graph.css) and `.list-pane` (viewer-content.css,
+ * later in that same file) override the same rule the same way, for the
+ * same reason.
  */
 
 .dashboard {

@@ -310,6 +310,10 @@ describe("search UI — input wires up and renders results", () => {
     doc.dispatchEvent(event);
     expect(doc.activeElement).toBe(input);
     expect(event.defaultPrevented).toBe(true);
+    // select(), not just focus() — the whole point is that typing
+    // immediately replaces the previous query rather than appending to it.
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(input.value.length);
   });
 });
 
