@@ -291,12 +291,11 @@
 
 .nav-count { font: 500 10.5px/1 var(--font-mono); color: var(--fg-faint); }
 /*
- * Zero-valued counts (rendered as an em dash — EMPTY_COUNT in
- * viewer-sidebar.js) de-emphasise further with --fg-disabled instead of
- * the --fg-faint non-zero counts use (mockup tree line 40, the Queries
- * "—"; the mockup's own Reviews "0" at line 53 uses the same colour, even
- * though it shows the literal digit rather than an em dash — that text
- * choice is unrelated content, out of scope for this colour fix).
+ * Zero-valued counts de-emphasise further with --fg-disabled instead of the
+ * --fg-faint non-zero counts use (mockup tree lines 44/57: the Queries "—"
+ * and the Reviews "0" are both this colour). The TEXT a zero renders as
+ * (em dash vs the literal digit) is a separate rule, keyed on BROWSE vs
+ * MAINTAIN — see NAV_SECTIONS' `zeroCountDisplay` in viewer-sidebar.js.
  */
 .nav-count.nav-count-zero { color: var(--fg-disabled); }
 .nav-badge {

@@ -416,13 +416,18 @@ function buildGraphLegend() {
   return row;
 }
 
-/** Build the rail's closing note: the viewer is a frozen, not live, snapshot. */
+/**
+ * Build the rail's closing note: the viewer is a frozen, not live, snapshot.
+ * The "llmwiki view" command is its own span (mockup tree line 368) so it can
+ * carry the accent colour the surrounding sentence doesn't.
+ */
 function buildSnapshotNote() {
   const note = el("div", "snapshot-note");
   note.appendChild(
-    el("span", undefined,
-      "The viewer serves a frozen snapshot. Changes on disk appear after llmwiki view restarts."),
+    document.createTextNode("The viewer serves a frozen snapshot. Changes on disk appear after "),
   );
+  note.appendChild(el("span", "snapshot-command", "llmwiki view"));
+  note.appendChild(document.createTextNode(" restarts."));
   return note;
 }
 
@@ -432,14 +437,24 @@ function buildReceipt(model) {
   panel.dataset.compileReceipt = "";
   const body = el("div", "panel-body receipt-body");
   for (const [label, value] of receiptRows(model)) {
-    const row = el("div", "receipt-row");
-    row.appendChild(el("span", "receipt-label", label));
-    row.appendChild(el("span", "receipt-value", value));
-    body.appendChild(row);
+    body.appendChild(buildReceiptRow(label, value));
   }
-  body.appendChild(buildCitationBar(model));
+  body.appendChild(buildMeter(model));
   panel.appendChild(body);
   return panel;
+}
+
+/**
+ * Build one receipt label/value row. "Root" gets the wrapping, right-aligned
+ * value variant (mockup tree line 296) — the only receipt value long enough
+ * to need it; every other row's value fits on one line.
+ */
+function buildReceiptRow(label, value) {
+  const row = el("div", "receipt-row");
+  row.appendChild(el("span", "receipt-label", label));
+  const isRootPath = label === "Root";
+  row.appendChild(el("span", isRootPath ? "receipt-value receipt-value-path" : "receipt-value", value));
+  return row;
 }
 
 /** Receipt label/value rows drawn from the envelope and lint cache. */
@@ -459,19 +474,19 @@ function receiptRows(model) {
 }
 
 /**
- * Build the citations-resolved bar. This replaces the mockup's
- * "Traceability" bar, which was backed by a claim inventory the compiler
+ * Build the citations-resolved meter. This replaces the mockup's
+ * "Traceability" meter, which was backed by a claim inventory the compiler
  * does not maintain; citation resolution is the equivalent fact that IS
  * tracked.
  */
-function buildCitationBar(model) {
+function buildMeter(model) {
   const total = model.totalCitations;
   const resolved = total - model.unresolved;
   const percent = total === 0 ? 100 : Math.round((resolved / total) * 100);
-  const wrap = el("div", "receipt-bar");
-  const head = el("div", "receipt-row");
-  head.appendChild(el("span", "receipt-label", "Citations resolved"));
-  head.appendChild(el("span", "receipt-value", `${percent}%`));
+  const wrap = el("div", "meter");
+  const head = el("div", "meter-head");
+  head.appendChild(el("span", "meter-label", "Citations resolved"));
+  head.appendChild(el("span", "meter-value", `${percent}%`));
   wrap.appendChild(head);
   // Two segments per the design system's meter: violet to the value, amber for
   // the shortfall. A neutral remainder would read as "no data" rather than
@@ -483,7 +498,7 @@ function buildCitationBar(model) {
   track.appendChild(el("div", "bar-remainder"));
   wrap.appendChild(track);
   wrap.appendChild(
-    el("div", "receipt-caption", `${resolved} of ${total} citations resolve to a source file`),
+    el("div", "meter-caption", `${resolved} of ${total} citations resolve to a source file`),
   );
   return wrap;
 }
@@ -492,18 +507,33 @@ function buildCitationBar(model) {
 function buildNextActions(model) {
   const panel = buildPanel("Next actions");
   panel.dataset.nextActions = "";
-  const body = el("div", "panel-body");
-  for (const [title, hint] of nextActionRows(model)) {
-    const row = el("div", "action-row");
-    row.appendChild(el("span", "action-title", title));
-    row.appendChild(el("span", "action-hint", hint));
-    body.appendChild(row);
-  }
+  const body = el("div", "panel-body next-actions-body");
+  for (const row of nextActionRows(model)) body.appendChild(buildActionRow(row));
   panel.appendChild(body);
   return panel;
 }
 
-/** Only actions that currently apply; the export row always applies. */
+/**
+ * Build one next-action row: a coloured glyph (mockup tree lines 334/342/
+ * 350/358) plus a title/hint pair stacked in a `flex:1` wrapper so the glyph
+ * stays put while the text takes the remaining width.
+ */
+function buildActionRow({ glyph, title, hint }) {
+  const row = el("div", "action-row");
+  row.appendChild(el("span", "action-glyph", glyph));
+  const text = el("span", "action-body");
+  text.appendChild(el("span", "action-title", title));
+  text.appendChild(el("span", "action-hint", hint));
+  row.appendChild(text);
+  return row;
+}
+
+/**
+ * Only actions that currently apply; the export row always applies. Each
+ * entry's glyph matches the mockup's fixed glyph-per-action-kind (dangling
+ * ⌗, recompile ↻, lint ✓, export ⇩) — not per-position, so a future action
+ * inserted between these would not need to guess a new symbol.
+ */
 // Three independent, non-nested guard conditions each appending one row
 // inflate cyclomatic count for what stays a flat action list
 // (cognitive complexity: 4).
@@ -511,13 +541,17 @@ function buildNextActions(model) {
 function nextActionRows(model) {
   const rows = [];
   if (model.dangling > 0) {
-    rows.push([`Resolve ${model.dangling} dangling links`, "create the pages or fix the targets"]);
+    rows.push({
+      glyph: "⌗",
+      title: `Resolve ${model.dangling} dangling links`,
+      hint: "create the pages or fix the targets",
+    });
   }
   if ((model.counts.stale ?? 0) > 0) {
-    rows.push([`Recompile ${model.counts.stale} stale pages`, "llmwiki compile"]);
+    rows.push({ glyph: "↻", title: `Recompile ${model.counts.stale} stale pages`, hint: "llmwiki compile" });
   }
-  if (!model.lint) rows.push(["Run lint", "llmwiki lint"]);
-  rows.push(["Export for agents", "llmwiki export"]);
+  if (!model.lint) rows.push({ glyph: "✓", title: "Run lint", hint: "llmwiki lint" });
+  rows.push({ glyph: "⇩", title: "Export for agents", hint: "llmwiki export" });
   return rows;
 }
 

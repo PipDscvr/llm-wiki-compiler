@@ -244,7 +244,10 @@
   flex: 1;
 }
 
-.panel-caption { font: var(--type-metadata); color: var(--fg-dim); }
+/* 400 10.5px/1 mono has no matching token (--type-metadata is 11px) —
+ * mockup tree line 229; --fg-faint (not --fg-dim) is the mockup's colour
+ * here. Found in task 4's final verification sweep of tasks 1-3's work. */
+.panel-caption { font: 400 10.5px/1 var(--font-mono); color: var(--fg-faint); }
 
 .panel-footer {
   display: flex;
@@ -359,56 +362,153 @@
   background: radial-gradient(120% 90% at 50% 45%, var(--graph-bg-inner) 0%, var(--graph-bg-outer) 70%);
 }
 
-/* ---- Rail: compile receipt, next actions, snapshot note ---- */
+/*
+ * ---- Rail: compile receipt, next actions, snapshot note (tree line 288+) ----
+ *
+ * The receipt/next-actions panels reuse the shared `.panel`/`.panel-head`/
+ * `.panel-body` shell (buildPanel(), above) but the tree gives the rail its
+ * own head padding (13px 16px vs the dashboard's 14px 17px) and asks the
+ * receipt's body for a grid, not the dashboard's tight row padding — both
+ * scoped to `[data-support-rail]` rather than edited into the shared base,
+ * which the dashboard panels above still rely on unchanged.
+ */
+[data-support-rail] .panel-head {
+  /* 13px 16px is off the spacing scale — mockup tree lines 290/330. */
+  padding: 13px 16px;
+}
+/* 600 12.5px/1 has no matching token (--type-panel-title is 13.5px) — mockup
+ * tree lines 290/330, one size step down from the dashboard panels' heads. */
+[data-support-rail] .panel-title { font: 600 12.5px/1 var(--font-sans); }
+/* Both rail panels clip (mockup tree lines 289/329); the dashboard's
+ * recent-compiled panel deliberately does not (see that rule above), so this
+ * stays scoped to the rail rather than joining the shared `.panel` base. */
+[data-support-rail] .panel { overflow: hidden; }
+
+/* `.receipt-body` is a hook class alongside `.panel-body` (buildReceipt,
+ * viewer-dashboard.js) so this can override the shared body padding without
+ * touching `.panel-body` itself — mockup tree line 292. */
+.receipt-body {
+  /* 14px 16px is off the spacing scale. */
+  padding: 14px 16px;
+  display: grid;
+  gap: var(--space-12);
+}
 
 .receipt-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--space-9);
+  /* 10px is off the spacing scale (nearest token, --space-9, is 9px) —
+   * mockup tree line 293. */
+  gap: 10px;
 }
 
-.receipt-label { font: var(--type-body); color: var(--fg-dim); }
-.receipt-value { font: var(--type-metadata); color: var(--fg-body); }
+/* 400 11.5px/1 sans has no matching token — mockup tree line 294, the same
+ * literal already used for `.stat-label`/`.meter-label`. */
+.receipt-label { font: 400 11.5px/1 var(--font-sans); color: var(--fg-dim); }
+/* 500 11px/1 mono matches --type-provenance exactly — mockup tree line 301
+ * (every row's value except Root's own variant below). */
+.receipt-value { font: var(--type-provenance); color: var(--fg-body); }
+/* Root's path is the only receipt value long enough to wrap — right-aligned
+ * against its label instead of truncated (mockup tree line 296). No token
+ * matches the 1.4 line-height. */
+.receipt-value-path {
+  font: 500 11px/1.4 var(--font-mono);
+  text-align: right;
+  word-break: break-all;
+}
 
-.receipt-bar {
+/* Meter block ("Citations resolved", replacing the mockup's claim-inventory-
+ * backed "Traceability" bar — see buildMeter's own comment). Divided from the
+ * row list above by a border, not a gap (mockup tree line 318); 12px matches
+ * --space-12 exactly. */
+.meter {
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--border-soft);
+}
+.meter-head {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-  margin-top: var(--space-6);
+  align-items: center;
+  justify-content: space-between;
+  /* 8px is off the spacing scale — mockup tree line 319. */
+  margin-bottom: 8px;
 }
+/* 400 11.5px/1 sans has no matching token — mockup tree line 320. */
+.meter-label { font: 400 11.5px/1 var(--font-sans); color: var(--fg-dim); }
+/* 600 13px/1 sans has no matching token — mockup tree line 322; --fg (not
+ * --fg-strong) is the mockup's colour here. */
+.meter-value { font: 600 13px/1 var(--font-sans); color: var(--fg); }
 
-/* Meter: violet fill to the value, `--warn` for the remainder — never a
- * neutral track (see file header). `.bar-fill`'s width is a CSSOM property
- * write from viewer-dashboard.js, not a markup `style=` attribute, so it
- * does not need `style-src 'unsafe-inline'`. */
-.bar-track { display: flex; height: 5px; border-radius: 3px; overflow: hidden; }
+/* `--border-soft` track background never actually shows — `.bar-fill` and
+ * `.bar-remainder` always sum to 100% width between them — but the mockup
+ * states it (tree line 324) so it is here too, as a defensive base rather
+ * than relying on that always holding exactly. `.bar-fill`'s width is a
+ * CSSOM property write from viewer-dashboard.js, not a markup `style=`
+ * attribute, so it does not need `style-src 'unsafe-inline'`. */
+.bar-track {
+  display: flex;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--border-soft);
+}
 .bar-fill { background: var(--accent); }
 .bar-remainder { flex: 1; background: var(--warn); }
 
-.receipt-caption { font: var(--type-metadata); color: var(--fg-dim); }
+/* 400 10.5px/1 mono has no matching token — mockup tree line 327; --fg-faint
+ * (not --fg-dim, which the row labels above use) is the mockup's colour here. */
+.meter-caption { font: 400 10.5px/1 var(--font-mono); color: var(--fg-faint); margin-top: 8px; }
+
+/* `.next-actions-body` is next-actions' own hook class alongside
+ * `.panel-body` (buildNextActions, viewer-dashboard.js), mirroring
+ * `.receipt-body` above — mockup tree line 332. */
+.next-actions-body { padding: 8px; }
 
 .action-row {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-9);
-  padding: var(--space-9) 0;
-  border-bottom: 1px solid var(--border-soft);
+  align-items: center;
+  /* 11px / 11px 10px are off the spacing scale — mockup tree line 333. */
+  gap: 11px;
+  padding: 11px 10px;
+  border-radius: var(--radius-row);
+  margin-bottom: 2px;
 }
-.action-row:last-child { border-bottom: none; }
+.action-row:last-child { margin-bottom: 0; }
+/* The first row is the emphasised "do this next" pill — background, border,
+ * and a wider trailing gap set it apart from the plain rows below (mockup
+ * tree line 333); its glyph and title also pick up the stronger colours
+ * below rather than the other rows' neutral ones. */
+.action-row:first-child {
+  background: var(--bg-hover);
+  border: 1px solid var(--border-strong);
+  margin-bottom: var(--space-6);
+}
 
-.action-title { font: var(--type-row); color: var(--fg-body); }
-.action-hint { flex: none; font: var(--type-metadata); color: var(--fg-faint); }
+.action-glyph { font: 500 12px/1 var(--font-mono); flex: none; color: var(--accent-text); }
+.action-row:first-child .action-glyph { color: var(--warn); }
+
+.action-body { flex: 1; min-width: 0; }
+.action-title {
+  display: block;
+  font: 500 12px/1.2 var(--font-sans);
+  color: var(--fg-body);
+  margin-bottom: 3px;
+}
+.action-row:first-child .action-title { color: var(--fg-strong); }
+.action-hint { font: 400 10.5px/1.3 var(--font-mono); color: var(--fg-dim); }
 
 .snapshot-note {
-  padding: var(--space-12);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--bg-inset);
-  font: var(--type-body);
+  /* 13px 15px is off the spacing scale — mockup tree line 365. */
+  padding: 13px 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--bg-sunken);
+  /* 400 11px/1.65 mono has no matching token — mockup tree line 366. */
+  font: 400 11px/1.65 var(--font-mono);
   color: var(--fg-dim);
 }
+/* The inline "llmwiki view" command (mockup tree line 368). */
+.snapshot-command { color: var(--accent-text); }
 
 /* ---- Pattern strip: the four-column static explainer ---- */
 

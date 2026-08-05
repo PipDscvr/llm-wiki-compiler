@@ -3,7 +3,9 @@
  *
  * The Nebula sidebar is pure navigation with counts — the page tree and the
  * freshness filter live on #/concepts. These tests pin the nav entries, the
- * count rendering rules (zero renders as an em dash, an unrun lint omits its
+ * count rendering rules (a zero BROWSE count renders as an em dash — nothing
+ * to browse; a zero MAINTAIN count renders as the literal digit — a
+ * meaningful, reassuring "0", not an absence — and an unrun lint omits its
  * badge entirely), and active-route marking including page routes marking
  * their parent nav entry.
  */
@@ -67,16 +69,26 @@ describe("sidebar navigation", () => {
     expect(sidebar.textContent).toContain("LOCAL · READ ONLY");
   });
 
-  it("renders a zero count as an em dash", async () => {
+  it("renders a zero BROWSE count (Queries) as an em dash", async () => {
     const sidebar = await mountSidebar(null);
     const queries = sidebar.querySelector('a[data-route="queries"] .nav-count');
     expect(queries?.textContent).toBe("—");
   });
 
-  it("marks a zero count with the nav-count-zero modifier (--fg-disabled)", async () => {
+  it("renders a zero MAINTAIN count (Reviews) as the literal digit, not an em dash", async () => {
+    // "Zero pending reviews" is a meaningful, reassuring fact, unlike
+    // "nothing to browse" — see NAV_SECTIONS' zeroCountDisplay.
+    const sidebar = await mountSidebar(null);
+    const reviews = sidebar.querySelector('a[data-route="reviews"] .nav-count');
+    expect(reviews?.textContent).toBe("0");
+  });
+
+  it("marks a zero count with the nav-count-zero modifier (--fg-disabled), in both sections", async () => {
     const sidebar = await mountSidebar(null);
     const queries = sidebar.querySelector('a[data-route="queries"] .nav-count');
+    const reviews = sidebar.querySelector('a[data-route="reviews"] .nav-count');
     expect(queries?.className).toContain("nav-count-zero");
+    expect(reviews?.className).toContain("nav-count-zero");
   });
 
   it("renders a non-zero count as its number", async () => {

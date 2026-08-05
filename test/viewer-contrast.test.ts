@@ -89,10 +89,13 @@ const MUTED_TEXT_CASES: [fg: string, bg: string, theme: ThemeName, expected: Exp
   // opposite.
   ["--fg-ghost", "--bg-card", "dark", "fail"],
   ["--fg-ghost", "--bg-card", "light", "fail"],
-  // .result-kind (viewer-content.css, 9.5px), .action-hint
-  // (viewer-dashboard.css, 11px), .recent-age (viewer-dashboard.css,
-  // 10.5px as of the 2026-08-05 fidelity pass -- mockup tree line 169) --
-  // all card-hosted, all still well under the large-text threshold.
+  // .result-kind (viewer-content.css, 9.5px), .meter-caption
+  // (viewer-dashboard.css, 10.5px, mockup tree line 327), .recent-age
+  // (viewer-dashboard.css, 10.5px as of the 2026-08-05 fidelity pass --
+  // mockup tree line 169) -- all card-hosted, all still well under the
+  // large-text threshold. (.action-hint moved to --fg-dim in the rail's own
+  // fidelity pass -- mockup tree line 339 -- confirmed to still clear 4.5:1
+  // on --bg-card in both themes, so it did not need to join this file.)
   ["--fg-faint", "--bg-card", "dark", "fail"],
   ["--fg-faint", "--bg-card", "light", "pass"],
   // .search-kbd (viewer-content.css, 10px), .list-citations

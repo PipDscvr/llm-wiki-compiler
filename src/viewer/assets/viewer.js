@@ -240,7 +240,7 @@ function applyHomeEnvelope(envelope) {
   if (!main) return;
   // renderDashboard fills the shared support rail itself (compile receipt /
   // next actions / snapshot note, via renderDashboardRail) — no separate
-  // rail call belongs here. See viewer-rail.js's renderProjectRail JSDoc.
+  // rail call belongs here.
   renderDashboard(main, envelope, bootstrapData.health);
   injectGlobalCorruptBanner(envelope?.stateStatus);
 }

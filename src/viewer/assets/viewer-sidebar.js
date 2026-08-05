@@ -26,10 +26,16 @@ const EMPTY_COUNT = "—";
  * Nav entries per section. `count` names the `counts` key whose value is
  * shown; entries without one render no count. `route` doubles as the
  * `data-route` value `markActive` matches on.
+ *
+ * `zeroCountDisplay` sets what a zero count reads as, per section (mockup
+ * tree lines 44/57): BROWSE has nothing to browse — an absence, shown as an
+ * em dash; MAINTAIN's "zero pending reviews" is a meaningful, reassuring
+ * fact rather than an absence, so it shows the literal digit instead.
  */
 const NAV_SECTIONS = [
   {
     label: "BROWSE",
+    zeroCountDisplay: "dash",
     items: [
       { route: "home", href: "#/", label: "Overview" },
       { route: "concepts", href: "#/concepts", label: "Concepts", count: "concepts" },
@@ -40,6 +46,7 @@ const NAV_SECTIONS = [
   },
   {
     label: "MAINTAIN",
+    zeroCountDisplay: "digit",
     items: [
       { route: "health", href: "#/health", label: "Lint", badge: "lint" },
       { route: "reviews", href: "#/health", label: "Reviews", count: "pendingReviews" },
@@ -133,20 +140,20 @@ function buildNavSection(section, model) {
   wrap.appendChild(el("div", "nav-section-label", section.label));
   const list = el("ul", "nav-list");
   for (const item of section.items) {
-    list.appendChild(buildNavItem(item, model));
+    list.appendChild(buildNavItem(item, section.zeroCountDisplay, model));
   }
   wrap.appendChild(list);
   return wrap;
 }
 
 /** Build one nav `<li><a>` with its optional count or badge. */
-function buildNavItem(item, model) {
+function buildNavItem(item, zeroCountDisplay, model) {
   const li = el("li");
   const link = el("a", "nav-link");
   link.href = item.href;
   link.dataset.route = item.route;
   link.appendChild(el("span", "nav-label", item.label));
-  appendNavMetric(link, item, model);
+  appendNavMetric(link, item, zeroCountDisplay, model);
   li.appendChild(link);
   return li;
 }
@@ -155,9 +162,9 @@ function buildNavItem(item, model) {
 // Optional chaining in the two delegated lookups inflates cyclomatic count
 // for what is a two-way dispatch (cognitive complexity: 2).
 // fallow-ignore-next-line complexity
-function appendNavMetric(link, item, model) {
+function appendNavMetric(link, item, zeroCountDisplay, model) {
   if (item.count) {
-    appendNavCount(link, model?.counts?.[item.count]);
+    appendNavCount(link, model?.counts?.[item.count], zeroCountDisplay);
     return;
   }
   if (item.badge === "lint") appendLintBadge(link, model?.lint);
@@ -165,15 +172,23 @@ function appendNavMetric(link, item, model) {
 
 /**
  * Append the count span, when the model actually carries a value for this
- * item. Zero-valued counts get the `nav-count-zero` modifier, which maps
- * to `--fg-disabled` — a deliberately near-invisible treatment the mockup
- * uses for both the Queries em dash and the Reviews "0" (viewer-chrome.css).
+ * item. Zero-valued counts always get the `nav-count-zero` modifier, which
+ * maps to `--fg-disabled` (viewer-chrome.css); the TEXT a zero renders as
+ * depends on the section's `zeroCountDisplay` (see NAV_SECTIONS above) —
+ * an em dash for BROWSE, the literal digit for MAINTAIN.
  */
-function appendNavCount(link, value) {
+function appendNavCount(link, value, zeroCountDisplay) {
   if (value === undefined) return;
   const isZero = !(value > 0);
   const className = isZero ? "nav-count nav-count-zero" : "nav-count";
-  link.appendChild(el("span", className, isZero ? EMPTY_COUNT : String(value)));
+  link.appendChild(el("span", className, navCountText(value, isZero, zeroCountDisplay)));
+}
+
+/** A zero's text is an em dash unless its section prefers the literal digit
+ * (MAINTAIN); a non-zero count always renders as its number. */
+function navCountText(value, isZero, zeroCountDisplay) {
+  const zeroReadsAsDash = isZero && zeroCountDisplay !== "digit";
+  return zeroReadsAsDash ? EMPTY_COUNT : String(value);
 }
 
 /** Append the lint badge, omitting it entirely when lint has never run (see lintTotal). */
