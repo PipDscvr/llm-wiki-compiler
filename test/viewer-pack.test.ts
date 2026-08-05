@@ -41,6 +41,8 @@ const REQUIRED_ASSETS = [
   "dist/viewer/assets/viewer-chrome.css",
   "dist/viewer/assets/viewer-theme-boot.js",
   "dist/viewer/assets/viewer-theme.js",
+  "dist/viewer/assets/viewer-dashboard.css",
+  "dist/viewer/assets/viewer-dashboard.js",
 ];
 
 interface PackEntry {

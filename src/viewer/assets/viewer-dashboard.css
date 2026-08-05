@@ -1,0 +1,336 @@
+/**
+ * llmwiki viewer — Overview dashboard.
+ *
+ * Styles the DOM `viewer-dashboard.js` emits: the four-card stat grid, the
+ * hero banner, the recently-compiled / knowledge-graph split, the compile
+ * receipt, and the next-actions rail. Every colour is a token from
+ * viewer-tokens.css — no raw colour literals — so both themes stay correct
+ * automatically.
+ *
+ * Two decisions worth flagging for a reader unfamiliar with the redesign:
+ *   - The meter under "Citations resolved" is two segments (violet fill,
+ *     `--warn` remainder), never a neutral track. A grey remainder would
+ *     read as "no data"; amber reads as "this much is unresolved", which is
+ *     the fact being reported.
+ *   - `.graph-panel-surface` is a reserved, empty container. Task 11 draws
+ *     the real compact graph into it; this file only supplies its frame so
+ *     nothing here fabricates graph structure that doesn't exist yet.
+ *
+ * `.main-pane` (viewer.css) caps prose width at `min(100%, 72ch)`, which is
+ * far too narrow for a 4-column stat grid plus a 268px rail. `.dashboard`
+ * overrides `width` back to 100% — same selector specificity, later in the
+ * cascade (this sheet loads after viewer.css) — without editing the legacy
+ * rule other routes still rely on.
+ */
+
+.dashboard {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 268px;
+  gap: var(--space-16);
+  align-items: start;
+}
+
+.dashboard-primary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.dashboard-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+/* ---- Stat grid ---- */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-12);
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-9);
+  padding: var(--space-16);
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-tile);
+}
+
+/* Counter tile rule: only a number that can be bad is coloured, and the
+ * whole tile tints with it — value and sub-line both shift, not just one. */
+.stat-card.is-warn {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+.stat-card.is-warn .stat-value { color: var(--warn); }
+.stat-card.is-warn .stat-sub { color: var(--warn-muted); }
+
+.stat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-9);
+}
+
+.stat-label {
+  font: var(--type-label);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+
+.stat-badge {
+  font: var(--type-badge);
+  color: var(--fg-faint);
+  background: var(--bg-chip);
+  border: 1px solid var(--border-chip);
+  padding: 3px 6px;
+  border-radius: var(--radius-badge);
+}
+
+.stat-value { font: var(--type-metric); letter-spacing: -0.035em; color: var(--fg); }
+
+.stat-sub { font: var(--type-body); color: var(--fg-dim); }
+
+/* ---- Hero banner ---- */
+
+.hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-16);
+  padding: var(--space-24);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  background: linear-gradient(100deg, var(--accent-a16), var(--accent-a03) 62%, transparent);
+}
+
+.hero-title {
+  font: 600 19px/1.35 var(--font-sans);
+  letter-spacing: -0.015em;
+  color: var(--fg-strong);
+}
+
+.hero-body {
+  margin-top: var(--space-6);
+  font: var(--type-body);
+  color: var(--fg-dim);
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-9);
+  flex: none;
+}
+
+/* Page-action buttons are 36px; header controls are 34px (viewer-chrome.css). */
+.button {
+  display: inline-flex; align-items: center; gap: var(--space-6);
+  height: 36px; padding: 0 16px;
+  border-radius: var(--radius-control);
+  font: 600 12.5px/1 var(--font-sans);
+}
+.button-primary { background: var(--accent); color: var(--on-accent); }
+.button-primary:hover { background: var(--accent-text); text-decoration: none; }
+.button-secondary {
+  background: var(--bg-hover);
+  border: 1px solid var(--border-button);
+  color: var(--fg-body);
+  font-weight: 500;
+  padding: 0 14px;
+}
+
+/* ---- Recently compiled / knowledge graph split ---- */
+
+.dashboard-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr);
+  gap: var(--space-16);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding: var(--space-16);
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-panel);
+}
+
+.panel-head { font: var(--type-panel-title); color: var(--fg-strong); }
+
+.panel-body { display: flex; flex-direction: column; gap: var(--space-9); }
+
+.panel-caption { font: var(--type-metadata); color: var(--fg-dim); }
+
+.panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-9);
+  padding-top: var(--space-9);
+  border-top: 1px solid var(--border-soft);
+  font: var(--type-body);
+  color: var(--fg-dim);
+}
+.panel-footer a { color: var(--accent-text); }
+
+.recent-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-9);
+  padding: var(--space-9) 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.recent-row:last-child { border-bottom: none; }
+
+.recent-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--type-row);
+  color: var(--fg-body);
+}
+
+.recent-age { flex: none; font: var(--type-metadata); color: var(--fg-faint); }
+
+/* Freshness dot shared with the #/concepts and #/queries list rows
+ * (viewer-lists.js): status colour alone never carries the meaning — every
+ * dot also carries a title/aria-label — so only geometry + colour live here. */
+.list-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.list-dot.is-ok { background: var(--ok); }
+.list-dot.is-warn { background: var(--warn); }
+
+/* Reserved graph panel frame. Task 11 draws the compact graph inside
+ * [data-graph-panel]; deliberately empty until then (see file header). */
+.graph-panel-surface {
+  min-height: 296px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-tile);
+  background: radial-gradient(120% 90% at 50% 45%, var(--graph-bg-inner) 0%, var(--graph-bg-outer) 70%);
+}
+
+/* ---- Rail: compile receipt, next actions, snapshot note ---- */
+
+.receipt-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-9);
+}
+
+.receipt-label { font: var(--type-body); color: var(--fg-dim); }
+.receipt-value { font: var(--type-metadata); color: var(--fg-body); }
+
+.receipt-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin-top: var(--space-6);
+}
+
+/* Meter: violet fill to the value, `--warn` for the remainder — never a
+ * neutral track (see file header). `.bar-fill`'s width is a CSSOM property
+ * write from viewer-dashboard.js, not a markup `style=` attribute, so it
+ * does not need `style-src 'unsafe-inline'`. */
+.bar-track { display: flex; height: 5px; border-radius: 3px; overflow: hidden; }
+.bar-fill { background: var(--accent); }
+.bar-remainder { flex: 1; background: var(--warn); }
+
+.receipt-caption { font: var(--type-metadata); color: var(--fg-dim); }
+
+.action-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-9);
+  padding: var(--space-9) 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.action-row:last-child { border-bottom: none; }
+
+.action-title { font: var(--type-row); color: var(--fg-body); }
+.action-hint { flex: none; font: var(--type-metadata); color: var(--fg-faint); }
+
+.snapshot-note {
+  padding: var(--space-12);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--bg-inset);
+  font: var(--type-body);
+  color: var(--fg-dim);
+}
+
+/* ---- Pattern strip: the four-column static explainer ---- */
+
+.pattern-strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding: var(--space-16);
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-panel);
+}
+
+.pattern-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-16);
+}
+
+.pattern-eyebrow {
+  font: var(--type-label);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--fg-ghost);
+}
+
+.pattern-body {
+  margin-top: var(--space-6);
+  font: var(--type-body);
+  color: var(--fg-dim);
+}
+
+/* ---- Empty state (Nebula Design System reference) ---- */
+
+.empty-state {
+  padding: var(--space-16);
+  border: 1px dashed var(--border-button);
+  border-radius: var(--radius-tile);
+  background: var(--bg-sunken);
+}
+.empty-state-title { font: 500 12.5px/1.3 var(--font-sans); color: var(--fg-strong); }
+.empty-state-body { font: 400 11.5px/1.55 var(--font-sans); color: var(--fg-dim); }
+.empty-state-command {
+  display: inline-flex; align-items: center; gap: var(--space-9);
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-strong);
+  font: 500 11.5px/1 var(--font-mono);
+  color: var(--fg-body);
+}
+
+@media (max-width: 900px) {
+  .dashboard { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-split { grid-template-columns: minmax(0, 1fr); }
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pattern-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

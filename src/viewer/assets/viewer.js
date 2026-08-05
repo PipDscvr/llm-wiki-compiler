@@ -26,8 +26,8 @@ import { renderSidebar, markActive } from "./viewer-sidebar.js";
 import { renderProjectRail, renderSupportRail, clearSupportRail } from "./viewer-rail.js";
 import { loadGraph } from "./viewer-graph.js";
 import { renderHeader } from "./viewer-header.js";
-import { projectTitle } from "./viewer-format.js";
 import { renderConceptsList, renderQueriesList, renderSourcesList } from "./viewer-lists.js";
+import { renderDashboard } from "./viewer-dashboard.js";
 
 const MAIN_SELECTOR = "[data-main-pane]";
 
@@ -46,14 +46,6 @@ const STATIC_ROUTES = new Map([
 
 /** Pattern matching `#/(concepts|queries)/<slug>` hash routes. */
 const PAGE_HASH_PATTERN = /^#\/(concepts|queries)\/(.+)$/;
-
-/** Rows for the home dashboard counts grid: `[label, envelope.counts key]`. */
-const COUNT_ROWS = [
-  ["Concepts", "concepts"],
-  ["Saved queries", "queries"],
-  ["Source files", "sourceFiles"],
-  ["Pending reviews", "pendingReviews"],
-];
 
 /** Rows for the /api/health metrics block: `[label, health key]`. */
 const HEALTH_METRIC_ROWS = [
@@ -122,81 +114,6 @@ function decodeSlug(raw) {
   } catch {
     return null;
   }
-}
-
-/** Render the home dashboard from the `/api/pages` envelope. */
-function renderHome(envelope) {
-  const main = document.querySelector(MAIN_SELECTOR);
-  if (!main) return;
-  main.innerHTML = "";
-  main.className = "main-pane home-dashboard";
-  appendHomeContent(main, envelope);
-  renderProjectRail(envelope);
-}
-
-/** Append every section of the home dashboard to the main pane. */
-function appendHomeContent(main, envelope) {
-  main.appendChild(heading("h1", projectTitle(envelope)));
-  main.appendChild(buildCountsBlock(envelope?.counts));
-  appendIndexLinkIfAvailable(main, envelope);
-  appendRecentBlockIfAny(main, envelope);
-}
-
-/** Append the compiled-index link, if the envelope flagged it available. */
-function appendIndexLinkIfAvailable(main, envelope) {
-  if (envelope?.index?.available) {
-    main.appendChild(buildIndexLink(envelope.index.href));
-  }
-}
-
-/** Append the recent-updates block, if the envelope carried any rows. */
-function appendRecentBlockIfAny(main, envelope) {
-  if (hasRecentPages(envelope)) {
-    main.appendChild(buildRecentBlock(envelope.recentPages));
-  }
-}
-
-/** True when the envelope carries at least one recent page. */
-function hasRecentPages(envelope) {
-  return Array.isArray(envelope?.recentPages) && envelope.recentPages.length > 0;
-}
-
-/** Render a `<dl>` of project counts on the home dashboard. */
-function buildCountsBlock(counts) {
-  const rows = COUNT_ROWS.map(([label, key]) => [label, counts?.[key] ?? 0]);
-  const dl = definitionList(rows);
-  dl.className = "metric-grid";
-  return dl;
-}
-
-/** Build the link that takes the user to the compiled wiki/index.md page. */
-function buildIndexLink(href) {
-  const p = document.createElement("p");
-  p.className = "home-action";
-  const a = document.createElement("a");
-  a.href = href;
-  a.textContent = "Browse the compiled index →";
-  p.appendChild(a);
-  return p;
-}
-
-/** Render the recent-pages list on the home dashboard. */
-function buildRecentBlock(recent) {
-  const ul = document.createElement("ul");
-  ul.className = "recent-list";
-  for (const page of recent) {
-    const li = document.createElement("li");
-    const a = document.createElement("a");
-    a.href = `#/${encodeURIComponent(page.pageDirectory)}/${encodeURIComponent(page.slug)}`;
-    a.textContent = page.title || page.slug;
-    li.appendChild(a);
-    ul.appendChild(li);
-  }
-  const wrap = document.createElement("section");
-  wrap.className = "recent-section";
-  wrap.appendChild(heading("h2", "Recently updated"));
-  wrap.appendChild(ul);
-  return wrap;
 }
 
 /** Dispatch table: route.kind → handler for routes that fit the (main) signature. */
@@ -317,10 +234,12 @@ async function loadAndRenderHome() {
   applyHomeEnvelope(data.pages);
 }
 
-/** Apply a successfully fetched /api/pages envelope to the chrome + main pane. */
+/** Apply a successfully fetched bootstrap payload to the chrome + main pane. */
 function applyHomeEnvelope(envelope) {
-  renderHome(envelope);
-  // Inject into .app-layout (outside <main>) so the banner persists across route changes.
+  const main = document.querySelector(MAIN_SELECTOR);
+  if (!main) return;
+  renderDashboard(main, envelope, bootstrapData.health);
+  renderProjectRail(envelope);
   injectGlobalCorruptBanner(envelope?.stateStatus);
 }
 

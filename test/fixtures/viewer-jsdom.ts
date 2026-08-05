@@ -31,8 +31,16 @@ const THEME_BOOT_SCRIPT = "viewer-theme-boot.js";
 /**
  * Modules whose evaluation order matters because they import each other.
  * Anything not listed here is appended afterwards in directory order.
+ *
+ * `viewer-format.js` has no imports of its own (pure functions, no DOM
+ * access) but is imported by several other modules, including
+ * `viewer-dashboard.js` — whose name sorts alphabetically BEFORE
+ * "viewer-format.js", so directory order alone would evaluate the
+ * dependent first and crash destructuring an undefined registry entry.
+ * Pinning it here (like viewer-dom.js and viewer-theme.js) guarantees it
+ * registers before any dependent regardless of filename.
  */
-const MODULE_ORDER = ["viewer-dom.js", "viewer-theme.js"];
+const MODULE_ORDER = ["viewer-dom.js", "viewer-format.js", "viewer-theme.js"];
 
 /** Match `import { a, b } from "./viewer-x.js";` including multi-line forms. */
 const IMPORT_PATTERN = /import\s*\{([\s\S]*?)\}\s*from\s*['"](\.\/[\w.-]+\.js)['"]\s*;/g;
