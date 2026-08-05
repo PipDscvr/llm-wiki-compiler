@@ -44,6 +44,7 @@ const REQUIRED_ASSETS = [
   "dist/viewer/assets/viewer-dashboard.css",
   "dist/viewer/assets/viewer-dashboard.js",
   "dist/viewer/assets/viewer-pattern.js",
+  "dist/viewer/assets/viewer-stat-card.js",
   "dist/viewer/assets/viewer-graph.css",
 ];
 

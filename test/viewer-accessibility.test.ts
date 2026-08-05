@@ -337,9 +337,12 @@ describe("/#/health route — dashboard renders from /api/health", () => {
     expect(main.textContent).toContain("Concepts");
     expect(main.textContent).toContain("3");
     expect(main.textContent).toContain("Saved queries");
-    expect(main.textContent).toContain("Compiled sources");
-    expect(main.textContent).toContain("Source files");
-    expect(main.textContent).toContain("Pending reviews");
+    // Compiled sources/Source files are now one "Sources" stat card whose
+    // sub-line names both counts (see test/viewer-health-dashboard.test.ts).
+    expect(main.textContent).toContain("Sources");
+    expect(main.textContent).toContain("1 compiled");
+    expect(main.textContent).toContain("5 on disk");
+    expect(main.textContent).toContain("Awaiting review");
     expect(main.textContent).toContain("4");
     expect(main.textContent).toContain("No cached lint summary");
   });

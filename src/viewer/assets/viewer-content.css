@@ -312,15 +312,6 @@
 .health-dashboard dd { margin: 0; color: var(--fg-body); font-variant-numeric: tabular-nums; }
 .health-dashboard h2 { font: var(--type-panel-title); color: var(--fg-strong); }
 
-.metric-list {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  column-gap: var(--space-16);
-  row-gap: var(--space-6);
-  margin: 0;
-}
-.metric-list .metric { display: contents; }
-
 /* ---- List routes (#/concepts, #/queries, #/sources) ---- */
 
 /*

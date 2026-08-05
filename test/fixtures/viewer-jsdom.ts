@@ -52,6 +52,14 @@ const THEME_BOOT_SCRIPT = "viewer-theme-boot.js";
  * persistence logic was split out to stay under the 400-line file cap —
  * see that module's own header), and "viewer-dashboard.js" sorts before
  * "viewer-pattern.js" alphabetically too.
+ *
+ * `viewer-stat-card.js` has the same problem a third time, on both of its
+ * importers at once: `viewer-dashboard.js` AND `viewer.js` both import
+ * `buildStatCard` from it (extracted so the health route's five-card grid
+ * and the dashboard's four-card grid share one implementation — see that
+ * module's own header), and "viewer-dashboard.js" sorts alphabetically
+ * before "viewer-stat-card.js" — directory order alone would evaluate that
+ * importer first and crash destructuring an undefined registry entry.
  */
 const MODULE_ORDER = [
   "viewer-dom.js",
@@ -59,6 +67,7 @@ const MODULE_ORDER = [
   "viewer-theme.js",
   "viewer-rail.js",
   "viewer-pattern.js",
+  "viewer-stat-card.js",
 ];
 
 /** Match `import { a, b } from "./viewer-x.js";` including multi-line forms. */

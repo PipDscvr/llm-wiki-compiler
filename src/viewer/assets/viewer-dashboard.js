@@ -46,6 +46,12 @@
  * here (this file was already at CLAUDE.md's 400-line cap when the
  * dismiss/persistence logic was added). It returns `null` once dismissed;
  * `renderDashboard` below skips appending in that case.
+ *
+ * The stat card itself — label/badge/value/sub-line plus the warn/calm
+ * state logic — is `viewer-stat-card.js`'s `buildStatCard()`, not defined
+ * here. The health route (`viewer.js`) renders its own five-card grid
+ * through the same function, so the card markup and its warn/calm rules
+ * can never drift between the two surfaces.
  */
 
 import { el, emptyState } from "./viewer-dom.js";
@@ -53,6 +59,7 @@ import { isWarnFreshness, lintTotal, plural, relativeAge } from "./viewer-format
 import { LEGEND_KINDS, loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js";
 import { buildPatternStrip } from "./viewer-pattern.js";
 import { renderDashboardRail } from "./viewer-rail.js";
+import { buildStatCard } from "./viewer-stat-card.js";
 
 /**
  * Stat card definitions: key, label, badge, and value/sub-line derivations.
@@ -225,52 +232,6 @@ function buildStatGrid(model) {
   const grid = el("div", "stat-grid");
   for (const card of STAT_CARDS) grid.appendChild(buildStatCard(card, model));
   return grid;
-}
-
-/** True when a card's warnWhenNonZero flag is set and its value has something to report. */
-function isCardWarn(card, value) {
-  return card.warnWhenNonZero === true && value > 0;
-}
-
-/** True when a card's calmWhenZero flag is set and its value is clear. */
-function isCardCalm(card, value) {
-  return card.calmWhenZero === true && value === 0;
-}
-
-/**
- * Resolve a card's state from its value: "warn" and "calm" are mutually
- * exclusive (see STAT_CARDS' comment and the CSS rules' own comments in
- * viewer-dashboard.css); anything else is "neutral" (concepts, sources,
- * and any signal card that opted into neither flag).
- *
- * @param {object} card - A STAT_CARDS entry.
- * @param {number} value - That card's computed value.
- * @returns {"warn"|"calm"|"neutral"}
- */
-function statCardState(card, value) {
-  if (isCardWarn(card, value)) return "warn";
-  if (isCardCalm(card, value)) return "calm";
-  return "neutral";
-}
-
-/** Resolve a card's badge text for its current state (see badgeWhenCalm's own comment). */
-function statCardBadgeText(card, state) {
-  return state === "calm" && card.badgeWhenCalm ? card.badgeWhenCalm : card.badge;
-}
-
-/** Build one stat card. */
-function buildStatCard(card, model) {
-  const value = card.value(model);
-  const state = statCardState(card, value);
-  const wrap = el("div", `stat-card${state === "neutral" ? "" : ` is-${state}`}`);
-  wrap.dataset.stat = card.key;
-  const head = el("div", "stat-head");
-  head.appendChild(el("span", "stat-label", card.label));
-  head.appendChild(el("span", "stat-badge", statCardBadgeText(card, state)));
-  wrap.appendChild(head);
-  wrap.appendChild(el("div", "stat-value", String(value)));
-  wrap.appendChild(el("div", "stat-sub", card.sub(model)));
-  return wrap;
 }
 
 /** Build the hero banner with its two calls to action. */
