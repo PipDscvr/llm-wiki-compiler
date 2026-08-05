@@ -26,6 +26,7 @@ import { collectPageSummaries } from "../src/compiler/indexgen.js";
 import { countCandidates } from "../src/compiler/candidates.js";
 import { readState } from "../src/utils/state.js";
 import { CONCEPTS_DIR, QUERIES_DIR } from "../src/utils/constants.js";
+import { writeLintCache } from "../src/linter/cache.js";
 
 const { start: startViewer } = useViewerProcessLifecycle();
 
@@ -73,6 +74,34 @@ describe("/api/health count parity vs MCP wiki_status helpers", () => {
     const handle = await startViewer(root);
     const health = await fetchHealth(handle);
     expect(health.lint).toBeNull();
+  });
+
+  it("surfaces the per-rule aggregate breakdown from the lint cache", async () => {
+    const root = await makeTempRoot("viewer-health-lint-rules");
+    await writePage(path.join(root, "wiki/concepts"), "alpha", { title: "Alpha" }, "Body.");
+    await writeLintCache(root, {
+      errors: 1,
+      warnings: 1,
+      info: 0,
+      results: [
+        { rule: "broken-wikilink", severity: "error", file: "alpha.md", message: "" },
+        { rule: "missing-summary", severity: "warning", file: "alpha.md", message: "" },
+      ],
+    });
+
+    const handle = await startViewer(root);
+    const health = await fetchHealth(handle);
+
+    // Round-trips through the real HTTP response — proves the field survives
+    // JSON serialization on the wire, not just the in-process cache read.
+    expect(health.lint).toMatchObject({
+      errors: 1,
+      warnings: 1,
+      rules: [
+        { rule: "broken-wikilink", severity: "error", count: 1, fileCount: 1, topFile: "alpha.md", topFileCount: 1 },
+        { rule: "missing-summary", severity: "warning", count: 1, fileCount: 1, topFile: "alpha.md", topFileCount: 1 },
+      ],
+    });
   });
 });
 

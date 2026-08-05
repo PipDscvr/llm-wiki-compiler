@@ -45,7 +45,7 @@ Both are surfaced by `llmwiki lint` and are also visible in the local viewer, JS
 
 ### Lint cache
 
-After every run, lint writes a summary to `.llmwiki/last-lint.json`. The local viewer (`llmwiki view`) reads this file to display health counts in the sidebar without re-running lint. The MCP `lint_wiki` tool returns the same structured diagnostics programmatically.
+After every run, lint writes a summary to `.llmwiki/last-lint.json`, including a per-rule breakdown of which rules produced error or warning findings, how many files each one touched, and its most-flagged file. The local viewer (`llmwiki view`) reads this file to display health counts in the sidebar without re-running lint. The MCP `lint_wiki` tool returns the same structured diagnostics programmatically.
 
 ### Exit code
 
