@@ -1,0 +1,125 @@
+/**
+ * Subprocess integration tests for the read-only `/api/reviews` viewer route.
+ *
+ * These spin up the compiled `llmwiki view` binary against a temp project whose
+ * candidates were seeded through the project's own `writeCandidate`, then GET
+ * `/api/reviews` and assert the projection contract.
+ *
+ * Two of the four tests exist because of real defects on this branch rather
+ * than for coverage:
+ *  - `body` (the ENTIRE generated page, frontmatter included) must never reach
+ *    the client: a list view does not need it, and shipping it would push
+ *    unbounded unreviewed LLM text over the wire.
+ *  - No response field may carry an absolute path. `/api/reviews` — like
+ *    `/api/health` and unlike `/api/page` — does not participate in the
+ *    non-loopback `isLoopback` suppression, so a leaked machine-local path
+ *    would be readable by every LAN client. Commit c5c9e5e fixed exactly this
+ *    class of leak once already.
+ */
+
+import { describe, it, expect } from "vitest";
+import path from "path";
+import { makeTempRoot } from "./fixtures/temp-root.js";
+import { writeCandidate } from "../src/compiler/candidates.js";
+import type { CandidateDraft } from "../src/compiler/candidates.js";
+import { useViewerProcessLifecycle } from "./fixtures/run-cli-server.js";
+import { fetchJson } from "./fixtures/viewer-fetch.js";
+
+const { start: startViewer } = useViewerProcessLifecycle();
+
+/** A single `/api/reviews` row shape. */
+interface ReviewRow {
+  id: string;
+  title: string;
+  slug: string;
+  summary: string;
+  sources: string[];
+  generatedAt: string;
+  reviewMode: string;
+  heldReasons: { code: string; detail?: string }[];
+  targetDirectory?: string;
+  body?: string;
+}
+
+/** Read the `reviews` array out of the `/api/reviews` envelope. */
+function rowsOf(body: unknown): ReviewRow[] {
+  return (body as { reviews: ReviewRow[] }).reviews;
+}
+
+/** Seed one pending candidate through the project's own writer, so the on-disk
+ *  format cannot drift from what the compile pipeline actually produces. */
+function seedCandidate(root: string, overrides: Partial<CandidateDraft> = {}) {
+  return writeCandidate(root, {
+    title: "Transformer attention",
+    slug: "transformer-attention",
+    summary: "Every token is weighted against every other token.",
+    sources: ["karpathy.md"],
+    body: "---\ntitle: Transformer attention\nconfidence: 0.4\n---\n\nFull page body.",
+    reviewMode: "policy",
+    heldReasons: [{ code: "low-confidence", detail: "confidence 0.4 < 0.6" }],
+    ...overrides,
+  });
+}
+
+/** Every string anywhere in `value` that reads as an absolute filesystem path. */
+function absolutePathsIn(value: unknown): string[] {
+  if (typeof value === "string") return /^(?:\/|[A-Za-z]:[\\/])/.test(value) ? [value] : [];
+  if (Array.isArray(value)) return value.flatMap(absolutePathsIn);
+  if (value && typeof value === "object") return Object.values(value).flatMap(absolutePathsIn);
+  return [];
+}
+
+describe("llmwiki view — /api/reviews", () => {
+  it("lists every pending candidate with the fields the list route renders", async () => {
+    const root = await makeTempRoot("viewer-reviews-list");
+    await seedCandidate(root);
+    await seedCandidate(root, { title: "Backprop", slug: "backprop", sources: ["lecun.md"] });
+    const handle = await startViewer(root);
+    const { status, body } = await fetchJson(handle, "/api/reviews");
+    expect(status).toBe(200);
+    const rows = rowsOf(body);
+    expect(rows).toHaveLength(2);
+    const row = rows.find((r) => r.slug === "transformer-attention");
+    expect(row?.title).toBe("Transformer attention");
+    expect(row?.summary).toBe("Every token is weighted against every other token.");
+    expect(row?.sources).toEqual(["karpathy.md"]);
+    expect(row?.reviewMode).toBe("policy");
+    expect(row?.heldReasons).toEqual([{ code: "low-confidence", detail: "confidence 0.4 < 0.6" }]);
+    expect(typeof row?.generatedAt).toBe("string");
+    expect(typeof row?.id).toBe("string");
+  });
+
+  it("omits `body` — the whole generated page — from every row", async () => {
+    const root = await makeTempRoot("viewer-reviews-nobody");
+    await seedCandidate(root);
+    const handle = await startViewer(root);
+    const { body } = await fetchJson(handle, "/api/reviews");
+    const row = rowsOf(body)[0];
+    expect(row.body).toBeUndefined();
+    expect("body" in row).toBe(false);
+    expect(JSON.stringify(body)).not.toContain("Full page body.");
+  });
+
+  it("emits no absolute path, even when a candidate records one as a source", async () => {
+    const root = await makeTempRoot("viewer-reviews-paths");
+    await seedCandidate(root, { sources: [path.join(root, "sources", "karpathy.md")] });
+    const handle = await startViewer(root);
+    const { body } = await fetchJson(handle, "/api/reviews");
+    expect(absolutePathsIn(body)).toEqual([]);
+    expect(JSON.stringify(body)).not.toContain(root);
+    expect(rowsOf(body)[0].sources).toEqual(["karpathy.md"]);
+  });
+
+  it("returns an empty list with no candidates, and existing routes still work", async () => {
+    const root = await makeTempRoot("viewer-reviews-empty");
+    const handle = await startViewer(root);
+    const reviews = await fetchJson(handle, "/api/reviews");
+    expect(reviews.status).toBe(200);
+    expect(rowsOf(reviews.body)).toEqual([]);
+    // The sidebar's pending-review count and this list read the same store,
+    // so the bootstrap envelope must agree with the empty queue.
+    const pages = await fetchJson(handle, "/api/pages");
+    expect(pages.status).toBe(200);
+    expect((pages.body as { counts: { pendingReviews: number } }).counts.pendingReviews).toBe(0);
+  });
+});

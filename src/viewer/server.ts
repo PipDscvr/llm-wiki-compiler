@@ -25,6 +25,8 @@ import { renderPageHtml } from "./render.js";
 import { searchPages } from "./search.js";
 import { workflowStatus } from "../workflows/status.js";
 import { buildWorkflowRunsEnvelope } from "./workflow-runs.js";
+import { listCandidates } from "../compiler/candidates.js";
+import { buildReviewsEnvelope } from "./reviews.js";
 import type { PageDirectory } from "../export/types.js";
 import { UNRESOLVED_CITATION_CODE } from "./types.js";
 import type { ViewerSnapshot, ViewerPage } from "./types.js";
@@ -169,8 +171,8 @@ async function routeRegistered(
  * Exact-path API routes whose handler needs only `(res, snapshot)` — collapsed
  * into one lookup table so adding such a route is a single map entry rather than
  * another `if` in `routeRegistered` (which keeps that dispatcher's branching, and
- * thus its complexity, flat). `/api/workflow-runs` reads its runs from
- * `snapshot.root` at request time. Routes with extra params (`/api/index`,
+ * thus its complexity, flat). `/api/workflow-runs` and `/api/reviews` both read
+ * from `snapshot.root` at request time. Routes with extra params (`/api/index`,
  * `/api/search`) and the prefix routes stay as explicit branches.
  */
 const SNAPSHOT_ONLY_HANDLERS: ReadonlyMap<
@@ -181,6 +183,7 @@ const SNAPSHOT_ONLY_HANDLERS: ReadonlyMap<
   ["/api/health", handleApiHealth],
   ["/api/graph", handleApiGraph],
   ["/api/workflow-runs", (res, snapshot) => handleApiWorkflowRuns(res, snapshot.root)],
+  ["/api/reviews", (res, snapshot) => handleApiReviews(res, snapshot.root)],
 ]);
 
 /**
@@ -195,6 +198,7 @@ const REGISTERED_EXACT_PATHS: ReadonlySet<string> = new Set([
   "/api/search",
   "/api/graph",
   "/api/workflow-runs",
+  "/api/reviews",
 ]);
 
 /** Prefix-based registered routes (assets and per-page API). */
@@ -423,6 +427,19 @@ function handleApiGraph(res: ServerResponse, snapshot: ViewerSnapshot): void {
  */
 async function handleApiWorkflowRuns(res: ServerResponse, root: string): Promise<void> {
   writeJson(res, 200, buildWorkflowRunsEnvelope(await workflowStatus(root)));
+}
+
+/**
+ * `/api/reviews` — read-only projection of every pending review candidate.
+ * Candidates live under `.llmwiki/candidates/` (NOT in the frozen snapshot),
+ * so this reads them at REQUEST time via the shared sanitizing
+ * `listCandidates(root)`. Deliberately NOT folded into `/api/health`: that
+ * payload is fetched by every route at bootstrap and must stay cheap. Strictly
+ * read-only — no approve/reject, and the projection drops the candidate `body`
+ * and every absolute path (see `buildReviewsEnvelope`).
+ */
+async function handleApiReviews(res: ServerResponse, root: string): Promise<void> {
+  writeJson(res, 200, buildReviewsEnvelope(await listCandidates(root)));
 }
 
 /** `/api/health` — cheap status summary. */

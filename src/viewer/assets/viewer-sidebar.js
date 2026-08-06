@@ -49,7 +49,7 @@ const NAV_SECTIONS = [
     zeroCountDisplay: "digit",
     items: [
       { route: "health", href: "#/health", label: "Health & lint", badge: "lint" },
-      { route: "reviews", href: "#/health", label: "Reviews", count: "pendingReviews" },
+      { route: "reviews", href: "#/reviews", label: "Reviews", count: "pendingReviews" },
     ],
   },
 ];
@@ -73,6 +73,7 @@ const STATIC_ROUTE_FOR_HASH = new Map([
   ["#/sources", "sources"],
   ["#/graph", "graph"],
   ["#/health", "health"],
+  ["#/reviews", "reviews"],
   ["#/index", "home"],
 ]);
 

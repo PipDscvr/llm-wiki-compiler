@@ -370,3 +370,28 @@ a.list-title:hover, a.list-title:focus-visible { color: var(--accent-hover); tex
   font: var(--type-body);
   color: var(--fg-body);
 }
+
+/* ---- Review queue (#/reviews) ---- */
+
+/*
+ * A review row STACKS where a page row is one centred line. A page row can
+ * stay a single line because its title links to the page carrying the detail;
+ * a candidate has no page to open yet, so the row itself has to carry the
+ * evidence — summary, provenance, and why it is held. Both `.review-row`
+ * overrides below are single-class selectors declared after `.list-row`, so
+ * they win on order without raising specificity.
+ */
+.review-row { flex-direction: column; align-items: stretch; gap: 4px; }
+.review-head { display: flex; align-items: baseline; gap: var(--space-9); }
+.review-summary { margin: 0; font: var(--type-body); color: var(--fg-dim); }
+.review-sources { margin: 0; font: var(--type-metadata); color: var(--fg-faint); }
+
+.review-reasons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.review-reason {
+  font: var(--type-badge);
+  color: var(--warn);
+  background: var(--warn-a12);
+  border: 1px solid var(--warn-border);
+  padding: 3px 6px;
+  border-radius: var(--radius-badge);
+}
