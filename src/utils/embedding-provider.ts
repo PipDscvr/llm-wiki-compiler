@@ -163,6 +163,21 @@ export function resolveEmbeddingEndpoint(providerName: string): string {
   return "";
 }
 
+/**
+ * True when the embedding configuration is steered away from what the chat
+ * provider alone would imply — an explicit LLMWIKI_EMBEDDING_PROVIDER, or an
+ * endpoint override for the effective provider.
+ *
+ * This is the condition under which a store's MODEL NAME stops being usable
+ * evidence of how its vectors were produced, which is what
+ * `storeMatchesActiveEmbedding` needs to know about a store that predates
+ * fingerprints — see its docstring for why that distinction has to exist.
+ */
+export function hasEmbeddingConfigurationOverride(): boolean {
+  if (isEmbeddingProviderExplicit()) return true;
+  return resolveEmbeddingEndpoint(getActiveEmbeddingProviderName()) !== "";
+}
+
 /** Describe an embedding-incapable provider name, or null when it can serve. */
 function capabilityProblem(name: string): EmbeddingProviderProblem | null {
   if (EMBEDDING_CAPABLE_PROVIDERS.has(name)) return null;

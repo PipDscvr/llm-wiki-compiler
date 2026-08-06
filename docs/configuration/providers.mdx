@@ -152,6 +152,7 @@ The `ollama` provider uses Ollama's OpenAI-compatible endpoint for embeddings. A
 | `LLMWIKI_PROVIDER` | Yes | Set to `ollama` |
 | `OLLAMA_HOST` | Yes | Ollama host URL for chat and structured tool calls. **Include `/v1`** — the native `/api/chat` base URL is derived from this value (path prefix preserved) |
 | `LLMWIKI_MODEL` | No | Model name override |
+| `LLMWIKI_EMBEDDING_PROVIDER` | No | Backend serving embeddings, independent of `LLMWIKI_PROVIDER`. One of `anthropic`, `claude-agent`, `openai`, `ollama` |
 | `LLMWIKI_EMBEDDING_MODEL` | No | Embedding model override |
 | `OLLAMA_EMBEDDINGS_HOST` | No | Separate Ollama host for embeddings. When unset, embeddings use `OLLAMA_HOST` |
 | `OLLAMA_TIMEOUT_MS` | No | Per-request timeout override for Ollama. Wins over `LLMWIKI_REQUEST_TIMEOUT_MS` when both are set |
@@ -207,7 +208,13 @@ Model names use dots, not dashes. Availability depends on your Copilot plan:
 
 **Embeddings**
 
-The GitHub Copilot API does not expose an embeddings endpoint. Semantic search (`llmwiki query` with chunked retrieval) falls back to full-index selection without embeddings. If you need embedding-dependent workflows, switch to the `openai` provider and supply `OPENAI_API_KEY`.
+The GitHub Copilot API does not expose an embeddings endpoint. Semantic search (`llmwiki query` with chunked retrieval) falls back to full-index selection without embeddings. To enable it, keep Copilot for chat and route embeddings to another backend with `LLMWIKI_EMBEDDING_PROVIDER` - see [Environment Variables](/configuration/environment-variables):
+
+```bash
+export LLMWIKI_PROVIDER=copilot
+export LLMWIKI_EMBEDDING_PROVIDER=openai
+export OPENAI_EMBEDDINGS_API_KEY=<your-key>
+```
 
 <Warning>
   `GITHUB_TOKEN` must be a GitHub OAuth token obtained via `gh auth token` after running `gh auth refresh --scopes copilot`. Classic personal access tokens (PATs) are rejected by the Copilot API and will not work.

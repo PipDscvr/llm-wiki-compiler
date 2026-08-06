@@ -2,9 +2,10 @@
  * Embedding store shape and persistence.
  *
  * Owns the on-disk JSON contract for .llmwiki/embeddings.json (types, version,
- * atomic read/write) and the active-model resolution used to tag and validate
- * a store. No retrieval or embedding logic lives here — this is the base module
- * every other embeddings-* module depends on, and it depends on none of them.
+ * atomic read/write) and the active embedding CONFIGURATION resolution — the
+ * provider backend, endpoint, and model that together tag and validate a store.
+ * No retrieval or embedding logic lives here — this is the base module every
+ * other embeddings-* module depends on, and it depends on none of them.
  *
  * Confinement + resource-cap policy (B1):
  *  - READ: routes through {@link resolveExistingConfinedPrivateDir} (no mkdir on
@@ -26,9 +27,11 @@
 
 import { open } from "fs/promises";
 import { constants as fsConstants } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "path";
 import {
   getActiveEmbeddingProviderName,
+  hasEmbeddingConfigurationOverride,
   resolveEmbeddingBackend,
   resolveEmbeddingEndpoint,
 } from "./embedding-provider.js";
@@ -358,24 +361,40 @@ export function resolveEmbeddingFingerprint(): string {
   // embed via Voyage, so moving between them must not trigger a rebuild.
   // NUL-separated: no env value can contain one, so no pair of distinct
   // configurations can collide by concatenation.
-  return [
+  const identity = [
     resolveEmbeddingBackend(providerName),
     resolveEmbeddingModel(),
     resolveEmbeddingEndpoint(providerName),
   ].join("\0");
+  // HASHED because this is persisted. The endpoint component is a free-form URL
+  // that routinely carries a credential as userinfo or a query parameter, and
+  // .llmwiki/embeddings.json gets committed, copied between machines, and pasted
+  // into bug reports. Nothing ever reads the fingerprint back — it is only
+  // compared for equality — so opacity costs nothing, and `model` remains on the
+  // store in cleartext for diagnostics.
+  return createHash("sha256").update(identity, "utf8").digest("hex");
 }
 
 /**
  * True when `store` was built by the ACTIVE embedding configuration, so its
  * vectors may be preserved and searched.
  *
- * Falls back to comparing `model` when the store predates
- * {@link resolveEmbeddingFingerprint}: a legacy store's provenance is unknown,
- * and forcing every existing project into a full re-embed on upgrade is a worse
- * default than keeping today's (weaker) check until the next write stamps one.
+ * A store that predates {@link resolveEmbeddingFingerprint} carries no record of
+ * its provenance, leaving only the model name to compare. Forcing every existing
+ * project into a full re-embed on upgrade would be a worse default than keeping
+ * that weaker check until the next write stamps a fingerprint — but only while
+ * nothing overrides the embedding backend or its endpoint. Under an override the
+ * name is known to be ambiguous: repointing at a local OpenAI-compatible server
+ * keeps the model tag identical while producing vectors from another space.
+ *
+ * Preserving there does not merely postpone the rebuild. A partial update mixes
+ * old and new vectors and then stamps the result with the current fingerprint,
+ * so the mixed store is trusted permanently by every check that follows. The
+ * rebuild is a bounded one-time cost; the laundering is not recoverable.
  */
 export function storeMatchesActiveEmbedding(store: Record<string, unknown> | null | undefined): boolean {
   if (!store) return false;
   if (typeof store.fingerprint === "string") return store.fingerprint === resolveEmbeddingFingerprint();
+  if (hasEmbeddingConfigurationOverride()) return false;
   return store.model === resolveEmbeddingModel();
 }

@@ -109,7 +109,16 @@ describe("storeMatchesActiveEmbedding", () => {
   it("falls back to the model name for a store written before fingerprints existed", () => {
     // Upgrading must not force every existing project into a full re-embed, so a
     // legacy store keeps the old (weaker) check until the next write stamps one.
-    setEnv({ LLMWIKI_EMBEDDING_PROVIDER: "ollama", LLMWIKI_EMBEDDING_MODEL: "bge-m3" });
+    // Only valid with NO override active — see the block below.
+    setEnv({
+      LLMWIKI_PROVIDER: "anthropic",
+      LLMWIKI_EMBEDDING_PROVIDER: undefined,
+      LLMWIKI_EMBEDDING_MODEL: undefined,
+      OPENAI_BASE_URL: undefined,
+      OPENAI_EMBEDDINGS_BASE_URL: undefined,
+      OLLAMA_HOST: undefined,
+      OLLAMA_EMBEDDINGS_HOST: undefined,
+    });
     expect(storeMatchesActiveEmbedding({ model: resolveEmbeddingModel() })).toBe(true);
     expect(storeMatchesActiveEmbedding({ model: "something-else" })).toBe(false);
   });
@@ -118,5 +127,79 @@ describe("storeMatchesActiveEmbedding", () => {
     setEnv({ LLMWIKI_EMBEDDING_PROVIDER: "ollama" });
     expect(storeMatchesActiveEmbedding(null)).toBe(false);
     expect(storeMatchesActiveEmbedding(undefined)).toBe(false);
+  });
+});
+
+describe("the fingerprint is opaque — it is persisted, so it must carry no secret", () => {
+  // The fingerprint lands in .llmwiki/embeddings.json, a file users commit,
+  // copy between machines, and attach to bug reports. An endpoint override is
+  // free-form and routinely carries a credential as userinfo or a query
+  // parameter, so joining it in verbatim writes that credential to disk in
+  // cleartext. The value is only ever compared for equality, never read back,
+  // so hashing costs nothing.
+  const SECRET_ENDPOINT = "https://user:hunter2@vllm.example.com/v1?api-key=sk-secret";
+
+  it("does not contain the endpoint, its credentials, or its host", () => {
+    const fingerprint = fingerprintFor({
+      LLMWIKI_EMBEDDING_PROVIDER: "openai",
+      OPENAI_EMBEDDINGS_BASE_URL: SECRET_ENDPOINT,
+    });
+    expect(fingerprint).not.toContain("hunter2");
+    expect(fingerprint).not.toContain("sk-secret");
+    expect(fingerprint).not.toContain("vllm.example.com");
+    expect(fingerprint).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("still separates two endpoints that differ only in their credential", () => {
+    // Hashing must not collapse distinct configurations into one.
+    const withSecret = fingerprintFor({
+      LLMWIKI_EMBEDDING_PROVIDER: "openai",
+      OPENAI_EMBEDDINGS_BASE_URL: SECRET_ENDPOINT,
+    });
+    const withoutSecret = fingerprintFor({
+      LLMWIKI_EMBEDDING_PROVIDER: "openai",
+      OPENAI_EMBEDDINGS_BASE_URL: "https://vllm.example.com/v1",
+    });
+    expect(withSecret).not.toBe(withoutSecret);
+  });
+});
+
+describe("a legacy store under an active override — the model name is known to be insufficient", () => {
+  // The model-name fallback is what protects existing projects from a forced
+  // re-embed on upgrade, but it is exactly wrong when an override is active:
+  // the CHANGELOG's own motivating case (hosted OpenAI repointed at a local
+  // endpoint, model tag unchanged) reports as matching. Worse, a partial update
+  // then mixes old and new vectors and STAMPS the result with the new
+  // fingerprint, so every later check vouches for the mixed store. Rebuilding
+  // is a one-time cost; laundering is permanent.
+  it("rebuilds when an embedding provider is named explicitly", () => {
+    setEnv({ LLMWIKI_EMBEDDING_PROVIDER: "ollama", LLMWIKI_EMBEDDING_MODEL: "bge-m3" });
+    expect(storeMatchesActiveEmbedding({ model: resolveEmbeddingModel() })).toBe(false);
+  });
+
+  it("rebuilds when an embeddings endpoint is overridden without naming a provider", () => {
+    setEnv({
+      LLMWIKI_PROVIDER: "openai",
+      LLMWIKI_EMBEDDING_PROVIDER: undefined,
+      OPENAI_EMBEDDINGS_BASE_URL: "http://localhost:8000/v1",
+    });
+    expect(storeMatchesActiveEmbedding({ model: resolveEmbeddingModel() })).toBe(false);
+  });
+
+  it("rebuilds when the whole OpenAI base URL is repointed", () => {
+    setEnv({
+      LLMWIKI_PROVIDER: "openai",
+      LLMWIKI_EMBEDDING_PROVIDER: undefined,
+      OPENAI_EMBEDDINGS_BASE_URL: undefined,
+      OPENAI_BASE_URL: "http://localhost:8000/v1",
+    });
+    expect(storeMatchesActiveEmbedding({ model: resolveEmbeddingModel() })).toBe(false);
+  });
+
+  it("still honours a fingerprint when one is present, override or not", () => {
+    // The rule above is a fallback for MISSING provenance, not a blanket
+    // rebuild: a stamped store already answers the question exactly.
+    setEnv({ LLMWIKI_EMBEDDING_PROVIDER: "openai", OPENAI_EMBEDDINGS_BASE_URL: "http://vllm-a:8000/v1" });
+    expect(storeMatchesActiveEmbedding({ fingerprint: resolveEmbeddingFingerprint() })).toBe(true);
   });
 });

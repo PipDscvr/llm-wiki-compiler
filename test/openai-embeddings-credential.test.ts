@@ -98,3 +98,53 @@ describe("no separate embeddings endpoint", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 });
+
+describe("the warning does not itself disclose a credential", () => {
+  // The warning exists to report a credential disclosure, so printing the
+  // endpoint verbatim would leak a second one into scrollback and CI logs.
+  it("strips userinfo from the printed endpoint", () => {
+    setEnv({ OPENAI_API_KEY: "sk-cloud" });
+    const { messages } = buildWithEndpoint("https://user:hunter2@embeddings.example.com/v1");
+    expect(messages.join("\n")).not.toContain("hunter2");
+    expect(messages.join("\n")).toContain("embeddings.example.com");
+  });
+
+  it("strips query-parameter values from the printed endpoint", () => {
+    setEnv({ OPENAI_API_KEY: "sk-cloud" });
+    const { messages } = buildWithEndpoint("https://embeddings.example.com/v1?api-key=sk-secret");
+    expect(messages.join("\n")).not.toContain("sk-secret");
+    // The parameter NAME stays: it identifies the endpoint without disclosing it.
+    expect(messages.join("\n")).toContain("api-key");
+  });
+});
+
+describe("a dedicated embeddings key with no separate endpoint", () => {
+  // The provider guard accepts OPENAI_EMBEDDINGS_API_KEY on its own. If the
+  // embeddings client is built only for a separate ENDPOINT, that key is
+  // dropped and embedding authenticates as the chat client's placeholder —
+  // startup validation passes and the failure resurfaces as a late 401.
+  it("honours the dedicated key rather than the chat placeholder", () => {
+    setEnv({ OPENAI_API_KEY: undefined });
+    const provider = new OpenAIProvider("gpt-4o", { embeddingsApiKey: "sk-embed" });
+    expect(embeddingsKeyOf(provider)).toBe("sk-embed");
+  });
+
+  it("prefers the dedicated key over a chat key that is set", () => {
+    setEnv({ OPENAI_API_KEY: "sk-cloud" });
+    const provider = new OpenAIProvider("gpt-4o", { embeddingsApiKey: "sk-embed" });
+    expect(embeddingsKeyOf(provider)).toBe("sk-embed");
+  });
+
+  it("stays on the chat base URL, since only the credential differs", () => {
+    setEnv({ OPENAI_API_KEY: undefined });
+    const provider = new OpenAIProvider("gpt-4o", { baseURL: LOCAL, embeddingsApiKey: "sk-embed" });
+    expect(Reflect.get(Reflect.get(provider, "embeddingsClient"), "baseURL")).toBe(LOCAL);
+  });
+
+  it("does not warn: a key with no separate endpoint is forwarded nowhere", () => {
+    setEnv({ OPENAI_API_KEY: "sk-cloud" });
+    const warn = vi.spyOn(output, "status").mockImplementation(() => {});
+    new OpenAIProvider("gpt-4o", { embeddingsApiKey: "sk-embed" });
+    expect(warn).not.toHaveBeenCalled();
+  });
+});

@@ -21,6 +21,7 @@ import {
 import { CONCEPTS_DIR, EMBEDDINGS_FILE, LLMWIKI_DIR } from "../src/utils/constants.js";
 import { hashChunkText, splitIntoChunks } from "../src/utils/retrieval.js";
 import { buildEmbeddingText } from "../src/utils/embeddings-pages.js";
+import { resolveEmbeddingFingerprint } from "../src/utils/embeddings-store.js";
 
 const aimock = useAimockLifecycle("context-cli");
 
@@ -192,15 +193,38 @@ interface SeedChunk {
   text: string;
 }
 
+/**
+ * The fingerprint the CLI subprocess will compute under `env`, produced by the
+ * real resolver rather than a hand-built string.
+ *
+ * `runCLI` spawns with `{ ...process.env, ...overrides }`, so applying the same
+ * overrides here reproduces exactly what the child resolves. A seeded store then
+ * stays valid on precisely the terms a production store does — including under
+ * an endpoint override, where an unstamped store is deliberately rejected.
+ */
+function fingerprintForEnv(env: NodeJS.ProcessEnv): string {
+  const saved = Object.keys(env).map((key) => [key, process.env[key]] as const);
+  Object.assign(process.env, env);
+  try {
+    return resolveEmbeddingFingerprint();
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
 /** Write a single-page v3 store (concepts/retrieval) with the given hashes/chunks. */
 async function writeV3Store(
   root: string,
-  spec: { model: string; vector: number[]; title: string; pageHash: string; chunks: SeedChunk[] },
+  spec: { model: string; vector: number[]; title: string; pageHash: string; chunks: SeedChunk[]; fingerprint?: string },
 ): Promise<void> {
   const at = "2026-05-24T00:00:00.000Z";
   const store = {
     version: 3,
     model: spec.model,
+    ...(spec.fingerprint ? { fingerprint: spec.fingerprint } : {}),
     dimensions: spec.vector.length,
     entries: [
       { pageId: "concepts/retrieval", title: spec.title, summary: "", embeddingTextHash: spec.pageHash, vector: spec.vector, updatedAt: at },
@@ -223,6 +247,7 @@ async function seedContentConsistentStore(
   title: string,
   body: string,
   vector: number[],
+  env: NodeJS.ProcessEnv,
 ): Promise<void> {
   await mkdir(path.join(root, CONCEPTS_DIR), { recursive: true });
   await writeFile(
@@ -234,6 +259,11 @@ async function seedContentConsistentStore(
     model: "text-embedding-3-small",
     vector,
     title,
+    // Stamped like a store the compiler actually wrote. aimock points
+    // OPENAI_BASE_URL at its own server, and an unstamped store under an
+    // endpoint override is rejected as unprovenanced — correctly, since its
+    // model name cannot say which server produced the vectors.
+    fingerprint: fingerprintForEnv(env),
     pageHash: hashChunkText(buildEmbeddingText({ title, summary: "" })),
     chunks: splitIntoChunks(body).map((text, chunkIndex) => ({ chunkIndex, contentHash: hashChunkText(text), text })),
   });
@@ -351,11 +381,12 @@ describe("`llmwiki context` — Slice 2 semantic success via aimock", () => {
     // rehydrates its text from the live body (S12), so the seeded store's hashes
     // MUST match the live page's content or the hit is dropped as stale.
     const body = "Live body about retrieval that the v3 pipeline rehydrates from disk.";
-    await seedContentConsistentStore(cwd, "Retrieval", body, vector);
+    const env = mockOpenAIEnv(handle);
+    await seedContentConsistentStore(cwd, "Retrieval", body, vector, env);
     const result = await runCLI(
       ["context", "totally unrelated question", "--json", "--top-chunks", "2"],
       cwd,
-      mockOpenAIEnv(handle),
+      env,
     );
     expectCLIExit(result, 0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;

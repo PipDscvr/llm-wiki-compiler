@@ -72,6 +72,34 @@ function isLoopbackEndpoint(url: string): boolean {
   }
 }
 
+/** Stands in for a credential removed from a URL before it is printed. */
+const REDACTED = "***";
+
+/**
+ * `url` with any embedded credential removed: userinfo replaced, and every query
+ * value replaced while its NAME is kept so the endpoint stays recognisable.
+ *
+ * An endpoint override is free-form, and both `https://user:pass@host/v1` and
+ * `https://host/v1?api-key=...` are ordinary ways to carry one. A warning whose
+ * whole purpose is to report a credential disclosure must not create a second
+ * one by pasting that URL into the terminal, CI logs, and pasted bug reports.
+ */
+function redactUrlCredentials(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const hasUserinfo = parsed.username !== "" || parsed.password !== "";
+    parsed.username = "";
+    parsed.password = "";
+    for (const name of [...parsed.searchParams.keys()]) parsed.searchParams.set(name, REDACTED);
+    const rendered = parsed.toString();
+    return hasUserinfo ? rendered.replace("//", `//${REDACTED}@`) : rendered;
+  } catch {
+    // Unparseable: the credential cannot be located, so drop the two places it
+    // is normally carried rather than echoing a string we cannot reason about.
+    return url.replace(/\/\/[^/@]*@/, `//${REDACTED}@`).replace(/\?.*$/, `?${REDACTED}`);
+  }
+}
+
 /**
  * Warn ONCE that the chat API key is being sent to a separate embeddings host.
  *
@@ -82,11 +110,13 @@ function isLoopbackEndpoint(url: string): boolean {
  */
 function warnForwardedKey(embeddingsBaseURL: string): void {
   if (isLoopbackEndpoint(embeddingsBaseURL) || warnedForwardedKeyHosts.has(embeddingsBaseURL)) return;
+  // Dedupe on the RAW url — two endpoints differing only in their credential are
+  // different destinations and each deserves its own warning.
   warnedForwardedKeyHosts.add(embeddingsBaseURL);
   output.status(
     "!",
     output.warn(
-      `Sending OPENAI_API_KEY to the embeddings endpoint ${embeddingsBaseURL}. ` +
+      `Sending OPENAI_API_KEY to the embeddings endpoint ${redactUrlCredentials(embeddingsBaseURL)}. ` +
       `Set OPENAI_EMBEDDINGS_API_KEY to use a different credential there.` +
       (embeddingsBaseURL.startsWith("http://") ? " That endpoint is plaintext http." : ""),
     ),
@@ -132,13 +162,28 @@ export class OpenAIProvider implements LLMProvider {
       baseURL: options.baseURL ?? null,
       timeout,
     });
-    this.embeddingsClient = options.embeddingsBaseURL
-      ? new OpenAI({
-          apiKey: this.resolveEmbeddingsKey(options, resolvedKey),
-          baseURL: options.embeddingsBaseURL,
-          timeout,
-        })
-      : this.client;
+    this.embeddingsClient = this.buildEmbeddingsClient(options, resolvedKey, timeout);
+  }
+
+  /**
+   * The client serving embeddings: the chat client itself, unless a separate
+   * endpoint OR a separate credential is configured.
+   *
+   * Keying this on the endpoint alone silently discarded `embeddingsApiKey`,
+   * which the provider guard accepts on its own. Embeddings then authenticated
+   * as the chat client — i.e. as PLACEHOLDER_API_KEY when no chat key was set —
+   * so validation passed and the failure resurfaced much later as a 401 from
+   * inside the embed call.
+   */
+  private buildEmbeddingsClient(options: OpenAIProviderOptions, chatKey: string, timeout: number): OpenAI {
+    if (!options.embeddingsBaseURL && !options.embeddingsApiKey) return this.client;
+    return new OpenAI({
+      apiKey: this.resolveEmbeddingsKey(options, chatKey),
+      // Falls back to the chat base URL: when only the credential differs, the
+      // endpoint is unchanged.
+      baseURL: options.embeddingsBaseURL ?? options.baseURL ?? null,
+      timeout,
+    });
   }
 
   /**
@@ -153,7 +198,10 @@ export class OpenAIProvider implements LLMProvider {
    */
   private resolveEmbeddingsKey(options: OpenAIProviderOptions, chatKey: string): string {
     if (options.embeddingsApiKey) return options.embeddingsApiKey;
-    if (chatKey !== PLACEHOLDER_API_KEY) warnForwardedKey(options.embeddingsBaseURL!);
+    // Only a separate ENDPOINT can forward the key to another operator. A
+    // dedicated key with no endpoint returns above, so there is nothing to warn
+    // about — and nothing to assert a base URL on.
+    if (options.embeddingsBaseURL && chatKey !== PLACEHOLDER_API_KEY) warnForwardedKey(options.embeddingsBaseURL);
     return chatKey;
   }
 

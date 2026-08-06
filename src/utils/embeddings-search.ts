@@ -103,8 +103,9 @@ export async function findRelevantChunks(
 
 /**
  * Read the embedding store, returning null when it is missing, empty (per the
- * caller's predicate), or built with a stale model. Centralises the "is this
- * store usable for semantic lookup right now?" check.
+ * caller's predicate), or built by a different embedding configuration —
+ * another provider, endpoint, or model. Centralises the "is this store usable
+ * for semantic lookup right now?" check.
  */
 async function loadActiveStore(
   root: string,

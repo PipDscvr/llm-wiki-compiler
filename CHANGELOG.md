@@ -15,13 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Changing the embedding backend invalidates the embedding index. It records the provider, model, and endpoint that produced its vectors, so the next `llmwiki compile` re-embeds every page. The model name alone is not enough to tell two backends apart — a local server answering to `text-embedding-3-small` and cloud OpenAI tag a store identically while producing vectors that do not share a space, and nothing downstream would notice. Moving between `anthropic` and `claude-agent` does not rebuild: both embed via Voyage with the same model.
 
-  Set `OPENAI_EMBEDDINGS_API_KEY` to give a separate embeddings endpoint its own credential. Without it the embeddings client reuses `OPENAI_API_KEY`, which sends your cloud OpenAI key to whatever host `OPENAI_EMBEDDINGS_BASE_URL` names; llmwiki now warns when that happens, except on `localhost`.
+  Set `OPENAI_EMBEDDINGS_API_KEY` to give a separate embeddings endpoint its own credential. Without it the embeddings client reuses `OPENAI_API_KEY`, which sends your cloud OpenAI key to whatever host `OPENAI_EMBEDDINGS_BASE_URL` names; llmwiki now warns when that happens, except on `localhost`. The warning redacts any credential carried in the endpoint URL itself, and the endpoint is hashed rather than stored verbatim in `.llmwiki/embeddings.json`.
+
+  An index written before llmwiki recorded the endpoint carries only its model name. It is preserved while you run without `LLMWIKI_EMBEDDING_PROVIDER` or an endpoint override, so upgrading does not re-embed an existing project; under either override the model name cannot establish where the vectors came from, so the next compile rebuilds the index once and records the full configuration from then on.
 
 ### Fixed
 
 - **Embedding store dimensions after a full rebuild** — when the embedding model changed, the rebuilt store carried the previous vector dimension forward, so switching to a provider whose vectors have a different dimension failed validation on every subsequent compile and never recovered. The rebuilt store now takes its dimension from the newly written vectors.
 
 - **A rebuilt-but-empty embedding index broke every query** — a rebuild with nothing eligible to embed persisted a store declaring `dimensions: 0`, and each later query asserted its query vector against that zero and threw. No compile rewrote the store, so it never recovered. A non-positive stored dimension is now treated as unknown, and a read with no candidates returns before embedding the query at all — which also drops a provider round-trip that could only be scored against an empty pool.
+
+- **`OPENAI_EMBEDDINGS_API_KEY` was accepted at startup and then ignored** — the embeddings client was built only when `OPENAI_EMBEDDINGS_BASE_URL` was also set, so a configuration supplying just the dedicated key passed validation and then authenticated with the chat client's placeholder credential, failing later as a 401. The dedicated client is now built whenever either the endpoint or the key is configured.
 
 - **A misconfigured `LLMWIKI_EMBEDDING_PROVIDER` failed late and inconsistently** — validation ran inside the embedding call, so the same typo made `llmwiki query` exit 1, made context retrieval degrade, and made compile warn, retry, and eventually quarantine the affected pages. An unusable name also fell through to the default model and was reported as "the index was built with a different model", which described the wrong problem. The provider guard now checks it at startup, before any work begins, alongside the chat provider's credentials.
 

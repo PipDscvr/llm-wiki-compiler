@@ -114,7 +114,8 @@ export async function loadEmbeddingsForContext(root: string): Promise<EmbeddingL
  * Parse + gate the on-disk store READ-ONLY. Returns a usable v3 store, or a
  * degraded outcome (`store: null`) with a structured warning when the store is
  * not v3 (older version — the writer has not flipped yet), failed the search
- * gate (corrupt vectors / over-cap), is stale-model, or is absent.
+ * gate (corrupt vectors / over-cap), was built by a different embedding
+ * configuration (provider, endpoint, or model), or is absent.
  */
 async function gateActiveStore(root: string): Promise<EmbeddingLoadOutcome> {
   const raw = await readConfinedRaw(root);

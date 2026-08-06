@@ -35,6 +35,8 @@ This matters because vectors from different backends are not comparable even whe
 
 Moving between `anthropic` and `claude-agent` does **not** rebuild the index. Both send embeddings to Voyage with the same model, so their vectors are interchangeable.
 
+An index built before llmwiki recorded the endpoint carries only its model name, which cannot distinguish those backends. Such an index is kept as-is while you run without `LLMWIKI_EMBEDDING_PROVIDER` or an endpoint override, so upgrading does not re-embed your project. With either override active, the next `llmwiki compile` rebuilds it once and records the full configuration from then on.
+
 ---
 
 ## Anthropic
@@ -56,6 +58,7 @@ Either `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` satisfies authentication - 
 | `OPENAI_API_KEY` | Yes (for `openai` provider) | API key. For local servers that ignore auth, any value works (e.g. `sk-local`) |
 | `OPENAI_BASE_URL` | For custom or local endpoints | Base URL for chat and tool calls. **Must include `/v1`** |
 | `OPENAI_EMBEDDINGS_BASE_URL` | No | Separate base URL for embeddings requests. When unset, embeddings use the same client and base URL as chat |
+| `OPENAI_EMBEDDINGS_API_KEY` | No | Credential for embeddings requests. When unset, embeddings reuse `OPENAI_API_KEY` - set this whenever the embeddings endpoint belongs to someone else |
 
 ---
 
