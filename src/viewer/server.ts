@@ -350,7 +350,26 @@ function handleApiPages(res: ServerResponse, snapshot: ViewerSnapshot): void {
     recentPages: snapshot.recentPages,
     pages: snapshot.pages.map(pageListRow),
     updatedAt: snapshot.generatedAt,
+    ...profileProblemFields(snapshot.profile),
   });
+}
+
+/**
+ * The profile collector's problems, serialised ONLY when there is at least one.
+ *
+ * The data exists so a non-default project with a bad entity directory or an
+ * invalid entity page is never reported as silently healthy — but it stopped at
+ * the snapshot until now, so the header could still read ALL CLEAR over a broken
+ * project. Omitted-when-clean keeps a default-profile envelope byte-identical and
+ * lets the client treat absence as "nothing wrong" without a second flag.
+ *
+ * Both fields ship together because `problems` is CAPPED (`PROFILE_PROBLEM_CAP`)
+ * while `problemTotal` is the true count: without the total, a truncated list
+ * would read as the whole set.
+ */
+function profileProblemFields(profile: ViewerSnapshot["profile"]): Record<string, unknown> {
+  if (!profile?.problems?.length) return {};
+  return { profileProblems: profile.problems, profileProblemTotal: profile.problemTotal };
 }
 
 /**

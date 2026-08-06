@@ -12,8 +12,17 @@ import { makeTempRoot } from "./fixtures/temp-root.js";
 import { writePage } from "./fixtures/write-page.js";
 import { useViewerProcessLifecycle } from "./fixtures/run-cli-server.js";
 import { CONCEPTS_DIR } from "../src/utils/constants.js";
+import { seedSampleNotesProject, writeMarkdownPage } from "./fixtures/profile-fixtures.js";
 
 const { start: startViewer } = useViewerProcessLifecycle();
+
+/** One collector problem as the envelope serialises it. */
+interface ProblemView {
+  kind: string;
+  entityType?: string;
+  path?: string;
+  message: string;
+}
 
 interface Envelope {
   profileId: string;
@@ -21,6 +30,8 @@ interface Envelope {
   graph: { nodeCount: number; edgeCount: number; danglingCount: number };
   sourceFilenames: string[];
   pages: { citationCount: number; unresolvedCitationCount: number }[];
+  profileProblems?: ProblemView[];
+  profileProblemTotal?: number;
 }
 
 /** Seed a one-page project whose body carries a citation and a dangling link. */
@@ -71,5 +82,45 @@ describe("/api/pages envelope", () => {
     const env = await fetchEnvelope(await seedProject());
     expect(env.pages[0].citationCount).toBe(1);
     expect(env.pages[0].unresolvedCitationCount).toBe(1);
+  });
+
+  it("omits the profile problem fields for a healthy default-profile project", async () => {
+    const env = await fetchEnvelope(await seedProject());
+    expect(env.profileProblems).toBeUndefined();
+    expect(env.profileProblemTotal).toBeUndefined();
+  });
+});
+
+/** Seed a non-default `notes` project whose second page omits its required `title`. */
+async function seedBrokenProfileProject(): Promise<string> {
+  const root = await makeTempRoot("viewer-envelope-profile");
+  await seedSampleNotesProject(root);
+  await writeMarkdownPage(root, "wiki/notes", "no-title", "---\nslug: no-title\n---\nNo title.");
+  return root;
+}
+
+describe("/api/pages envelope — profile collector problems", () => {
+  it("serialises the collector's problems and their true total", async () => {
+    const env = await fetchEnvelope(await seedBrokenProfileProject());
+    expect(env.profileProblems?.length).toBeGreaterThan(0);
+    expect(env.profileProblemTotal).toBe(env.profileProblems?.length);
+    expect(env.profileProblems?.[0].message).toContain("title");
+  });
+
+  /**
+   * The docstring on `ProfileSummaryBlock.problems` promises project-relative
+   * paths, but a docstring is not a guarantee: an absolute path already leaked
+   * through `/api/health` once on this branch. Assert it at the wire, where the
+   * value crosses into the DOM.
+   */
+  it("never puts an absolute or escaping path on the wire", async () => {
+    const root = await seedBrokenProfileProject();
+    const env = await fetchEnvelope(root);
+    for (const view of env.profileProblems ?? []) {
+      if (view.path === undefined) continue;
+      expect(path.isAbsolute(view.path)).toBe(false);
+      expect(view.path.startsWith("..")).toBe(false);
+      expect(view.path).not.toContain(root);
+    }
   });
 });

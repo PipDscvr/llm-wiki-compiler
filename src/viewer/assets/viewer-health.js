@@ -6,7 +6,14 @@
  * CONTENTS strip of inert counts (deliberately one divided panel, not five
  * cards — five equal tiles gave a zero the same weight as a real figure),
  * then a two-column grid whose wide left side is the Lint panel and whose
- * right side stacks Freshness, Traceability, and the cache note.
+ * right side stacks the profile problems panel, Freshness, Traceability, and
+ * the cache note.
+ *
+ * The profile problems panel leads that column, and only exists when the
+ * profile collector actually reported something. Its data was purpose-built to
+ * stop a project with a bad entity directory or an invalid entity page reading
+ * as healthy, so burying it under two panels that report on something else
+ * would waste the one signal that says the project is broken.
  *
  * Both bootstrap payloads are needed: `/api/health` carries the counts and
  * the lint cache; `/api/pages` carries per-page freshness and the citation
@@ -115,6 +122,7 @@ function buildContentsModel(health, envelope) {
   const citations = citationTotals(pages);
   return {
     ...healthCounts(health),
+    profile: profileProblemsOf(envelope),
     totalCitations: citations.total,
     citedCitations: citations.total - citations.unresolved,
     unresolved: citations.unresolved,
@@ -130,6 +138,23 @@ function buildContentsModel(health, envelope) {
     // the first.
     unverifiedPages: conceptPages.length - countVerified(conceptPages),
   };
+}
+
+/**
+ * The profile collector's problems and their TRUE total.
+ *
+ * The list is CAPPED on the wire (`PROFILE_PROBLEM_CAP`, src/profile/block.ts)
+ * while the total is the real figure, so the two are carried together: the
+ * panel's badge and its "showing N of M" notice both speak from the total, and
+ * a truncated list can never present itself as the whole set.
+ *
+ * A default-profile project carries neither field, which reads as an empty
+ * list — the panel then renders nothing at all, exactly as before this input
+ * reached the client.
+ */
+function profileProblemsOf(envelope) {
+  const { profileProblems = [], profileProblemTotal } = envelope ?? {};
+  return { problems: profileProblems, total: profileProblemTotal ?? profileProblems.length };
 }
 
 /** Count the pages whose freshness status is one the compiler actually resolved. */
@@ -217,13 +242,86 @@ function buildContentsCell(column, model) {
   return cell;
 }
 
-/** Build the right-hand column: Freshness, Traceability, then the cache note. */
+/** Build the right-hand column: profile problems, Freshness, Traceability, cache note. */
 function buildRightColumn(model) {
   const column = el("div", "health-column");
+  const problems = buildProfileProblemsPanel(model.profile);
+  if (problems) column.appendChild(problems);
   column.appendChild(buildFreshnessPanel(model));
   column.appendChild(buildTraceabilityPanel(model));
   column.appendChild(buildCacheNote());
   return column;
+}
+
+/**
+ * Build the profile problems panel, or return null when the collector found
+ * nothing to report.
+ *
+ * Nothing renders in the clean case on purpose. An empty panel headed "Profile
+ * problems" would be a sixth count on a screen whose CONTENTS strip already
+ * promises that counts are not problems, and a default-profile project has no
+ * collector output to be empty about in the first place.
+ *
+ * @param {{problems: object[], total: number}} profile - Capped list and true total.
+ * @returns {HTMLElement|null}
+ */
+function buildProfileProblemsPanel({ problems, total }) {
+  if (problems.length === 0) return null;
+  const panel = el("section", "panel profile-panel");
+  panel.dataset.profilePanel = "";
+  panel.appendChild(buildProfileHead(total));
+  const body = el("div", "panel-body profile-body");
+  for (const problem of problems) body.appendChild(buildProfileProblemRow(problem));
+  panel.appendChild(body);
+  const notice = buildCappedNotice(problems.length, total);
+  if (notice) panel.appendChild(notice);
+  return panel;
+}
+
+/**
+ * Build the panel head: the title beside a warn-toned badge carrying the TRUE
+ * count, reusing the same `.freshness-pill` badge the Freshness panel wears so
+ * the two read as peers rather than as two unrelated inventions.
+ */
+function buildProfileHead(total) {
+  const head = el("div", "panel-head");
+  head.appendChild(el("span", "panel-title", "Profile problems"));
+  head.appendChild(el("span", "freshness-pill is-warn", `${total} ${total === 1 ? "PROBLEM" : "PROBLEMS"}`));
+  return head;
+}
+
+/**
+ * Build one problem row: what is wrong (the collector's kind) beside where it
+ * applies, with the collector's own message below.
+ *
+ * "Where" is the project-relative page path when the problem names a page and
+ * the entity type when it does not — a directory-level problem (a missing or
+ * malformed entity directory) carries no path at all, and a row naming no place
+ * would leave the reader with nowhere to look.
+ */
+function buildProfileProblemRow(problem) {
+  const row = el("div", "profile-problem");
+  const head = el("div", "profile-problem-head");
+  head.appendChild(el("span", "profile-problem-kind", problem.kind));
+  const where = problem.path ?? problem.entityType;
+  if (where) head.appendChild(el("span", "profile-problem-where", where));
+  row.appendChild(head);
+  row.appendChild(el("div", "profile-problem-message", problem.message));
+  return row;
+}
+
+/**
+ * Say how many of how many when the wire list was truncated, and nothing at
+ * all when it is the whole set.
+ *
+ * The envelope caps the list (`PROFILE_PROBLEM_CAP`, src/profile/block.ts) but
+ * always sends the true total, so silence here would let a capped list read as
+ * the complete one — the same failure the Lint table's "other · N rules" row
+ * and `/api/reviews`' "Showing 200 of 253" each already avoid.
+ */
+function buildCappedNotice(shown, total) {
+  if (shown >= total) return null;
+  return el("div", "profile-footer", `Showing ${shown} of ${plural(total, "problem")}.`);
 }
 
 /** Build the Freshness panel: a status badge, one bar per page, then a sentence. */

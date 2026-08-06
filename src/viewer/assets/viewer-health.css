@@ -314,6 +314,79 @@
 }
 .lint-action:hover, .lint-action:focus-visible { color: var(--warn-surface); opacity: 0.88; }
 
+/* ---- Profile problems panel ---- */
+
+/* Warm framing unconditionally, unlike `.lint-panel` — which only tints once
+ * it has findings. This panel is not rendered at all when the collector found
+ * nothing, so its mere presence already means "something is wrong" and a
+ * neutral surface would understate it. */
+.profile-panel {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  overflow: hidden;
+}
+.profile-panel .panel-head { border-bottom-color: var(--warn-divider); }
+
+/* Overrides the column's shared 16px 17px body padding: rows carry their own
+ * vertical gutter and full-bleed dividers, so the body pads horizontally only. */
+.health-column .profile-panel .panel-body { padding: 0; }
+
+/* Rules BETWEEN rows only — the trailing edge is the panel's own border, or
+ * the footer band's top border when the list was capped. */
+.profile-problem { padding: 11px 17px; border-bottom: 1px solid var(--warn-divider-soft); }
+.profile-problem:last-child { border-bottom: none; }
+
+.profile-problem-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 5px;
+}
+
+/* Mono, matching the Lint table's rule names: both are stable machine
+ * identifiers, not prose. --warn rather than --danger keeps one warm red on
+ * the screen — --danger is spent on the Lint bar's top-ranked rule.
+ *
+ * `flex: none` so the PATH beside it is the item that gives way: a kind is a
+ * fixed vocabulary the reader matches on sight, and hyphenating it across two
+ * lines ("field-" / "violation") reads as two words rather than one token. */
+.profile-problem-kind {
+  font: 500 11.5px/1 var(--font-mono);
+  color: var(--warn);
+  flex: none;
+  white-space: nowrap;
+}
+
+/* The path (or, for a directory-level problem, the entity type). Truncates
+ * rather than wraps so a deep path cannot push the row's two lines apart;
+ * `direction: rtl` keeps the FILENAME visible when it does, since the leading
+ * directories are the part a reader can afford to lose. */
+.profile-problem-where {
+  font: 400 11px/1 var(--font-mono);
+  color: var(--fg-faint);
+  min-width: 0;
+  direction: rtl;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The collector's own sentence. Wraps freely — it is the one part of the row
+ * that says what actually went wrong, so truncating it would defeat the panel. */
+.profile-problem-message { font: 400 12.5px/1.5 var(--font-sans); color: var(--warn-muted); }
+
+/* The "showing N of M" band, sharing the Lint footer's surface treatment
+ * because it reports the same class of fact: this list is not everything. */
+.profile-footer {
+  padding: 11px 17px;
+  border-top: 1px solid var(--warn-divider);
+  background: var(--warn-surface);
+  font: 400 11.5px/1.5 var(--font-sans);
+  color: var(--warn-muted);
+}
+
 /* ---- Freshness panel ---- */
 
 /* Scoped to this column, NOT a bare `.panel-body` rule: that class is shared

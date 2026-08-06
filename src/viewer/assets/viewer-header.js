@@ -74,13 +74,20 @@ function renderVerdictPill(envelope, lint) {
  *
  * Precedence, highest first:
  *   1. Attention — something measured is wrong (lint findings, stale or
- *      orphaned pages).
+ *      orphaned pages, profile collector problems).
  *   2. Unmeasured — a check could not run at all, so its result is unknown.
  *   3. Clear — everything was measured and nothing is wrong.
  *
  * Attention deliberately outranks unmeasured: a wiki with known errors AND
  * freshness that could not be computed is attention-worthy, not merely
  * unknown, and reporting the weaker fact would bury the stronger one.
+ *
+ * Profile collector problems sit in rule 1 — NOT rule 2 — for that same
+ * reason. A malformed entity directory or an invalid entity page is a
+ * measured, confirmed defect; the collector ran and found it. It is only
+ * carried on the envelope when non-empty, and the whole block is absent for a
+ * default-profile project, so absence stays exactly what it was before this
+ * input existed: not evidence of anything.
  *
  * Rule 2 exists because the freshness-only pill this replaced could not tell
  * the two zeroes apart. A missing or corrupt state.json makes every page
@@ -101,7 +108,9 @@ function renderVerdictPill(envelope, lint) {
  */
 function wikiVerdict(envelope, lint) {
   const findings = lintTotal(lint);
-  if (isAttentionWorthy(envelope.counts, findings)) return VERDICT_ATTENTION;
+  if (isAttentionWorthy(envelope.counts, findings, profileProblemCount(envelope))) {
+    return VERDICT_ATTENTION;
+  }
   const unmeasured = unmeasuredLabels(envelope.stateStatus, findings);
   if (unmeasured.length === 0) return VERDICT_CLEAR;
   return { tone: TONE_UNMEASURED, text: unmeasured.join(" · ") };
@@ -116,8 +125,21 @@ function wikiVerdict(envelope, lint) {
  * this wants: a count that was never measured is not evidence of a problem —
  * {@link unmeasuredLabels} is what speaks for those.
  */
-function isAttentionWorthy(counts, findings) {
-  return [findings, counts.stale, counts.orphaned].some((count) => count > 0);
+function isAttentionWorthy(counts, findings, profileProblems) {
+  return [findings, counts.stale, counts.orphaned, profileProblems].some((count) => count > 0);
+}
+
+/**
+ * How many problems the profile collector reported.
+ *
+ * `profileProblems` is a CAPPED list, so `profileProblemTotal` — the true
+ * count — is read first; the list length is only a fallback for a payload that
+ * somehow carried one without the other. A default-profile project sends
+ * neither key, and 0 is the correct reading of that: absent means the collector
+ * had nothing to report, not that it never ran.
+ */
+function profileProblemCount(envelope) {
+  return envelope.profileProblemTotal ?? envelope.profileProblems?.length ?? 0;
 }
 
 /**

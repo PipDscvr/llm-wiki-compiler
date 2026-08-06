@@ -1,11 +1,13 @@
 /**
- * DOM-level tests for the `#/health` route's right-hand column: the
- * Freshness panel, the Traceability meter, and the cache note.
+ * DOM-level tests for the `#/health` route's right-hand column: the profile
+ * problems panel, the Freshness panel, the Traceability meter, and the cache
+ * note.
  *
- * Both panels project `/api/pages` rather than `/api/health` — freshness is
- * per-page (one bar each, coloured by that page's own status) and
- * traceability is the citation totals summed across pages — so these tests
- * drive the page rows, not the health counts.
+ * Every panel here projects `/api/pages` rather than `/api/health` — freshness
+ * is per-page (one bar each, coloured by that page's own status), traceability
+ * is the citation totals summed across pages, and the collector's problems ride
+ * the same snapshot envelope — so these tests drive the page rows and the
+ * envelope's profile fields, not the health counts.
  */
 
 import { describe, expect, it } from "vitest";
@@ -117,6 +119,67 @@ describe("traceability panel — cited citations as a share of all citations", (
     expect(textOf(main, ".trace-value")).toBe("100%");
     expect(textOf(main, ".trace-detail")).toBe("0 / 0 citations");
     expect(textOf(main, ".trace-note")).toBe("No citations recorded yet.");
+  });
+});
+
+/** One collector problem, in the shape `/api/pages` serialises it. */
+function problem(overrides: Payload = {}): Payload {
+  return {
+    kind: "field-violation",
+    entityType: "notes",
+    path: "wiki/notes/a.md",
+    message: 'missing required field "title"',
+    ...overrides,
+  };
+}
+
+/** Render the health route over an envelope reporting `problems` out of `total`. */
+function withProblems(problems: Payload[], total = problems.length): Promise<HTMLElement> {
+  const overrides = { profileProblems: problems, profileProblemTotal: total };
+  return renderHealthRoute(CLEAN, pagesEnvelope([], overrides));
+}
+
+/** Read every problem row's trimmed text, in render order. */
+function rowTexts(main: HTMLElement): string[] {
+  return [...main.querySelectorAll(".profile-problem")].map((n) => n.textContent?.trim() ?? "");
+}
+
+describe("profile problems panel — what the collector found, and where", () => {
+  it("stays absent for a project the collector found nothing wrong with", async () => {
+    const main = await withPages([conceptPage("a")]);
+    expect(main.querySelector("[data-profile-panel]")).toBeNull();
+  });
+
+  it("renders one row per problem, naming what is wrong and where", async () => {
+    const main = await withProblems([problem(), problem({ path: "wiki/notes/b.md" })]);
+    expect(rowTexts(main)).toHaveLength(2);
+    expect(textOf(main, ".profile-problem-kind")).toBe("field-violation");
+    expect(textOf(main, ".profile-problem-where")).toBe("wiki/notes/a.md");
+    expect(textOf(main, ".profile-problem-message")).toContain('missing required field "title"');
+  });
+
+  it("badges the problem count so the panel head states the scale", async () => {
+    const main = await withProblems([problem(), problem(), problem()]);
+    const badge = main.querySelector("[data-profile-panel] .freshness-pill");
+    expect(badge?.textContent).toBe("3 PROBLEMS");
+    expect(badge?.className).toContain("is-warn");
+  });
+
+  it("falls back to the entity type when a directory-level problem names no page", async () => {
+    const dirProblem = { kind: "invalid-directory", entityType: "notes", message: "not a directory" };
+    const main = await withProblems([dirProblem]);
+    expect(textOf(main, ".profile-problem-where")).toBe("notes");
+  });
+
+  it("says how many of how many when the list was capped", async () => {
+    const main = await withProblems([problem(), problem()], 253);
+    expect(rowTexts(main)).toHaveLength(2);
+    expect(textOf(main, ".profile-footer")).toBe("Showing 2 of 253 problems.");
+  });
+
+  it("shows no such notice when the list is the whole set", async () => {
+    const main = await withProblems([problem(), problem()]);
+    expect(main.querySelector(".profile-footer")).toBeNull();
   });
 });
 

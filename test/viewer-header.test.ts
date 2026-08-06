@@ -20,13 +20,28 @@ import { jsonResponse, mountViewerDom, type FetchResponder } from "./fixtures/vi
 /** Lint cache shape the verdict reads; `null` means lint has never run. */
 type Lint = { errors: number; warnings: number } | null;
 
+/** One profile-collector problem, in the shape `/api/pages` serialises. */
+type ProfileProblem = { kind: string; message: string; path?: string };
+
 /** What the two bootstrap payloads report for one header scenario. */
 interface Scenario {
   stale?: number;
   orphaned?: number;
   stateStatus?: string;
   lint?: Lint;
+  /**
+   * Collector problems on the `/api/pages` envelope. A default-profile project
+   * sends NEITHER key, which is why both are optional here: the absent case is
+   * the control, and it must keep producing the pre-existing verdict.
+   */
+  profileProblems?: ProfileProblem[];
+  profileProblemTotal?: number;
 }
+
+/** A single field violation — enough to prove a project is not healthy. */
+const ONE_PROFILE_PROBLEM: ProfileProblem[] = [
+  { kind: "field-violation", path: "wiki/notes/a.md", message: 'missing required field "title"' },
+];
 
 /** Everything measured, nothing wrong — the ALL CLEAR baseline every case varies from. */
 const CLEAN: Scenario = {
@@ -36,8 +51,15 @@ const CLEAN: Scenario = {
   lint: { errors: 0, warnings: 0 },
 };
 
+/** The capped-list/true-total pair, omitted entirely when a scenario declares no problems. */
+function profileFields({ profileProblems, profileProblemTotal }: Scenario) {
+  if (!profileProblems) return {};
+  return { profileProblems, profileProblemTotal: profileProblemTotal ?? profileProblems.length };
+}
+
 /** Build an `/api/pages` envelope carrying a scenario's counts and state status. */
-function envelopeFor({ stale = 0, orphaned = 0, stateStatus = "ok" }: Scenario) {
+function envelopeFor(scenario: Scenario) {
+  const { stale = 0, orphaned = 0, stateStatus = "ok" } = scenario;
   return {
     project: { title: "my-llm-wiki", rootName: "my-llm-wiki" },
     stateStatus,
@@ -52,6 +74,7 @@ function envelopeFor({ stale = 0, orphaned = 0, stateStatus = "ok" }: Scenario) 
     recentPages: [],
     pages: [],
     updatedAt: "2026-08-04T10:14:00.000Z",
+    ...profileFields(scenario),
   };
 }
 
@@ -107,6 +130,43 @@ describe("header verdict pill — measured problems win", () => {
 
   it("needs attention when pages are orphaned", async () => {
     expect((await verdictOf({ ...CLEAN, orphaned: 2 })).text).toBe("NEEDS ATTENTION");
+  });
+});
+
+/**
+ * The profile collector's problems are the one input purpose-built to stop a
+ * broken project reading as healthy — a bad entity directory or an invalid
+ * entity page is a KNOWN defect, so it belongs in the attention tier beside
+ * lint, not in the unmeasured tier.
+ */
+describe("header verdict pill — profile collector problems", () => {
+  it("needs attention when the collector reported a problem", async () => {
+    const verdict = await verdictOf({ ...CLEAN, profileProblems: ONE_PROFILE_PROBLEM });
+    expect(verdict.text).toBe("NEEDS ATTENTION");
+    expect(verdict.tone).toContain("is-warn");
+  });
+
+  it("never reads all clear while a collector problem stands", async () => {
+    const verdict = await verdictOf({ ...CLEAN, profileProblems: ONE_PROFILE_PROBLEM });
+    expect(verdict.text).not.toBe("ALL CLEAR");
+    expect(verdict.tone).not.toContain("is-ok");
+  });
+
+  it("outranks the unmeasured tier when freshness could not be computed too", async () => {
+    const scenario = { ...CLEAN, stateStatus: "missing", profileProblems: ONE_PROFILE_PROBLEM };
+    const verdict = await verdictOf(scenario);
+    expect(verdict.text).toBe("NEEDS ATTENTION");
+    expect(verdict.tone).toContain("is-warn");
+  });
+
+  it("warns on a directory-level problem, which names no page at all", async () => {
+    const problem = { kind: "invalid-directory", message: "wiki/notes is not a directory" };
+    expect((await verdictOf({ ...CLEAN, profileProblems: [problem] })).text).toBe("NEEDS ATTENTION");
+  });
+
+  it("leaves a default-profile project untouched — an absent block is not a problem", async () => {
+    expect((await verdictOf(CLEAN)).text).toBe("ALL CLEAR");
+    expect((await verdictOf({ ...CLEAN, stateStatus: "missing" })).text).toBe("FRESHNESS UNVERIFIED");
   });
 });
 
