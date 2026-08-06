@@ -364,11 +364,20 @@ function traceNote(model) {
   return `${model.unresolved} ${noun} at no source file — the rest resolve to a real span.`;
 }
 
-/** Build the dim note explaining that lint figures come from a cache. */
+/**
+ * Build the dim note explaining that lint figures come from a cache.
+ *
+ * A reload is enough, not a restart: `.llmwiki/last-lint.json` is the one
+ * file the viewer re-reads per request (see `buildHealthResponse` in
+ * health.ts), so the next render of this page already picks up a fresh lint
+ * run. Page and graph data ARE frozen at startup, but saying so here would
+ * attach a true caveat to the wrong fact and send the reader to restart a
+ * server that did not need it.
+ */
 function buildCacheNote() {
   const note = el("div", "cache-note");
   note.appendChild(el("span", undefined, "Lint results are cached from the last run. Re-run "));
   note.appendChild(el("code", undefined, "llmwiki lint"));
-  note.appendChild(el("span", undefined, " and restart the viewer to refresh."));
+  note.appendChild(el("span", undefined, " and reload this page to refresh."));
   return note;
 }

@@ -7,7 +7,10 @@
  *
  * Consumers (e.g., the upcoming viewer's /api/health endpoint) read the cache
  * to surface lint counts without re-running lint per request. A missing or
- * malformed cache reads as null, which means "lint has not been run yet."
+ * malformed cache reads as null, which means "lint has not been run yet." The
+ * one exception is a per-rule breakdown that contradicts the totals beside it:
+ * that field alone is dropped, because the totals are still trustworthy and
+ * "lint has not been run yet" would be a worse lie than an absent breakdown.
  */
 
 import { mkdir, readFile } from "fs/promises";
@@ -50,7 +53,9 @@ export interface LintCacheEntry {
   /**
    * Per-rule breakdown of error/warning findings, one row per rule that
    * fired, sorted by count descending. Absent when the run had no
-   * error/warning findings (a clean run), and on pre-upgrade caches.
+   * error/warning findings (a clean run), on pre-upgrade caches, and when a
+   * persisted breakdown failed to reconcile with the totals above it (see
+   * {@link readLintCache}).
    */
   rules?: LintRuleAggregate[];
 }
@@ -167,6 +172,10 @@ export async function writeLintCache(root: string, summary: LintSummary): Promis
  * Read the cached lint summary, returning null for missing or malformed files.
  * Validation is strict: every field must have its expected type, otherwise the
  * cache is treated as absent so callers do not surface garbage counts.
+ *
+ * A schema-valid `rules` breakdown that contradicts the totals it was derived
+ * from is dropped on its own, leaving the entry otherwise intact — see
+ * {@link rulesAgreeWithTotals}.
  */
 export async function readLintCache(root: string): Promise<LintCacheEntry | null> {
   let raw: string;
@@ -182,13 +191,43 @@ export async function readLintCache(root: string): Promise<LintCacheEntry | null
     return null;
   }
   if (!isValidEntry(parsed)) return null;
-  return {
+  const entry: LintCacheEntry = {
     warnings: parsed.warnings,
     errors: parsed.errors,
     at: parsed.at,
     ...(parsed.freshness !== undefined ? { freshness: parsed.freshness } : {}),
-    ...(parsed.rules !== undefined ? { rules: parsed.rules } : {}),
   };
+  const rules = parsed.rules;
+  return rules !== undefined && rulesAgreeWithTotals(rules, entry) ? { ...entry, rules } : entry;
+}
+
+/**
+ * Whether a breakdown reconciles with the headline counts beside it.
+ *
+ * {@link writeLintCache} guarantees all three checks by construction: the rows
+ * partition exactly the error/warning findings the totals count, and both
+ * `fileCount` and `topFileCount` are derived from that same partition. A
+ * violation therefore means the file was hand-edited or corrupted — the same
+ * threat model the type validation above defends against.
+ *
+ * The failure is partial, not total, because the two halves of the entry fail
+ * independently. The totals drive the viewer's problem chip and its whole-wiki
+ * verdict; the rows only decorate them with a bar and a table. Rejecting the
+ * whole entry would throw away an accurate error/warning count over a cosmetic
+ * inconsistency, and would report "lint has never run" for a wiki that has.
+ * Dropping the rows alone degrades the panel to totals-only, which is a state
+ * it already renders correctly for pre-upgrade caches.
+ */
+function rulesAgreeWithTotals(
+  rules: LintRuleAggregate[],
+  totals: Pick<LintCacheEntry, "errors" | "warnings">,
+): boolean {
+  const summed = rules.reduce((total, row) => total + row.count, 0);
+  if (summed !== totals.errors + totals.warnings) return false;
+  // Per-row: `mostAffectedText` in the viewer renders "<page> · <topFileCount>
+  // of <count>", so a row whose parts exceed its own total reads as nonsense
+  // even when the rows happen to sum correctly.
+  return rules.every((row) => row.topFileCount <= row.count && row.fileCount <= row.count);
 }
 
 /** True for finite non-negative integers, including zero. NaN and Infinity fail Number.isInteger. */

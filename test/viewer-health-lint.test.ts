@@ -7,9 +7,20 @@
  * `lint.rules[]` (persisted by the linter's cache), so a payload without a
  * lint cache at all must degrade to the placeholder rather than render an
  * empty table — asserted explicitly below.
+ *
+ * The fixtures deliberately disagree with both the mockup (which showed
+ * exactly four rules) and the demo wiki (which fires two): sixteen lint rules
+ * exist, so the panel is driven here with six — past the four-colour palette
+ * — and with a dominant rule that is not about the link graph, which are the
+ * two shapes the mockup and the demo agreed to never produce.
  */
 
+import { mkdir, mkdtemp, rm, writeFile } from "fs/promises";
+import os from "os";
+import path from "path";
 import { describe, expect, it } from "vitest";
+import { readLintCache } from "../src/linter/cache.js";
+import { LAST_LINT_FILE, LLMWIKI_DIR } from "../src/utils/constants.js";
 import {
   conceptPage,
   pagesEnvelope,
@@ -17,6 +28,19 @@ import {
   textOf,
   type Payload,
 } from "./fixtures/viewer-health-fixture.js";
+
+/** One persisted rule-aggregate row; defaults describe a rule confined to one page. */
+function ruleRow(name: string, count: number, overrides: Payload = {}): Payload {
+  return {
+    rule: name,
+    severity: "warning",
+    count,
+    fileCount: 1,
+    topFile: "wiki/concepts/alpha.md",
+    topFileCount: count,
+    ...overrides,
+  };
+}
 
 /** Two rules with a deliberately lopsided 3:1 split, so proportions are checkable. */
 const LINT: Payload = {
@@ -29,8 +53,28 @@ const LINT: Payload = {
   ],
 };
 
+/** Six rules — two more than the palette can colour — dominated by a rule the graph says nothing about. */
+const SIX: Payload = {
+  warnings: 26,
+  errors: 9,
+  at: LINT.at,
+  rules: [
+    ruleRow("missing-summary", 12, { fileCount: 12, topFile: "wiki/concepts/beta.md", topFileCount: 1 }),
+    ruleRow("broken-wikilink", 9, { severity: "error", fileCount: 2, topFileCount: 7 }),
+    ruleRow("empty-page", 6, { fileCount: 6, topFile: "wiki/concepts/gamma.md", topFileCount: 1 }),
+    ruleRow("low-confidence", 4, { fileCount: 4, topFile: "wiki/concepts/delta.md", topFileCount: 1 }),
+    ruleRow("duplicate-concept", 3, { fileCount: 3, topFile: "wiki/concepts/epsilon.md", topFileCount: 1 }),
+    ruleRow("journal-health", 1, { topFile: ".llmwiki/journal" }),
+  ],
+};
+
 /** A pages envelope containing the two concept pages the rules above point at. */
 const PAGES = pagesEnvelope([conceptPage("alpha"), conceptPage("beta")]);
+
+/** Every page the six-rule fixture points at, so no row is unroutable by accident. */
+const WIDE_PAGES = pagesEnvelope(
+  ["alpha", "beta", "gamma", "delta", "epsilon"].map((slug) => conceptPage(slug)),
+);
 
 /** Render the health route with a lint cache attached to an otherwise clean wiki. */
 function withLint(lint: Payload | null, pages = PAGES): Promise<HTMLElement> {
@@ -133,16 +177,144 @@ describe("lint panel — the FIX cell navigates only to routes that exist", () =
 });
 
 describe("lint panel — footer insight", () => {
-  it("names the dominant rule's share and links onward to the graph explorer", async () => {
+  it("names the dominant rule's share of the problems", async () => {
     const main = await withLint(LINT);
     expect(textOf(main, ".lint-insight")).toBe("15 of 20 problems come from broken-wikilink.");
-    expect(main.querySelector(".lint-action")?.getAttribute("href")).toBe("#/graph");
   });
 
   it("omits the footer band entirely on a clean run", async () => {
     const main = await withLint({ warnings: 0, errors: 0, at: LINT.at, rules: [] });
     expect(main.querySelector(".lint-footer")).toBeNull();
     expect(main.querySelector(".lint-row:not(.is-head)")).toBeNull();
+  });
+});
+
+describe("lint panel — the footer's button goes where its label says", () => {
+  it("opens the graph explorer for every rule that is about the link graph", async () => {
+    for (const name of ["broken-wikilink", "orphaned-page", "schema-cross-link-minimum"]) {
+      const main = await withLint({ ...LINT, warnings: 20, errors: 0, rules: [ruleRow(name, 20)] });
+      const action = main.querySelector(".lint-action");
+      expect(action?.getAttribute("href"), name).toBe("#/graph");
+      expect(action?.textContent, name).toBe("Open the graph explorer");
+    }
+  });
+
+  it("opens the most affected page, and names it, when the dominant rule is not", async () => {
+    const main = await withLint(SIX, WIDE_PAGES);
+    expect(textOf(main, ".lint-insight")).toBe("12 of 35 problems come from missing-summary.");
+    const action = main.querySelector(".lint-action");
+    expect(action?.getAttribute("href")).toBe("#/concepts/beta");
+    expect(action?.textContent).toBe("Open beta");
+  });
+
+  it("keeps the insight but drops the button when neither destination resolves", async () => {
+    const rules = [ruleRow("journal-health", 20, { topFile: ".llmwiki/journal" })];
+    const main = await withLint({ ...LINT, warnings: 20, errors: 0, rules });
+    expect(textOf(main, ".lint-insight")).toBe("20 of 20 problems come from journal-health.");
+    expect(main.querySelector(".lint-action")).toBeNull();
+  });
+});
+
+describe("lint panel — more rules than the palette can colour", () => {
+  it("keeps the top four rules and folds the rest into one aggregate row", async () => {
+    const main = await withLint(SIX, WIDE_PAGES);
+    expect(column(main, ".lint-rule")).toEqual([
+      "missing-summary",
+      "broken-wikilink",
+      "empty-page",
+      "low-confidence",
+      "other",
+    ]);
+  });
+
+  it("counts the folded row as the sum of the rules it covers, and says how many", async () => {
+    const main = await withLint(SIX, WIDE_PAGES);
+    expect(column(main, ".lint-count")).toEqual(["12", "9", "6", "4", "4"]);
+    expect(column(main, ".lint-affected")[4]).toBe("2 rules");
+  });
+
+  it("says one rule, not one rules, when the fold covers a single rule", async () => {
+    const rules = (SIX.rules as Payload[]).slice(0, 5);
+    const main = await withLint({ ...SIX, warnings: 25, rules }, WIDE_PAGES);
+    expect(column(main, ".lint-affected")[4]).toBe("1 rule");
+    expect(column(main, ".lint-count")[4]).toBe("3");
+  });
+
+  it("leaves the folded row unroutable, like every other row with no single page", async () => {
+    const main = await withLint(SIX, WIDE_PAGES);
+    expect(column(main, ".lint-fix")[4]).toBe("—");
+  });
+});
+
+describe("lint panel — the legend stays unambiguous past four rules", () => {
+  it("draws five legend entries for six rules, the last one the aggregate", async () => {
+    const main = await withLint(SIX, WIDE_PAGES);
+    const legend = [...main.querySelectorAll(".lint-legend-item")].map((n) => n.textContent?.trim());
+    expect(legend).toEqual([
+      "missing-summary 12",
+      "broken-wikilink 9",
+      "empty-page 6",
+      "low-confidence 4",
+      "other 4",
+    ]);
+  });
+
+  it("gives no two visible swatches the same colour", async () => {
+    const main = await withLint(SIX, WIDE_PAGES);
+    const swatches = [...main.querySelectorAll(".lint-swatch")];
+    const colours = swatches.map((n) => n.getAttribute("data-rank") ?? "neutral");
+    expect(colours).toEqual(["0", "1", "2", "3", "neutral"]);
+    expect(new Set(colours).size).toBe(swatches.length);
+  });
+
+  it("keeps the aggregate off the rank palette in the bar, legend and table alike", async () => {
+    const main = await withLint(SIX, WIDE_PAGES);
+    for (const selector of [".lint-bar-seg", ".lint-swatch", ".lint-rule"]) {
+      const last = [...main.querySelectorAll(selector)].pop() as HTMLElement;
+      expect(last.className, selector).toContain("is-other");
+      expect(last.getAttribute("data-rank"), selector).toBeNull();
+    }
+  });
+
+  it("still spends the whole bar once the remainder is folded in", async () => {
+    const main = await withLint(SIX, WIDE_PAGES);
+    const widths = [...main.querySelectorAll(".lint-bar-seg")].map((n) =>
+      parseFloat((n as HTMLElement).style.width),
+    );
+    expect(widths).toHaveLength(5);
+    expect(widths.reduce((sum, width) => sum + width, 0)).toBeCloseTo(100, 6);
+  });
+});
+
+/**
+ * The entry `readLintCache` actually yields for a cache whose rows contradict
+ * its totals — read through the real reader, not hand-shaped, so the panel is
+ * proven to degrade against exactly what `/api/health` would hand it.
+ */
+async function readInconsistentCache(): Promise<Payload> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "lint-panel-"));
+  await mkdir(path.join(dir, LLMWIKI_DIR), { recursive: true });
+  const rules = [ruleRow("broken-wikilink", 65, { topFileCount: 99 })];
+  const contradictory = JSON.stringify({ warnings: 4, errors: 6, at: LINT.at, rules });
+  await writeFile(path.join(dir, LAST_LINT_FILE), contradictory, "utf-8");
+  const entry = await readLintCache(dir);
+  await rm(dir, { recursive: true, force: true });
+  return entry as unknown as Payload;
+}
+
+describe("lint panel — an internally inconsistent cache degrades to totals only", () => {
+  it("keeps the chip and both figures once the reader has dropped the rows", async () => {
+    const main = await withLint(await readInconsistentCache());
+    expect(textOf(main, ".lint-chip")).toBe("10 PROBLEMS");
+    expect(textOf(main, ".lint-figure.is-errors")).toBe("6");
+    expect(textOf(main, ".lint-figure.is-warnings")).toBe("4");
+  });
+
+  it("renders no table, legend or footer rather than contradicting the chip", async () => {
+    const main = await withLint(await readInconsistentCache());
+    for (const selector of [".lint-row", ".lint-bar-seg", ".lint-legend-item", ".lint-footer"]) {
+      expect(main.querySelector(selector), selector).toBeNull();
+    }
   });
 });
 

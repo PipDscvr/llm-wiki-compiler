@@ -47,6 +47,8 @@ Both are surfaced by `llmwiki lint` and are also visible in the local viewer, JS
 
 After every run, lint writes a summary to `.llmwiki/last-lint.json`, including a per-rule breakdown of which rules produced error or warning findings, how many files each one touched, and its most-flagged file. The local viewer (`llmwiki view`) reads this file to display health counts in the sidebar without re-running lint. The MCP `lint_wiki` tool returns the same structured diagnostics programmatically.
 
+Treat the file as generated output, not as something to edit. Readers reject a malformed cache outright and report it as "lint has never run". A cache that parses but whose per-rule rows contradict the error and warning totals - rows that do not sum back to those totals, or a row flagging more files or more findings in one file than the rule produced - keeps its totals and loses only the breakdown, so the viewer shows accurate counts without a bar that disagrees with them. Re-run `llmwiki lint` to restore the breakdown.
+
 ### Exit code
 
 `llmwiki lint` exits with code `1` if any **errors** are found. Warnings and info do not affect the exit code, but they are printed. This makes lint suitable for CI gating when you want to block on hard errors only.

@@ -128,6 +128,13 @@ describe("health screen — cache note and pane sizing", () => {
     expect(textOf(main, ".cache-note code")).toBe("llmwiki lint");
   });
 
+  it("asks for a reload, never a restart — the lint cache is re-read per request", async () => {
+    const main = await withPages([conceptPage("a")]);
+    const note = textOf(main, ".cache-note");
+    expect(note).toContain("reload");
+    expect(note).not.toContain("restart");
+  });
+
   it("opts the pane out of the prose-width cap so the two-column grid can breathe", async () => {
     const main = await withPages([conceptPage("a")]);
     expect(main.className).toContain("health-pane");

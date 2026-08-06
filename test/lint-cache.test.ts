@@ -324,3 +324,44 @@ describe("rule aggregates", () => {
     expect(await readLintCache(tmpDir)).toBeNull();
   });
 });
+
+/**
+ * A schema-valid breakdown can still contradict the totals it was derived
+ * from. The viewer's Lint panel reads both at once — the chip from
+ * `errors + warnings`, the bar's proportions from the rows — so an
+ * unreconciled cache renders an impossible sentence beside a bar that
+ * disagrees with it. The reader drops only the rows, never the totals.
+ */
+describe("rule-aggregate invariants", () => {
+  const at = "2026-06-05T00:00:00.000Z";
+  const row = { rule: "broken-wikilink", severity: "warning", count: 5, fileCount: 2, topFile: "a.md", topFileCount: 3 };
+
+  it("drops rows that do not sum back to errors + warnings, keeping the totals", async () => {
+    await writeRawCache(JSON.stringify({ warnings: 4, errors: 6, at, rules: [{ ...row, count: 65 }] }));
+    const entry = await readLintCache(tmpDir);
+    expect(entry?.rules).toBeUndefined();
+    expect(entry).toMatchObject({ warnings: 4, errors: 6, at });
+  });
+
+  it("drops rows whose worst file carries more findings than the rule produced", async () => {
+    await writeRawCache(JSON.stringify({ warnings: 0, errors: 5, at, rules: [{ ...row, topFileCount: 99 }] }));
+    expect((await readLintCache(tmpDir))?.rules).toBeUndefined();
+  });
+
+  it("drops rows flagging more distinct files than the rule has findings", async () => {
+    await writeRawCache(JSON.stringify({ warnings: 0, errors: 5, at, rules: [{ ...row, fileCount: 9 }] }));
+    expect((await readLintCache(tmpDir))?.rules).toBeUndefined();
+  });
+
+  it("keeps a breakdown that reconciles with the totals", async () => {
+    await writeRawCache(JSON.stringify({ warnings: 1, errors: 4, at, rules: [row] }));
+    expect((await readLintCache(tmpDir))?.rules).toEqual([row]);
+  });
+
+  it("keeps the freshness counts a dropped breakdown sat beside", async () => {
+    const freshness = { stalePages: 1, orphanedPages: 0 };
+    const rules = [{ ...row, count: 65 }];
+    await writeRawCache(JSON.stringify({ warnings: 4, errors: 6, at, rules, freshness }));
+    expect(await readLintCache(tmpDir)).toEqual({ warnings: 4, errors: 6, at, freshness });
+  });
+});

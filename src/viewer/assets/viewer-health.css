@@ -215,9 +215,10 @@
 .lint-legend-item { display: flex; align-items: center; gap: 6px; }
 .lint-swatch { width: 7px; height: 7px; border-radius: 2px; }
 
-/* One palette entry per rank, cycling every four rules so a bar segment, its
- * legend swatch, and the table's rule name always agree on one rule's colour
- * (tree lines 191-207). */
+/* One palette entry per rank, so a bar segment, its legend swatch, and the
+ * table's rule name always agree on one rule's colour (tree lines 191-207).
+ * Exactly four rules can be ranked — sixteen lint rules exist, and a fifth
+ * colour would have to repeat one of these. */
 .lint-bar-seg[data-rank="0"], .lint-swatch[data-rank="0"] { background: var(--danger); }
 .lint-bar-seg[data-rank="1"], .lint-swatch[data-rank="1"] { background: var(--warn); }
 .lint-bar-seg[data-rank="2"], .lint-swatch[data-rank="2"] { background: var(--accent-text); }
@@ -226,6 +227,12 @@
 .lint-rule[data-rank="1"] { color: var(--warn); }
 .lint-rule[data-rank="2"] { color: var(--accent-text); }
 .lint-rule[data-rank="3"] { color: var(--ok); }
+
+/* The row every rule past the fourth folds into. Neutral rather than a fifth
+ * hue: it stands for several rules at once, none of which owns a colour, and
+ * a fifth hue would have to be one the four above already spend. */
+.lint-bar-seg.is-other, .lint-swatch.is-other { background: var(--fg-dim); }
+.lint-rule.is-other { color: var(--fg-dim); }
 
 /* ---- Rule table ---- */
 
@@ -284,12 +291,15 @@
   background: var(--warn-surface);
 }
 
-/* 400 11.5px/1.5 sans has no matching token — tree line 255. */
-.lint-insight { font: 400 11.5px/1.5 var(--font-sans); color: var(--warn-muted); }
+/* 400 11.5px/1.5 sans has no matching token — tree line 255. `min-width: 0`
+ * makes the sentence, not the button, the flex item that gives way: the
+ * button's label names a page whose slug it cannot truncate and stay honest. */
+.lint-insight { font: 400 11.5px/1.5 var(--font-sans); color: var(--warn-muted); min-width: 0; }
 
 /* The one filled button on the screen. The mockup's label mutates the wiki;
- * this viewer is a frozen read-only snapshot, so it navigates to the graph
- * explorer instead, where dangling targets already render as ghost nodes. */
+ * this viewer is a frozen read-only snapshot, so it navigates instead — to
+ * the graph explorer for link-graph rules, to the most-affected page
+ * otherwise. `white-space: nowrap` keeps either label on the button's line. */
 .lint-action {
   display: flex;
   align-items: center;
