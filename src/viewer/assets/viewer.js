@@ -8,7 +8,8 @@
  *      `loadBootstrapData()` and cached in `bootstrapData` — fill in the
  *      sidebar's counts and lint badge, the header's whole-wiki verdict
  *      pill (which reads both), and render the dashboard home.
- *   3. Hash router (`#/`, `#/concepts/<slug>`, `#/queries/<slug>`,
+ *   3. Hash router (`#/`, `#/<directory>/<slug>` — where directory is
+ *      `concepts`, `queries`, or any entity type the active profile declares —
  *      `#/index`, `#/health`, `#/reviews`, `#/workflows`) that fetches
  *      `/api/page/...`, `/api/index`, `/api/health`, `/api/reviews`, or
  *      `/api/workflow-runs` and drops the result into the main pane. The
@@ -51,8 +52,25 @@ const STATIC_ROUTES = new Map([
   ["#/workflows", { kind: "workflows" }],
 ]);
 
-/** Pattern matching `#/(concepts|queries)/<slug>` hash routes. */
-const PAGE_HASH_PATTERN = /^#\/(concepts|queries)\/(.+)$/;
+/**
+ * Pattern matching a `#/<directory>/<slug>` page hash.
+ *
+ * The directory is deliberately NOT an enumeration here. A profile project's
+ * entity types are addressable page directories too (`#/articles/<slug>`), and
+ * that set is per-project — so hardcoding one would make every typed page a
+ * dead link, which is precisely what it did before `/api/page` learned to serve
+ * them. The authoritative allowlist lives on the server, derived from the active
+ * profile (see `isAllowedDirectory`, src/viewer/api-pages.ts); an unknown
+ * directory is rejected there and surfaces through {@link handlePageError}.
+ *
+ * Resolving here rather than against the bootstrap envelope keeps a cold deep
+ * link working: opening `#/articles/x` in a fresh tab must route before
+ * `/api/pages` has settled.
+ *
+ * Single-segment hashes never reach this pattern — STATIC_ROUTES is consulted
+ * first, and an unmatched one still falls back to home.
+ */
+const PAGE_HASH_PATTERN = /^#\/([^/]+)\/(.+)$/;
 
 /**
  * Bootstrap payloads shared by the sidebar, dashboard, and health route.
@@ -87,7 +105,7 @@ function parseRoute(hash) {
   return parsePageRoute(key);
 }
 
-/** Resolve a `#/(concepts|queries)/<slug>` hash; non-matches return home. */
+/** Resolve a `#/<directory>/<slug>` hash; non-matches return home. */
 function parsePageRoute(hash) {
   const match = hash.match(PAGE_HASH_PATTERN);
   if (!match) return { kind: "home" };
@@ -304,9 +322,18 @@ function buildQueryQuestion(title) {
   return el("p", "query-question", `Question: ${title}`);
 }
 
-/** Render the 404 placeholder or a generic error for /api/page failures. */
+/**
+ * Render the not-found placeholder or a generic error for /api/page failures.
+ *
+ * 400 is treated as not-found alongside 404 because both mean "this hash does
+ * not name a page": the server answers 400 when the directory is not one the
+ * active profile declares, and 404 when the directory is valid but the page is
+ * not there. To a reader those are the same fact, and since the hash router no
+ * longer enumerates directories itself (see PAGE_HASH_PATTERN), 400 is the
+ * ordinary response to a mistyped or stale link rather than a client defect.
+ */
 function handlePageError(main, err, directory, slug) {
-  if (err.status !== 404) {
+  if (err.status !== 404 && err.status !== 400) {
     renderError(`Could not load page: ${err.message}`);
     return;
   }
