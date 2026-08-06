@@ -355,8 +355,38 @@ function attachHover(nodeSel, edgeSel, tooltip, svg) {
     })
     .on('click', function(_event, d) {
       if (d.isDangling) return;
-      location.hash = '#/' + encodeURIComponent(d.directory) + '/' + encodeURIComponent(d.slug);
+      const hash = nodeRouteHash(d);
+      if (hash !== null) location.hash = hash;
     });
+}
+
+/**
+ * The `#/<directory>/<slug>` hash a node routes to, or null when it has no id.
+ *
+ * Built from `id`, NOT from `directory`, because that field means two different
+ * things depending on where the node came from: a default page reports its
+ * ROUTE segment (`concepts`), while a typed entity page reports its ON-DISK
+ * directory (`wiki/articles`, see `EntityPageNode.directory` in
+ * src/viewer/graph.ts). Encoding the latter turned the slash into `%2F`, so a
+ * click on any typed node navigated to `#/wiki%2Farticles/<slug>` and the page
+ * route answered 400 — the directory segment is matched against the profile's
+ * declared entity types, and `wiki%2Farticles` is not one of them.
+ *
+ * `id` is already `<routeDirectory>/<slug>` for BOTH kinds
+ * (`concepts/change-detection`, `articles/arena-deal-spiked`), so it is the one
+ * field that needs no per-kind branch. Split on the FIRST separator only: a
+ * dangling target's slug can itself contain one.
+ *
+ * @param {{id?: string}} node - A graph node datum.
+ * @returns {string|null}
+ */
+function nodeRouteHash(node) {
+  const id = typeof node.id === 'string' ? node.id : '';
+  const cut = id.indexOf('/');
+  if (cut <= 0 || cut === id.length - 1) return null;
+  const directory = id.slice(0, cut);
+  const slug = id.slice(cut + 1);
+  return '#/' + encodeURIComponent(directory) + '/' + encodeURIComponent(slug);
 }
 
 /**

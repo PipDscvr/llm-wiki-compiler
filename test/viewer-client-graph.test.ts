@@ -37,7 +37,7 @@ async function loadGraphHelpers(win: Window & typeof globalThis) {
       .replace(/^export async function loadGraph\(/m, "async function loadGraph(")
       .replace(/^export function staleIdsFromEnvelope\(/m, "function staleIdsFromEnvelope(")
       .replace(/^export const LEGEND_KINDS/m, "const LEGEND_KINDS") +
-    `\nwindow.__vg = { nodeClass, staleIdsFromEnvelope, buildLegend, styleEdges };\n`;
+    `\nwindow.__vg = { nodeClass, staleIdsFromEnvelope, buildLegend, styleEdges, nodeRouteHash };\n`;
   win.eval(rewritten);
   return (win as unknown as Record<string, Record<string, unknown>>).__vg;
 }
@@ -201,5 +201,54 @@ describe("viewer-graph.js — styleEdges (DOM marker-end + relation class)", () 
     expect(directed.getAttribute("title")).toBe("tests");
     expect(wikilink.getAttribute("class")).toBe("graph-edge");
     expect(wikilink.getAttribute("title")).toBeNull();
+  });
+});
+
+describe("nodeRouteHash", () => {
+  /** Load the module and return its `nodeRouteHash` helper. */
+  async function routeHash(): Promise<(node: Record<string, unknown>) => string | null> {
+    const vg = await loadGraphHelpers(makeWindow());
+    return vg.nodeRouteHash as (node: Record<string, unknown>) => string | null;
+  }
+
+  it("routes a typed entity node by its entity type, not its on-disk directory", async () => {
+    // The regression: `directory` is "wiki/articles" for a typed node, and
+    // encoding it produced #/wiki%2Farticles/<slug>, which the page route
+    // answers 400 for. `id` already carries the route directory.
+    const hash = (await routeHash())({
+      id: "articles/harbour-lease-records",
+      directory: "wiki/articles",
+      slug: "harbour-lease-records",
+    });
+    expect(hash).toBe("#/articles/harbour-lease-records");
+  });
+
+  it("never emits an encoded separator in the directory segment", async () => {
+    const hash = (await routeHash())({ id: "articles/x", directory: "wiki/articles", slug: "x" });
+    expect(hash).not.toContain("%2F");
+  });
+
+  it("routes a default concept node unchanged", async () => {
+    const hash = (await routeHash())({
+      id: "concepts/change-detection",
+      directory: "concepts",
+      slug: "change-detection",
+    });
+    expect(hash).toBe("#/concepts/change-detection");
+  });
+
+  it("keeps a slug's own separator in the slug segment", async () => {
+    // Split on the FIRST separator only — a dangling target's slug can contain one.
+    expect((await routeHash())({ id: "concepts/a/b" })).toBe("#/concepts/a%2Fb");
+  });
+
+  it("percent-encodes a slug that needs it", async () => {
+    expect((await routeHash())({ id: "concepts/a b" })).toBe("#/concepts/a%20b");
+  });
+
+  it("returns null for an id it cannot split", async () => {
+    for (const id of ["", "concepts", "/x", "concepts/", undefined]) {
+      expect((await routeHash())({ id })).toBeNull();
+    }
   });
 });
