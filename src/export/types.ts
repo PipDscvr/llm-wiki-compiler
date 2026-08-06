@@ -68,9 +68,19 @@ export interface ExportPage {
   sources: string[];
   /** Taxonomy tags (from frontmatter). */
   tags: string[];
-  /** ISO-8601 creation timestamp. */
+  /**
+   * ISO-8601 creation timestamp, read verbatim from frontmatter. `""` when the
+   * page declares none — the export never substitutes its own run time, for the
+   * same reason it omits an unset {@link ExportPage.kind}: an invented value is
+   * indistinguishable from a recorded one once it reaches a consumer.
+   */
   createdAt: string;
-  /** ISO-8601 last-updated timestamp. */
+  /**
+   * ISO-8601 last-updated timestamp: the page's `updatedAt`, falling back to
+   * {@link ExportPage.createdAt} (a saved query declares only the latter, and
+   * `query --save` rewrites the whole file on every save, so there `createdAt`
+   * *is* the last-written time). `""` when the page declares neither.
+   */
   updatedAt: string;
   /** Slugs of other pages this page links to via [[wikilinks]]. */
   links: string[];

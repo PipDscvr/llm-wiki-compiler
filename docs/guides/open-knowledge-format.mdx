@@ -55,6 +55,8 @@ x-llmwiki:
   freshnessStatus: fresh
 ```
 
+`type` is the page's `kind` when it declares one, `query` for pages under `wiki/queries/`, and `concept` otherwise. `timestamp` is the page's `updatedAt`, falling back to its `createdAt`; a page that declares neither exports no `timestamp` at all, so the bundle never records a time the page did not have.
+
 The body is markdown. llmwiki rewrites `[[wikilinks]]` to OKF-style links and appends a human-readable `# Citations` section. Structured citation data also lives under `x-llmwiki.citations`.
 
 For non-default projects, `index.md` also carries bundle-level `x-llmwiki`

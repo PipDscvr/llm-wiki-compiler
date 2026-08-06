@@ -185,6 +185,8 @@ dist/exports/okf/
 
 Each page document includes standard OKF fields (`type`, `title`, `description`, `tags`, `timestamp`) plus an `x-llmwiki` block with compiler metadata such as source files, citations, freshness, provenance, and a canonical content hash. Imported foreign OKF pages preserve their foreign `type` and producer-specific keys on re-export while refreshing the current llmwiki metadata.
 
+`type` is the page's `kind` when it declares one, `query` for pages under `wiki/queries/`, and `concept` otherwise. `timestamp` is the page's `updatedAt`, falling back to its `createdAt`; a page that declares neither exports no `timestamp` at all rather than the time the export ran.
+
 <Note>
   `export --target okf` refuses dangerous output targets such as the filesystem root, the project root, directories inside `.git`, and non-empty directories that are not already OKF bundles. Re-exporting into an existing OKF bundle clears stale bundle files before writing the new bundle.
 </Note>

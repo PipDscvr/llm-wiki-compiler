@@ -96,6 +96,42 @@ function readXOkf(meta: Record<string, unknown>): XOkfSnapshot | undefined {
   return snap;
 }
 
+/** The two ISO-8601 instants every export format reports for a page. */
+interface PageTimestamps {
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Read `field` from frontmatter when it holds a non-empty string. */
+function readNonEmptyString(meta: Record<string, unknown>, field: string): string | undefined {
+  const value = meta[field];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * The instants a page actually declares — never the export run's clock.
+ *
+ * Stamping `new Date()` on a page that declares no timestamp was reachable in
+ * ordinary use (`llmwiki query --save` writes `createdAt` and no `updatedAt`),
+ * and it did two kinds of damage: two exports of an unchanged wiki differed,
+ * and `llmwiki import --okf` mapped the invented instant back into real
+ * frontmatter, where nothing distinguishes it from one the compiler recorded.
+ * An undeclared field therefore degrades to `""`, the same way `summary` does a
+ * few lines below and `src/pages/list.ts` reads these same two fields.
+ *
+ * `updatedAt` falls back to `createdAt` — never the reverse. `query --save`
+ * stamps a fresh `createdAt` on every save and rewrites the whole file through
+ * an overwriting `atomicWrite`, so on a saved query `createdAt` genuinely
+ * records when the page was last written, which is exactly what `updatedAt`
+ * means on a compiled concept. Same reasoning as `src/viewer/page-fields.ts`,
+ * restated here rather than imported: the export path must not depend on the
+ * viewer.
+ */
+function readPageTimestamps(meta: Record<string, unknown>): PageTimestamps {
+  const createdAt = readNonEmptyString(meta, "createdAt") ?? "";
+  return { createdAt, updatedAt: readNonEmptyString(meta, "updatedAt") ?? createdAt };
+}
+
 /** Validate and return PageKind from frontmatter, or undefined. */
 function readPageKind(meta: Record<string, unknown>): PageKind | undefined {
   const value = meta.kind;
@@ -133,8 +169,7 @@ function toExportPage(
     summary: typeof meta.summary === "string" ? meta.summary : "",
     sources,
     tags: readStringArray(meta, "tags"),
-    createdAt: typeof meta.createdAt === "string" ? meta.createdAt : new Date().toISOString(),
-    updatedAt: typeof meta.updatedAt === "string" ? meta.updatedAt : new Date().toISOString(),
+    ...readPageTimestamps(meta),
     links: extractWikilinkSlugs(raw.body),
     body: raw.body,
     kind: readPageKind(meta),
