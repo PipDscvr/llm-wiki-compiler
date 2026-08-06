@@ -16,7 +16,11 @@
 import { describe, expect, it } from "vitest";
 import { flushMicrotasks, jsonResponse, mountViewerDom, type FetchResponder } from "./fixtures/viewer-jsdom.js";
 
+/** Three declared entity types — the number the Pipeline entry counts. */
+const PIPELINE_TYPES = ["articles", "desks", "bylines"].map((type) => ({ type, pageCount: 0 }));
+
 function envelope(profileId: string): Record<string, unknown> {
+  const isProfile = profileId !== "default";
   return {
     project: { title: "demo", rootName: "demo" },
     profileId,
@@ -24,6 +28,7 @@ function envelope(profileId: string): Record<string, unknown> {
     pages: [],
     recentPages: [],
     index: { available: false },
+    ...(isProfile ? { profilePipeline: { entityTypes: PIPELINE_TYPES } } : {}),
   };
 }
 
@@ -36,8 +41,8 @@ function responderFor(profileId: string): FetchResponder {
 }
 
 /** The nav entry for `route`, or null when the sidebar omitted it. */
-async function navEntry(profileId: string, route: string): Promise<Element | null> {
-  const { dom } = await mountViewerDom([], responderFor(profileId));
+async function navEntry(profileId: string, route: string, startHash?: string): Promise<Element | null> {
+  const { dom } = await mountViewerDom([], responderFor(profileId), startHash);
   await flushMicrotasks();
   return dom.window.document.querySelector(`[data-sidebar] a[data-route="${route}"]`);
 }
@@ -62,5 +67,29 @@ describe("sidebar entries a project cannot use", () => {
     for (const route of ["home", "concepts", "sources", "queries", "graph", "health"]) {
       expect(await navEntry("default", route)).not.toBeNull();
     }
+  });
+});
+
+describe("the Pipeline entry", () => {
+  it("is absent on a default-profile project, which has no lifecycle to draw", async () => {
+    expect(await navEntry("default", "pipeline")).toBeNull();
+  });
+
+  it("lands on its own route once a profile is active", async () => {
+    const entry = await navEntry("newsroom", "pipeline");
+    expect(entry?.getAttribute("href")).toBe("#/pipeline");
+  });
+
+  it("counts the entity types the profile declares", async () => {
+    const entry = await navEntry("newsroom", "pipeline");
+    expect(entry?.querySelector(".nav-count")?.textContent).toBe("3");
+  });
+
+  it("marks itself — not Health — current at #/pipeline", async () => {
+    // The design's prose called Pipeline a panel ON Health; both its sidebars
+    // draw it as its own highlighted entry. A Health-bound entry would light
+    // Health up, which is the contradiction this pins shut.
+    expect((await navEntry("newsroom", "pipeline", "#/pipeline"))?.getAttribute("aria-current")).toBe("page");
+    expect((await navEntry("newsroom", "health", "#/pipeline"))?.getAttribute("aria-current")).toBeNull();
   });
 });

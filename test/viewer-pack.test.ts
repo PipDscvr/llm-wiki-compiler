@@ -50,6 +50,9 @@ const REQUIRED_ASSETS = [
   "dist/viewer/assets/viewer-health.js",
   "dist/viewer/assets/viewer-health-lint.js",
   "dist/viewer/assets/viewer-health.css",
+  "dist/viewer/assets/viewer-pipeline.js",
+  "dist/viewer/assets/viewer-pipeline-model.js",
+  "dist/viewer/assets/viewer-pipeline.css",
   "dist/viewer/assets/viewer-graph.css",
 ];
 

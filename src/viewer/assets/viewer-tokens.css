@@ -160,6 +160,20 @@
   --warn-surface: #1a1322;
   --warn-muted: #a1876b;
   --danger: #f87171;
+  /* The unreachable-state family, the danger counterpart to the --warn-* set
+   * above (pipeline mockup tree: the killed chip and its callout). --danger-surface
+   * is the tinted plate both sit on, --danger-border the callout's solid rule,
+   * --danger-edge the chip's dashed one, --danger-muted the body text that stays
+   * readable on the plate without shouting at --danger's full strength. */
+  --danger-surface: #1f1a1b;
+  --danger-border: #3a2b2b;
+  --danger-edge: rgba(248, 113, 113, 0.5);
+  --danger-muted: #e0a99f;
+  /* The proportional bar's unfilled channel. Identical to --border-soft in dark
+   * but NOT in light, where the mockup gives the track its own violet-tinted
+   * value (#eeebf7) a step off the light border — so it is a token of its own
+   * rather than a borrowed one that would be wrong in one theme. */
+  --bar-track: #1c1a2a;
 
   /* Graph */
   --graph-edge: #2c2842;
@@ -239,6 +253,16 @@
   --warn-surface: #fdf1e1;
   --warn-muted: #8d6440;
   --danger: #dc2626;
+  /* Light pairs for the unreachable-state family. Surface, dashed edge and
+   * muted text are the light mockup's own literals; --danger-border has no
+   * light literal (the mockup's light theme never draws the callout), so it is
+   * --danger at the same ~15% tint over --danger-surface that #3a2b2b is over
+   * the dark one. */
+  --danger-surface: #fdf3f2;
+  --danger-border: #f8d4d3;
+  --danger-edge: rgba(220, 38, 38, 0.4);
+  --danger-muted: #8d3a30;
+  --bar-track: #eeebf7;
 
   /* Graph */
   --graph-edge: #ded9ec;
@@ -297,6 +321,12 @@
     --warn-surface: #fdf1e1;
     --warn-muted: #8d6440;
     --danger: #dc2626;
+    /* Kept in sync with the :root[data-theme="light"] block above. */
+    --danger-surface: #fdf3f2;
+    --danger-border: #f8d4d3;
+    --danger-edge: rgba(220, 38, 38, 0.4);
+    --danger-muted: #8d3a30;
+    --bar-track: #eeebf7;
 
     /* Graph */
     --graph-edge: #ded9ec;

@@ -65,6 +65,10 @@ const THEME_BOOT_SCRIPT = "viewer-theme-boot.js";
  * panel is imported by `viewer-health.js`, and leaving that dependency to
  * an incidental property of ASCII ordering is exactly the bet this list
  * exists to stop the repo making a fourth time.
+ *
+ * `viewer-pipeline-model.js` is pinned on the same principle: the Pipeline
+ * panel's reachability model is imported by `viewer-pipeline.js`, and it too
+ * only happens to sort first because "-" precedes ".".
  */
 const MODULE_ORDER = [
   "viewer-dom.js",
@@ -74,6 +78,7 @@ const MODULE_ORDER = [
   "viewer-pattern.js",
   "viewer-stat-card.js",
   "viewer-health-lint.js",
+  "viewer-pipeline-model.js",
 ];
 
 /** Match `import { a, b } from "./viewer-x.js";` including multi-line forms. */
@@ -385,6 +390,18 @@ export function emptyBootstrapResponse(url: string): Response | null {
  */
 export function profileBootstrapResponse(url: string): Response | null {
   return bootstrapResponse(url, { ...EMPTY_DEMO_ENVELOPE, profileId: PROFILE_FIXTURE_ID });
+}
+
+/**
+ * Serve the same pair from a caller-supplied `/api/pages` envelope.
+ *
+ * The route tests that render FROM the bootstrap envelope (rather than from
+ * their own per-visit endpoint) each need this two-line responder around their
+ * own fixture, and writing it out per file is what fallow's clone-group check
+ * flags — the same reason {@link emptyBootstrapResponse} lives here.
+ */
+export function envelopeBootstrapResponse(envelope: unknown): FetchResponder {
+  return (url) => bootstrapResponse(url, envelope);
 }
 
 /** Standard JSON 200 helper for fetch responders. */

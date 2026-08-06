@@ -10,8 +10,8 @@
  *      pill (which reads both), and render the dashboard home.
  *   3. Hash router (`#/`, `#/<directory>/<slug>` — where directory is
  *      `concepts`, `queries`, or any entity type the active profile declares —
- *      `#/index`, `#/health`, `#/reviews`, `#/workflows`) that fetches
- *      `/api/page/...`, `/api/index`, `/api/health`, `/api/reviews`, or
+ *      `#/index`, `#/health`, `#/reviews`, `#/workflows`, `#/pipeline`) that
+ *      fetches `/api/page/...`, `/api/index`, `/api/health`, `/api/reviews`, or
  *      `/api/workflow-runs` and drops the result into the main pane. The
  *      server returns already-sanitized HTML in `html` (see
  *      `src/viewer/render.ts`), so the client only has to set `innerHTML`
@@ -32,6 +32,7 @@ import { renderHeader } from "./viewer-header.js";
 import { renderConceptsList, renderQueriesList, renderSourcesList } from "./viewer-lists.js";
 import { renderReviewsList } from "./viewer-reviews.js";
 import { renderWorkflowRunsList } from "./viewer-workflows.js";
+import { renderPipeline } from "./viewer-pipeline.js";
 import { renderDashboard } from "./viewer-dashboard.js";
 import { buildHealthView } from "./viewer-health.js";
 
@@ -50,6 +51,7 @@ const STATIC_ROUTES = new Map([
   ["#/sources", { kind: "sources" }],
   ["#/reviews", { kind: "reviews" }],
   ["#/workflows", { kind: "workflows" }],
+  ["#/pipeline", { kind: "pipeline" }],
 ]);
 
 /**
@@ -134,6 +136,7 @@ const ROUTE_RENDERERS = {
   sources: (main) => renderListRoute(main, renderSourcesList),
   reviews: (main) => renderFetchedRoute(main, "/api/reviews", renderReviewsList),
   workflows: (main) => renderFetchedRoute(main, "/api/workflow-runs", renderWorkflowRunsList),
+  pipeline: (main) => renderListRoute(main, renderPipeline),
 };
 
 /**
@@ -444,10 +447,26 @@ function main() {
 function sidebarModel(data) {
   return {
     project: data.pages?.project,
-    counts: data.pages?.counts,
+    counts: navCounts(data.pages),
     lint: data.health?.lint ?? null,
     profileId: data.pages?.profileId,
   };
+}
+
+/**
+ * The nav's count map: the envelope's own `counts`, plus `pipelineTypes` — how
+ * many entity types the active profile declares.
+ *
+ * Derived here rather than carried inside `counts` because `counts` is a fixed
+ * shape a DEFAULT project emits too, and a key that appears only for a profile
+ * project would break the byte-identity that shape is pinned for. A default
+ * envelope has no `profilePipeline`, so it gets its `counts` back untouched.
+ */
+function navCounts(envelope) {
+  if (!envelope) return undefined;
+  const entityTypes = envelope.profilePipeline?.entityTypes;
+  if (!Array.isArray(entityTypes)) return envelope.counts;
+  return { ...envelope.counts, pipelineTypes: entityTypes.length };
 }
 
 if (document.readyState === "loading") {

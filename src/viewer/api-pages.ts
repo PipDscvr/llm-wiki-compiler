@@ -16,6 +16,7 @@
 
 import type { ServerResponse } from "http";
 import { pageTimestamp, viewerPageKind } from "./page-fields.js";
+import { buildPipelineEnvelope } from "./pipeline.js";
 import { assertSafeSlug, PathSafetyError } from "./path-safety.js";
 import { tryRenderBody, writeJson, writeJsonError, writeRenderFailed } from "./respond.js";
 import { UNRESOLVED_CITATION_CODE } from "./types.js";
@@ -54,7 +55,26 @@ export function handleApiPages(res: ServerResponse, snapshot: ViewerSnapshot): v
     pages: snapshot.pages.map(pageListRow),
     updatedAt: snapshot.generatedAt,
     ...profileProblemFields(snapshot.profile),
+    ...profilePipelineField(snapshot),
   });
+}
+
+/**
+ * The active profile's lifecycle and relation model, serialised ONLY when a
+ * non-default profile is active — the same omitted-when-absent rule
+ * {@link profileProblemFields} follows, and for the same reason: a default
+ * project declares no lifecycle and no relation type, so its envelope must not
+ * grow a key describing either.
+ *
+ * The counts inside it (valid pages per type, the unfiltered state tally, live
+ * relation counts) already existed on `snapshot.profile`; the declarations come
+ * from the loaded pack via `snapshot.pipeline`. Joining them here rather than on
+ * the client means the panel reads one list instead of three maps it would have
+ * to align itself.
+ */
+function profilePipelineField(snapshot: ViewerSnapshot): Record<string, unknown> {
+  const pipeline = buildPipelineEnvelope(snapshot.pipeline, snapshot.profile);
+  return pipeline ? { profilePipeline: pipeline } : {};
 }
 
 /**

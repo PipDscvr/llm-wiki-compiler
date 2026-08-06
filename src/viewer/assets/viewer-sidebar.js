@@ -65,6 +65,14 @@ const NAV_SECTIONS = [
       // The profile-vocabulary design gates it the same way: its default
       // sidebar has no Pipeline row, only the two profile ones do.
       { route: "workflows", href: "#/workflows", label: "Workflows", profileOnly: true },
+      // `profileOnly` for the same structural reason as Workflows: only a
+      // profile declares entity types and lifecycles, so a default project has
+      // no pipeline to draw — which is exactly what the design's default
+      // sidebar shows, and why its two profile sidebars are the only ones with
+      // a Pipeline row. The count is the number of entity types the profile
+      // declares (see `navCounts`, viewer.js) — the number of rows the panel
+      // will have, not a workload.
+      { route: "pipeline", href: "#/pipeline", label: "Pipeline", count: "pipelineTypes", profileOnly: true },
     ],
   },
 ];
@@ -90,6 +98,7 @@ const STATIC_ROUTE_FOR_HASH = new Map([
   ["#/health", "health"],
   ["#/reviews", "reviews"],
   ["#/workflows", "workflows"],
+  ["#/pipeline", "pipeline"],
   ["#/index", "home"],
 ]);
 

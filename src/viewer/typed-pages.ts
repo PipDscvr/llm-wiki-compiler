@@ -31,8 +31,10 @@
 
 import { collectEntityPages, invalidEntityPagePaths } from "../profile/collect.js";
 import { loadNonDefaultProfile } from "../profile/block.js";
+import { buildPipelineDefinitions } from "./pipeline.js";
 import { readLiveValidRelations } from "../relations/live-valid.js";
 import type { EntityPageNode, GraphBuildOptions, RelationEdge } from "./graph.js";
+import type { PipelineDefinitions } from "./pipeline.js";
 import type { EntityPage, ProfilePack } from "../profile/types.js";
 
 /** Everything the snapshot needs from the active profile's typed entity pages. */
@@ -46,6 +48,13 @@ export interface TypedViewerInputs {
   pages: EntityPage[];
   /** The additive typed nodes + relation edges for {@link buildGraphData}. */
   graph: GraphBuildOptions;
+  /**
+   * What the profile DECLARES about lifecycles and relation types — the
+   * `#/pipeline` panel's half that no count collector carries. Projected from
+   * the SAME loaded pack the pages came from, so the panel can never describe a
+   * different profile than the one that produced the corpus beside it.
+   */
+  pipeline: PipelineDefinitions;
 }
 
 /**
@@ -70,6 +79,7 @@ export async function collectTypedViewerInputs(
       entityPages: valid.map(toEntityPageNode),
       relations: await readTypedRelations(root, loaded.profile),
     },
+    pipeline: buildPipelineDefinitions(loaded.profile),
   };
 }
 

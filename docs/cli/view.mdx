@@ -47,9 +47,12 @@ Every view in the viewer has its own hash route, so you can bookmark or reload a
 | `#/health` | Wiki health: lint findings by rule, profile problems, freshness, and traceability |
 | `#/reviews` | Review candidates awaiting approval, and why each is held |
 | `#/workflows` | Workflow runs, and which of them are parked waiting on you |
+| `#/pipeline` | Each entity type's lifecycle, where its pages sit, and which of them failed validation |
 | `#/graph` | Full graph explorer |
 
 Individual pages open at `#/concepts/<slug>` or `#/queries/<slug>`.
+
+`#/pipeline` appears only on a project running a non-default profile. The built-in default profile declares no entity types and no lifecycles, so there is nothing for the route to draw and the sidebar omits its entry entirely.
 
 ### Typed entity pages
 
@@ -82,6 +85,16 @@ Alongside those, **Freshness** draws one bar per concept page coloured by that p
 The route shows at most 200 candidates at a time. A review policy that holds every page (`heldReasons: all`) can queue one candidate per compiled page, and this route re-reads them from disk on every visit, so the cap keeps a large queue from turning each visit into a full re-read. When the queue is longer than that, the pane says so above the list - `Showing 200 of 5000 pending candidates` - and points you at `llmwiki review list`, which is not capped. Candidates are shown in candidate-id order, which is alphabetical by the slug each one would be written to, rather than the oldest-first order `llmwiki review list` uses: the generation time lives inside each candidate file, so ordering by it would mean opening every file to decide which 200 to show.
 
 This is the one route that re-reads disk on every visit rather than serving the startup snapshot, because candidates are written and cleared by the CLI while the viewer runs - so approving or rejecting one and revisiting `#/reviews` shows the new queue without a restart. It is read-only like the rest of the viewer: use `llmwiki review approve <id>` or `llmwiki review reject <id>` to act on a candidate. The route reads a local `/api/reviews` endpoint that serves only these list fields - never the candidate's generated page body, and never a filesystem path from your machine. Its response carries the candidates it serves plus a `total` count of everything pending, which is where the "showing N of M" line comes from.
+
+**Pipeline.** The `#/pipeline` route shows one row per entity type your active profile declares: the type's valid page count, the state chain its lifecycle moves pages through, a proportional bar of where those pages currently sit, and what the tally adds up to.
+
+The chain is read from the profile's own `initial` and `transitions`, never from the order the lifecycle field's enum happens to list its values in, and colour follows reachability rather than decoration. A state still moving takes the violet ramp in chain order. A state the profile declares `terminal` takes teal. A state no declared transition can reach from `initial` - or a value that is not a declared state at all - is drawn dashed and red, labelled `unreachable`, with a line naming it and saying why. A type that declares no terminal state and no transitions has no derivable order, so every one of its states stays neutral and the row says so instead of implying a sequence.
+
+The right-hand column reports a finding, not a warning. Two collectors walk the same directory with different filters: the page count validates each page against its field contract, the state tally does not. So the tally sum minus the page count is exactly the pages that failed profile validation and still declare a lifecycle state - `2 rejected pages counted here`, or `every page valid` when the two agree. A rejected page that omits the lifecycle field entirely appears in no tally at all, which the footer band says explicitly so the number is never read as the whole set of rejects. Those pages are the same ones listed on `#/health` under **Profile problems**.
+
+A relation band below the rows names each declared relation type with its endpoints, its direction, and how many live relations of that type the graph store holds - `filed-under · articles → desks · 6`.
+
+The route serves the startup snapshot like the rest of the viewer, so a profile edited while the viewer runs needs a restart to appear. Time-in-state is deliberately absent: nothing records when a page entered its current state, and a file's modification time answers a different question.
 
 **Workflow runs.** The `#/workflows` route lists every workflow run under `.llmwiki/workflows/runs/`: which workflow each run belongs to, its run id, its lifecycle status, and the stage it currently sits on. Workflows are declared by a profile, so a project on the built-in default profile has none - run `llmwiki workflow list` to see what your active profile declares.
 

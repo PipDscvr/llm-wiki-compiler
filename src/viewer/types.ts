@@ -16,6 +16,7 @@ import type { ClaimCitation } from "../utils/types.js";
 import type { PageDirectory } from "../export/types.js";
 import type { PageFreshness } from "../freshness/types.js";
 import type { ProfileSummaryBlock } from "../profile/block.js";
+import type { PipelineDefinitions } from "./pipeline.js";
 import type { EntityId } from "../profile/types.js";
 import type { StateStatus } from "../utils/state.js";
 
@@ -322,4 +323,13 @@ export interface ViewerSnapshot {
    * literal wiki/concepts + wiki/queries dirs in both cases.
    */
   profile?: ProfileSummaryBlock;
+  /**
+   * What the active profile DECLARES about its lifecycles and relation types —
+   * the half of the `#/pipeline` panel no count collector carries. ABSENT for
+   * the built-in default profile, which declares neither, so the default
+   * snapshot is byte-identical. Joined with {@link profile}'s counts on the way
+   * out (see `buildPipelineEnvelope`) rather than here, so the snapshot holds
+   * one copy of each fact instead of two views of the same numbers.
+   */
+  pipeline?: PipelineDefinitions;
 }
