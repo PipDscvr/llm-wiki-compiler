@@ -2,10 +2,13 @@
  * DOM-level tests for the `#/health` page head and CONTENTS strip.
  *
  * The Nebula health screen replaced the route's five stat cards with one
- * bordered CONTENTS strip of five rule-divided columns, and gave the page a
- * whole-wiki verdict pill of its own. Both are asserted here; the Lint panel
- * and the right-hand column have their own files (viewer-health-lint,
- * viewer-health-panels) so no file approaches the 400-line cap.
+ * bordered CONTENTS strip of five rule-divided columns. The whole-wiki
+ * verdict is NOT stated here — it lives in the shared header, on every
+ * route — so what this file guards about the verdict is that the page grew
+ * no second copy of it (see test/viewer-header.test.ts for the verdict's own
+ * branch coverage). The Lint panel and the right-hand column have their own
+ * files (viewer-health-lint, viewer-health-panels) so no file approaches the
+ * 400-line cap.
  *
  * The state-status banner block stays here because the banner is injected by
  * viewer.js around the health view rather than by the view itself.
@@ -59,31 +62,19 @@ describe("health head — title, verdict pill, lint run caption", () => {
   });
 });
 
-describe("health verdict pill — derived from errors, stale and orphaned", () => {
-  it("warns when lint reports errors", async () => {
-    const main = await renderHealthRoute({ ...FULL_HEALTH, lint: { warnings: 0, errors: 3 } });
-    const pill = main.querySelector("[data-verdict]");
-    expect(pill?.className).toContain("is-warn");
+describe("health verdict pill — stated once, in the shared header", () => {
+  it("renders exactly one verdict pill, and not inside the page", async () => {
+    const main = await renderHealthRoute(FULL_HEALTH);
+    const doc = main.ownerDocument;
+    expect(doc.querySelectorAll("[data-verdict]")).toHaveLength(1);
+    expect(main.querySelector("[data-verdict]")).toBeNull();
+  });
+
+  it("puts that one pill in the header, where it speaks for every route", async () => {
+    const main = await renderHealthRoute(FULL_HEALTH);
+    const pill = main.ownerDocument.querySelector("[data-verdict]");
+    expect(pill?.closest(".app-brand")).not.toBeNull();
     expect(pill?.textContent).toBe("NEEDS ATTENTION");
-  });
-
-  it("warns when pages are stale or orphaned even with a clean lint run", async () => {
-    const health = { ...FULL_HEALTH, stale: 1, lint: { warnings: 0, errors: 0 } };
-    const main = await renderHealthRoute(health);
-    expect(main.querySelector("[data-verdict]")?.className).toContain("is-warn");
-  });
-
-  it("stays calm when nothing is stale, orphaned, or an error", async () => {
-    const health = { ...FULL_HEALTH, lint: { warnings: 4, errors: 0 } };
-    const main = await renderHealthRoute(health);
-    const pill = main.querySelector("[data-verdict]");
-    expect(pill?.className).toContain("is-ok");
-    expect(pill?.textContent).toBe("ALL CLEAR");
-  });
-
-  it("stays calm when lint has never run and freshness is clean", async () => {
-    const main = await renderHealthRoute({ ...FULL_HEALTH, lint: null });
-    expect(main.querySelector("[data-verdict]")?.className).toContain("is-ok");
   });
 });
 

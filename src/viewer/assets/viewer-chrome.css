@@ -93,10 +93,12 @@
 }
 .freshness-pill.is-ok { color: var(--ok); background: var(--ok-a10); border: 1px solid var(--ok-a24); }
 .freshness-pill.is-warn { color: var(--warn); background: var(--warn-a12); border: 1px solid var(--warn-border); }
-/* Neither calm nor warning: the health screen's Freshness panel uses this
- * when state.json is missing or corrupt, so freshness could not be computed
- * for any page. The calm teal would assert an all-clear nothing backs up;
- * the warning amber would assert a problem that has not been observed. */
+/* Neither calm nor warning: worn when a check could not run at all, so its
+ * result is unknown rather than good or bad. The health screen's Freshness
+ * panel uses it when state.json is missing or corrupt; the header's verdict
+ * pill uses it for the same reason, and when lint has never run. The calm
+ * teal would assert an all-clear nothing backs up; the warning amber would
+ * assert a problem that has not been observed. */
 .freshness-pill.is-unknown { color: var(--fg-faint); background: var(--bg-chip); border: 1px solid var(--border-chip); }
 
 .app-actions { display: flex; align-items: center; gap: 9px; flex: none; }

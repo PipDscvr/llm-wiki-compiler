@@ -6,7 +6,8 @@
  *      (`renderSidebar({})`) so the chrome appears before any fetch settles.
  *   2. `/api/pages` and `/api/health`, fetched once in parallel via
  *      `loadBootstrapData()` and cached in `bootstrapData` — fill in the
- *      sidebar's counts and lint badge, and render the dashboard home.
+ *      sidebar's counts and lint badge, the header's whole-wiki verdict
+ *      pill (which reads both), and render the dashboard home.
  *   3. Hash router (`#/`, `#/concepts/<slug>`, `#/queries/<slug>`,
  *      `#/index`, `#/health`) that fetches `/api/page/...`,
  *      `/api/index`, or `/api/health` and drops the result into the
@@ -375,7 +376,7 @@ function main() {
   wireSearch({ fetchJson });
   void loadBootstrapData().then((data) => {
     renderSidebar(sidebarModel(data));
-    renderHeader(data.pages);
+    renderHeader(data.pages, data.health);
     injectGlobalCorruptBanner(data.pages?.stateStatus);
     void renderRoute();
   });

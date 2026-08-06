@@ -61,7 +61,9 @@ Alongside it, **Freshness** draws one bar per concept page coloured by that page
 
 **Sidebar navigation.** The sidebar no longer lists every compiled page - that listing grew with the size of the wiki, so it moved to `#/concepts`, beside the freshness filter that narrows it. What's left is a fixed set of links in two sections: **BROWSE** (Overview, Concepts, Sources, Queries, Graph explorer - with Concepts, Sources, and Queries each carrying a live count) and **MAINTAIN** (Health & lint, which carries a badge once a lint run exists, and Reviews, which carries the pending-review count). Click any entry to navigate instantly.
 
-**Header freshness badge.** The header carries one freshness indicator for the whole wiki: `ALL PAGES FRESH` when nothing is stale or orphaned, otherwise the counts that need attention - for example `3 STALE · 1 ORPHANED`. To narrow the concept list by freshness (stale, orphaned, contradicted, or archived), use the filter on `#/concepts`, beside the list it narrows.
+**Header verdict pill.** The header carries one verdict for the whole wiki, on every route. It reads `NEEDS ATTENTION` when lint has any findings or any page is stale or orphaned, and `ALL CLEAR` when everything was checked and nothing is wrong. When a check couldn't run at all, the pill names what it doesn't know rather than claiming health it didn't measure: `FRESHNESS UNVERIFIED` when `.llmwiki/state.json` is missing or unreadable, `LINT NEVER RUN` when no lint run has completed, or both. A wiki with real problems reads `NEEDS ATTENTION` even when something else couldn't be checked.
+
+For the per-count detail behind the verdict, open `#/health`. To narrow the concept list by freshness (stale, orphaned, contradicted, or archived), use the filter on `#/concepts`, beside the list it narrows.
 
 **Light and dark themes.** A toggle in the header switches between light and dark and remembers your choice for the next visit. Until you pick one, the viewer follows your operating system's colour scheme, defaulting to dark if that preference isn't available.
 

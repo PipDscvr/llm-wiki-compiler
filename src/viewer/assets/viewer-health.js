@@ -2,23 +2,22 @@
  * llmwiki viewer — the `#/health` route's view.
  *
  * Nebula's health screen answers one question in order: is anything wrong,
- * what is it, and where. So the page reads top to bottom as a head carrying
- * the whole-wiki verdict, a CONTENTS strip of inert counts (deliberately one
- * divided panel, not five cards — five equal tiles gave a zero the same
- * weight as a real figure), then a two-column grid whose wide left side is
- * the Lint panel and whose right side stacks Freshness, Traceability, and
- * the cache note.
+ * what is it, and where. So the page reads top to bottom as a head, a
+ * CONTENTS strip of inert counts (deliberately one divided panel, not five
+ * cards — five equal tiles gave a zero the same weight as a real figure),
+ * then a two-column grid whose wide left side is the Lint panel and whose
+ * right side stacks Freshness, Traceability, and the cache note.
  *
  * Both bootstrap payloads are needed: `/api/health` carries the counts and
  * the lint cache; `/api/pages` carries per-page freshness and the citation
  * totals. Either can be absent — every accessor here defaults rather than
  * assuming a field is present.
  *
- * The verdict pill lives on this page rather than in the persistent header:
- * the header is shared with every other route and was pixel-matched to a
- * different design file whose pill reports freshness alone. Restyling it to
- * carry a whole-wiki verdict would have changed what the Overview says about
- * itself; this page states its own verdict instead.
+ * The whole-wiki verdict is deliberately NOT stated here. It lives in the
+ * persistent header (viewer-header.js), which speaks for every route; this
+ * page briefly carried its own copy beside the title, and two derivations of
+ * one verdict is exactly the drift that produced the contradiction it was
+ * added to fix. The panels below report their own scoped facts instead.
  *
  * The Lint panel is in viewer-health-lint.js — see that module's header.
  */
@@ -87,7 +86,7 @@ const CONTENTS_COLUMNS = [
 export function buildHealthView(health, envelope) {
   const model = buildContentsModel(health, envelope);
   const view = el("section", "health-view");
-  view.appendChild(buildHead(health, model));
+  view.appendChild(buildHead(health));
   view.appendChild(buildContentsStrip(model));
   const grid = el("div", "health-grid");
   grid.appendChild(buildLintPanel(health?.lint ?? null, routablePageIndex(envelope)));
@@ -97,20 +96,13 @@ export function buildHealthView(health, envelope) {
 }
 
 /**
- * Count fields `/api/health` carries, each defaulting to 0. `stale` and
- * `orphaned` are whole-wiki counts straight from the snapshot: the verdict
- * pill speaks for every page, including any the Freshness panel does not
- * draw a bar for, and must still warn if `/api/pages` never arrived.
+ * Count fields `/api/health` carries, each defaulting to 0. The whole-wiki
+ * `stale`/`orphaned` totals are deliberately absent: they belong to the
+ * header's verdict, and the Freshness panel below reports the per-page counts
+ * derived from the same rows it draws its bars from, so its badge, bars, and
+ * sentence cannot contradict each other.
  */
-const HEALTH_COUNT_KEYS = [
-  "concepts",
-  "queries",
-  "sources",
-  "sourceFiles",
-  "pendingReviews",
-  "stale",
-  "orphaned",
-];
+const HEALTH_COUNT_KEYS = ["concepts", "queries", "sources", "sourceFiles", "pendingReviews"];
 
 /**
  * Project both payloads into the one flat model every section below reads.
@@ -123,7 +115,6 @@ function buildContentsModel(health, envelope) {
   const citations = citationTotals(pages);
   return {
     ...healthCounts(health),
-    errors: lintErrors(health),
     totalCitations: citations.total,
     citedCitations: citations.total - citations.unresolved,
     unresolved: citations.unresolved,
@@ -149,11 +140,6 @@ function countVerified(pages) {
 /** The envelope's page rows, or [] when `/api/pages` never arrived. */
 function pagesOf(envelope) {
   return Array.isArray(envelope?.pages) ? envelope.pages : [];
-}
-
-/** Lint's error count, or 0 when lint has never run. */
-function lintErrors(health) {
-  return health?.lint?.errors ?? 0;
 }
 
 /** Citation counts summed across every page, cited and uncited together. */
@@ -186,36 +172,12 @@ function routablePageIndex(envelope) {
   return new Set(pagesOf(envelope).map((page) => `${page.pageDirectory}/${page.slug}`));
 }
 
-/** Build the page head: the title and verdict pill, then the lint-run caption. */
-function buildHead(health, model) {
+/** Build the page head: the title, then the lint-run caption. */
+function buildHead(health) {
   const head = el("div", "health-head");
-  const group = el("div", "health-head-group");
-  group.appendChild(el("h1", "health-title", "Health"));
-  group.appendChild(buildVerdictPill(model));
-  head.appendChild(group);
+  head.appendChild(el("h1", "health-title", "Health"));
   head.appendChild(el("span", "health-lint-run", lintRunCaption(health?.lint ?? null)));
   return head;
-}
-
-/**
- * True when anything on the wiki is actionable. Warnings alone do not
- * qualify: they are advisory, and a verdict that warns at every warning
- * stops meaning anything.
- */
-function needsAttention(model) {
-  return model.errors > 0 || model.stale > 0 || model.orphaned > 0;
-}
-
-/** Build the whole-wiki verdict pill (see {@link needsAttention}). */
-function buildVerdictPill(model) {
-  const warn = needsAttention(model);
-  const pill = el(
-    "span",
-    `freshness-pill ${warn ? "is-warn" : "is-ok"}`,
-    warn ? "NEEDS ATTENTION" : "ALL CLEAR",
-  );
-  pill.dataset.verdict = "";
-  return pill;
 }
 
 /** Compose the "lint last run <ts> · <relative> ago" caption. */

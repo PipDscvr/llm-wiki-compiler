@@ -106,10 +106,12 @@ export function relativeSince(iso) {
 /**
  * Compose a freshness badge label from the two actionable counts, e.g.
  * "2 STALE · 1 ORPHANED". `calmLabel` is what the badge reads when neither
- * count has anything to report — the persistent header says "ALL PAGES
- * FRESH", the health screen's Freshness panel says "IN SYNC" — so the
- * wording stays each surface's own choice while the composition rule stays
- * shared.
+ * count has anything to report — the health screen's Freshness panel says
+ * "IN SYNC" — so the wording stays the calling surface's own choice while
+ * the composition rule stays shared. The persistent header was the second
+ * caller until its pill stopped reporting freshness alone and became the
+ * whole-wiki verdict (see viewer-header.js); `calmLabel` stays a parameter
+ * because the wording is a surface's decision, not this function's.
  *
  * @param {number} stale
  * @param {number} orphaned

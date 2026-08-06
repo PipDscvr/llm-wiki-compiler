@@ -45,10 +45,6 @@
   gap: 20px;
 }
 
-/* The verdict pill sits beside the title on the mockup's own header row
- * (`align-items: center`, gap 10px) rather than on the head's baseline. */
-.health-head-group { display: flex; align-items: center; gap: 10px; }
-
 /* 600 22px/1 sans has no matching token: --type-page-title is the 26px
  * header identity, this is the in-pane section title (tree line 116). */
 .health-title {
