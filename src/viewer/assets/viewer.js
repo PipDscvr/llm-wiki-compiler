@@ -10,7 +10,7 @@
  *      pill (which reads both), and render the dashboard home.
  *   3. Hash router (`#/`, `#/<directory>/<slug>` — where directory is
  *      `concepts`, `queries`, or any entity type the active profile declares —
- *      `#/<entity-type>` for that type's list, `#/index`, `#/health`,
+ *      `#/_type/<entity-type>` for that type's list, `#/index`, `#/health`,
  *      `#/reviews`, `#/workflows`, `#/pipeline`) that
  *      fetches `/api/page/...`, `/api/index`, `/api/health`, `/api/reviews`, or
  *      `/api/workflow-runs` and drops the result into the main pane. The
@@ -41,6 +41,7 @@ import { renderWorkflowRunsList } from "./viewer-workflows.js";
 import { renderPipeline } from "./viewer-pipeline.js";
 import { renderDashboard } from "./viewer-dashboard.js";
 import { buildHealthView } from "./viewer-health.js";
+import { typeListHashType } from "./viewer-routes.js";
 
 const MAIN_SELECTOR = "[data-main-pane]";
 
@@ -76,12 +77,11 @@ const STATIC_ROUTES = new Map([
  * `/api/pages` has settled.
  *
  * Single-segment hashes never reach this pattern — STATIC_ROUTES is consulted
- * first, and an unmatched one still falls back to home.
+ * first, and an unmatched one still falls back to home. A NAMESPACED list hash
+ * (`#/_type/articles`) does match it, which is why the order in
+ * {@link parseRoute} is load-bearing; see {@link namedRoute}.
  */
 const PAGE_HASH_PATTERN = /^#\/([^/]+)\/(.+)$/;
-
-/** Pattern matching a `#/<segment>` hash — one segment, no slug. */
-const SINGLE_SEGMENT_HASH_PATTERN = /^#\/([^/]+)$/;
 
 /**
  * Bootstrap payloads shared by the sidebar, dashboard, and health route.
@@ -121,47 +121,52 @@ function parseRoute(hash) {
  * A route the hash names outright: the fixed table first, then the typed list
  * routes the active profile contributes. Returns undefined when the hash names
  * neither, leaving the page-route path to answer.
+ *
+ * THE ORDER HERE IS LOAD-BEARING. A namespaced list hash is two segments, so
+ * `#/_type/articles` matches PAGE_HASH_PATTERN as readily as it matches the
+ * namespace. Resolving the page pattern first would fetch
+ * `/api/page/_type/articles`, take the 400 the server owes an undeclared
+ * directory, and paint "Page not found" over a route that exists — so the
+ * namespace is consulted before {@link parsePageRoute} ever sees the hash.
  */
 function namedRoute(key) {
   return STATIC_ROUTES.get(key) ?? entityListRoute(key);
 }
 
 /**
- * A single-segment hash whose classification the envelope has not yet answered.
+ * A namespaced list hash whose type the envelope has not yet classified.
  *
  * `renderRoute` runs once before /api/pages settles and again after, so a cold
- * deep link to `#/articles` reaches the first pass with no entity types known.
- * Falling back to home THERE is not merely a wrong first frame: the home render
- * is async and lands after the corrected second pass, overwriting the list it
- * just drew. Holding the route instead means the first pass paints nothing and
- * the second pass paints once, whichever way it resolves.
+ * deep link to `#/_type/articles` reaches the first pass with no entity types
+ * known. Falling back to home THERE is not merely a wrong first frame: the home
+ * render is async and lands after the corrected second pass, overwriting the
+ * list it just drew. Holding the route instead means the first pass paints
+ * nothing and the second pass paints once, whichever way it resolves.
  *
- * Only single-segment hashes wait. A page route (`#/articles/alpha`) is already
- * resolved without the envelope, and once settled an unknown segment falls
- * through to home exactly as before.
+ * Only the namespace waits, and nothing in it is ever a page route: `_type` is
+ * not a name a profile can declare (see viewer-routes.js), so an undeclared type
+ * goes home rather than to a page fetch that could only 400. A page route
+ * (`#/articles/alpha`) resolves without the envelope and never waits.
  */
 function unsettledOrPageRoute(key) {
-  if (!bootstrapData.settled && SINGLE_SEGMENT_HASH_PATTERN.test(key)) return { kind: "pending" };
+  const namespaced = typeListHashType(key) !== null;
+  if (namespaced && !bootstrapData.settled) return { kind: "pending" };
+  if (namespaced) return { kind: "home" };
   return parsePageRoute(key);
 }
 
 /**
- * Resolve `#/<entity-type>` — a profile's typed list route.
+ * Resolve `#/_type/<entity-type>` — a profile's typed list route.
  *
  * Entity types are per-project, so this cannot join STATIC_ROUTES: the match is
  * against what the ENVELOPE declares. Only a declared type resolves, which is
- * what keeps `#/nonsense` falling back to home — a fallback the nav-integrity
- * guard (test/viewer-sidebar-nav.test.ts) relies on to tell a real route from a
- * dead href.
- *
- * The envelope is not there on the first pass: `renderRoute` runs once before
- * /api/pages settles and again after, so a cold deep link to `#/articles`
- * resolves to home first and corrects itself on the second pass.
+ * what keeps `#/_type/nonsense` falling back to home — the same fallback that
+ * catches `#/nonsense`, and the one the nav-integrity guard
+ * (test/viewer-sidebar-nav.test.ts) relies on to tell a real route from a dead
+ * href.
  */
 function entityListRoute(key) {
-  const match = key.match(SINGLE_SEGMENT_HASH_PATTERN);
-  if (!match) return null;
-  const type = decodeSlug(match[1]);
+  const type = typeListHashType(key);
   if (type === null || !declaredEntityTypes().includes(type)) return null;
   return { kind: "entityList", type };
 }

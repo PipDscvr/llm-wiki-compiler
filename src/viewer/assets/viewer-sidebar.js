@@ -24,6 +24,7 @@
 import { el } from "./viewer-dom.js";
 import { lintTotal } from "./viewer-format.js";
 import { NAV_TYPE_CAP, typeNavItems } from "./viewer-nav-types.js";
+import { typeListHashType } from "./viewer-routes.js";
 
 const SIDEBAR_SELECTOR = "[data-sidebar]";
 
@@ -95,20 +96,32 @@ const NAV_SECTIONS = [
 ];
 
 /**
- * Leading segment of `#/<segment>` or `#/<segment>/<slug>`.
+ * Leading segment of a PAGE hash, `#/<segment>/<slug>`.
  *
- * That segment IS the nav route for every list route the sidebar renders, typed
- * ones included, and a page route's leading segment is its parent entry — so
- * `#/articles`, `#/articles/alpha` and `#/concepts/alpha` all resolve to the
- * entry that owns them without a table to keep in step. A segment no entry
- * claims (`#/nonsense`) simply matches no link and leaves the nav unmarked.
+ * A page route's leading segment is its parent nav entry, so `#/concepts/alpha`
+ * and `#/articles/alpha` both resolve to the entry that owns them without a
+ * table to keep in step — including the per-project typed entries the sidebar
+ * cannot enumerate here.
+ *
+ * The slug is REQUIRED. Every single-segment route the viewer has is in
+ * {@link STATIC_ROUTE_FOR_HASH}, and a typed list route is namespaced
+ * (`#/_type/articles`), so a bare `#/articles` routes nowhere — matching it here
+ * would light a nav row while the pane shows the home fallback, which is the
+ * highlight lying about where the reader is.
  */
-const HASH_ROUTE_SEGMENT = /^#\/([^/]+)(?:\/.+)?$/;
+const HASH_ROUTE_SEGMENT = /^#\/([^/]+)\/.+$/;
 
 /** Hashes that resolve to the home route. */
 const HOME_HASHES = new Set(["", "#", "#/"]);
 
-/** Exact-hash to nav route mapping for the static routes. */
+/**
+ * Exact-hash to nav route mapping for the static routes.
+ *
+ * The typed list routes are deliberately absent: they are per-project, and they
+ * are namespaced (`#/_type/<entity-type>`) precisely so a profile's `sources`
+ * type cannot claim the `#/sources` row above. {@link activeRouteName} resolves
+ * the namespace before consulting this table.
+ */
 const STATIC_ROUTE_FOR_HASH = new Map([
   ["#/concepts", "concepts"],
   ["#/queries", "queries"],
@@ -444,34 +457,54 @@ export function markActive() {
   match?.setAttribute("aria-current", "page");
 }
 
+/** True when a nav link is one of the generated entity-type rows. */
+function isTypeLink(link) {
+  return link.dataset.navType !== undefined;
+}
+
 /**
  * The links a hash is allowed to mark.
  *
  * Nothing stops a profile declaring an entity type named after a route the
  * viewer already owns — the built-in `autosci` template declares both `sources`
- * and `reviews` — and that type gets a BROWSE row with the same `data-route` as
- * the fixed entry. The FIXED route still owns the hash (STATIC_ROUTES is
- * consulted first in viewer.js, so it is what actually rendered), so a hash the
- * static table claims may only light a fixed row. Marking the shadowed type row
- * would tell the reader they are somewhere they are not.
+ * and `reviews` — and that type gets a BROWSE row carrying the same
+ * `data-route` as the fixed entry. Which of the two lights up is decided by
+ * WHICH HASH is being resolved, never by document order:
+ *
+ *   `#/_type/sources`  the type's own list route → only a type row may light
+ *   `#/sources`        the viewer's own surface  → only a fixed row may light
+ *   `#/sources/alpha`  a typed page, whose directory IS its entity type, so the
+ *                      type row owns it; a default project has no type rows and
+ *                      falls through to its fixed entry unchanged.
  */
 function markableLinks(links, hash) {
-  if (!STATIC_ROUTE_FOR_HASH.has(hash ?? "")) return links;
-  return links.filter((link) => link.dataset.navType === undefined);
+  if (typeListHashType(hash) !== null) return links.filter(isTypeLink);
+  if (STATIC_ROUTE_FOR_HASH.has(hash ?? "")) return links.filter((link) => !isTypeLink(link));
+  return [...links.filter(isTypeLink), ...links.filter((link) => !isTypeLink(link))];
 }
 
 /**
  * Resolve a hash to the nav route that should be marked current.
  *
- * The static map is consulted first because two of its hashes do NOT name their
- * own segment (`#/index` belongs to Overview). Everything else falls back to the
- * leading segment, which is the route name for list routes and the parent entry
- * for page routes alike — including the per-project typed ones the sidebar
- * cannot enumerate here.
+ * The namespace is consulted FIRST: a typed list hash names its type in its
+ * SECOND segment (`#/_type/articles`), so the leading-segment rule below would
+ * read it as the meaningless route `_type`.
+ *
+ * The static map comes next because one of its hashes does not name its own
+ * segment either (`#/index` belongs to Overview). Everything else falls back to
+ * the leading segment, which is the route name for the fixed list routes and the
+ * parent entry for page routes alike — including the per-project typed pages the
+ * sidebar cannot enumerate here.
  */
 function activeRouteName(hash) {
   const key = hash ?? "";
   if (HOME_HASHES.has(key)) return "home";
+  return typeListHashType(key) ?? fixedRouteName(key);
+}
+
+/** The nav route a hash outside the namespace names: the static table, then the
+ *  page route's parent entry. */
+function fixedRouteName(key) {
   return STATIC_ROUTE_FOR_HASH.get(key) ?? hashRouteSegment(key);
 }
 

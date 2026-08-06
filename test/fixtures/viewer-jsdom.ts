@@ -74,12 +74,22 @@ const THEME_BOOT_SCRIPT = "viewer-theme-boot.js";
  * precautionary pin: the profile-vocabulary projection is imported by
  * `viewer-lists.js` (for a typed list's heading and empty state), and
  * "viewer-lists.js" sorts alphabetically BEFORE "viewer-nav-types.js".
+ *
+ * `viewer-routes.js` is the sixth: the typed list route's namespace is imported
+ * by `viewer-nav-types.js` (which builds the href) and by `viewer-sidebar.js`
+ * (which matches it), and "viewer-nav-types.js" sorts before "viewer-routes.js".
+ * It is listed above its own importer for the same reason.
+ *
+ * `viewer-dashboard-vocabulary.js` is the seventh: `viewer-dashboard.js` imports
+ * the profile-vocabulary projection from it, and sorts before it.
  */
 const MODULE_ORDER = [
   "viewer-dom.js",
   "viewer-format.js",
   "viewer-theme.js",
+  "viewer-routes.js",
   "viewer-nav-types.js",
+  "viewer-dashboard-vocabulary.js",
   "viewer-rail.js",
   "viewer-pattern.js",
   "viewer-stat-card.js",

@@ -42,7 +42,7 @@ Every view in the viewer has its own hash route, so you can bookmark or reload a
 | `#/` | Overview dashboard |
 | `#/concepts` | Concept pages, with the freshness filter |
 | `#/queries` | Saved query pages |
-| `#/<entity-type>` | Pages of one entity type your profile declares, such as `#/articles` |
+| `#/_type/<entity-type>` | Pages of one entity type your profile declares, such as `#/_type/articles` |
 | `#/sources` | Source files, and how many are compiled |
 | `#/index` | The compiled `wiki/index.md` |
 | `#/health` | Wiki health: lint findings by rule, profile problems, freshness, and traceability |
@@ -53,7 +53,9 @@ Every view in the viewer has its own hash route, so you can bookmark or reload a
 
 Individual pages open at `#/concepts/<slug>`, `#/queries/<slug>`, or `#/<entity-type>/<slug>`.
 
-`#/<entity-type>` accepts only the entity types your active profile actually declares - anything else falls back to the Overview dashboard. On a project running the built-in default profile, no entity type is declared and no such route exists.
+`#/_type/<entity-type>` accepts only the entity types your active profile actually declares - anything else falls back to the Overview dashboard. On a project running the built-in default profile, no entity type is declared and no such route exists.
+
+The `_type/` prefix keeps your vocabulary out of the viewer's own URL space. Profiles are free to name an entity type after a screen the viewer already has - the built-in `autosci` template declares types called `sources` and `reviews` - so a list route at the bare name would have opened the viewer's source list or review queue instead of your pages. No profile can declare a type called `_type`, because entity type names must be lowercase letters, digits, and hyphens, which is what makes the prefix safe to reserve. Page routes need no prefix: `#/articles/<slug>` is already checked against your declared types before a page is looked up.
 
 `#/pipeline` appears only on a project running a non-default profile. The built-in default profile declares no entity types and no lifecycles, so there is nothing for the route to draw and the sidebar omits its entry entirely.
 
@@ -67,11 +69,15 @@ An entity page that violates its profile's field contract - a missing required f
 
 Typed entity pages carry the same citation chips and provenance as compiled pages. They do not carry a freshness verdict: freshness is derived from the sources a page was compiled from, and entity pages are authored rather than compiled, so they always read as unverified rather than being labelled fresh on no evidence.
 
-Each entity type your profile declares gets a row in the sidebar's **BROWSE** section and a list route of its own at `#/<entity-type>`, and every page on it opens at `#/<entity-type>/<slug>`. See **Sidebar navigation** below for how BROWSE is built.
+Each entity type your profile declares gets a row in the sidebar's **BROWSE** section and a list route of its own at `#/_type/<entity-type>`, and every page on it opens at `#/<entity-type>/<slug>`. See **Sidebar navigation** below for how BROWSE is built.
 
 ## What the viewer includes
 
-**Overview dashboard.** The `#/` route opens on a dashboard: four counters (concepts, sources, needs attention, and awaiting review), your most recently compiled pages, a compact version of the knowledge graph, a compile receipt (root, profile, state, index availability, lint status, and the percentage of citations that resolve to a source file), and a list of suggested next actions. The needs-attention counter is dangling links plus unresolved citations, not lint findings, so it always has a value even when lint has never run. Next actions are informational - the viewer is read-only and cannot act on them for you - so each row names a CLI command where one applies (`llmwiki compile` for stale pages, `llmwiki lint` if lint has never run, `llmwiki export` to export for agents) or the manual fix otherwise, such as creating the missing pages or correcting the targets behind dangling links.
+**Overview dashboard.** The `#/` route opens on a dashboard: four counters (concepts, sources, needs attention, and awaiting review), your most recently compiled pages, a compact version of the knowledge graph, a compile receipt (root, profile, state, index availability, lint status, and the percentage of citations that resolve to a source file), and a list of suggested next actions. The needs-attention counter is dangling links plus unresolved citations, not lint findings, so it always has a value even when lint has never run.
+
+The first counter names what your project actually holds. On the built-in default profile it counts your concept pages and is headed **Concepts**, and the recently-compiled panel links to `#/concepts`. On a project running another profile there are no concepts to count - your pages live in the types that profile declares - so the counter is headed **Entity pages**, counts every page across those types, and says how many types they span. It reports the same figures the sidebar's type rows add up to, and the panel below links to `#/pipeline`, the screen that lists every declared type. The other three counters mean the same thing on both, and there are always four: a profile can declare a dozen entity types, and per-type counts belong to the sidebar and `#/pipeline`.
+
+Next actions are informational - the viewer is read-only and cannot act on them for you - so each row names a CLI command where one applies (`llmwiki compile` for stale pages, `llmwiki lint` if lint has never run, `llmwiki export` to export for agents) or the manual fix otherwise, such as creating the missing pages or correcting the targets behind dangling links.
 
 **Health screen.** The `#/health` route opens on a whole-wiki verdict - `NEEDS ATTENTION` when lint reports errors, any page is stale or orphaned, or the profile collector found a problem, and `ALL CLEAR` otherwise - beside the time of the last lint run. Below it, a CONTENTS strip counts what the wiki holds (concepts, sources, citations, saved queries, and pages awaiting review); a count of zero renders as a dim dash rather than a bold `0`, so an empty column does not read as a figure worth acting on.
 
@@ -108,6 +114,8 @@ Like `#/reviews`, this route re-reads disk on every visit rather than serving th
 **Sidebar navigation.** The sidebar no longer lists every compiled page - that listing grew with the size of the wiki, so it moved to `#/concepts`, beside the freshness filter that narrows it. What's left is links in two sections: **BROWSE** and **MAINTAIN** (Health & lint, which carries a badge once a lint run exists; Reviews, which carries the pending-review count; Workflows, which carries no count because runs are not part of the startup snapshot; and Pipeline, on a profile project only). Click any entry to navigate instantly.
 
 **BROWSE is your profile's vocabulary.** Overview, Sources, and Graph explorer are fixed, and between them sit one row per entity type. On the built-in default profile those are Concepts and Queries - the two types it declares - so a default project's sidebar reads Overview, Concepts, Sources, Queries, Graph explorer. On a project running another profile, that profile's own types take their place: a newsroom profile reads Overview, Articles, Desks, Bylines, Sources, Graph explorer, and the profile's name sits on the BROWSE header.
+
+Each type row links to that type's own list route at `#/_type/<entity-type>`, so a type sharing a name with one of the viewer's own screens still opens your pages and highlights your row. The viewer's `#/sources` and `#/reviews` rows keep their own screens.
 
 Type rows are ordered by page count, highest first, with ties falling back to the order your profile declares them - never alphabetically, so you can predict the result from your own profile file. A type with no pages still gets a row, showing a dim dash: its absence is worth knowing. Long names truncate with an ellipsis and show their full text on hover; the count never truncates. Past eleven rows the list scrolls - every type stays reachable - with a count of how many are below the fold and an **All types** link to `#/pipeline`, which lists the full set.
 

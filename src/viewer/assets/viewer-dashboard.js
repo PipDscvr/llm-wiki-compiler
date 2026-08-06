@@ -60,9 +60,17 @@ import { LEGEND_KINDS, loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js
 import { buildPatternStrip } from "./viewer-pattern.js";
 import { renderDashboardRail } from "./viewer-rail.js";
 import { buildStatCard } from "./viewer-stat-card.js";
+import {
+  heroTotals,
+  inventoryCard,
+  inventoryLink,
+  profileVocabulary,
+} from "./viewer-dashboard-vocabulary.js";
 
 /**
- * Stat card definitions: key, label, badge, and value/sub-line derivations.
+ * The three stat cards that mean the same thing whatever profile is active.
+ * The FIRST card is the wiki's own inventory, whose label and number are the
+ * active profile's to name — see `inventoryCard` (viewer-dashboard-vocabulary.js).
  *
  * `badge` is a fixed category noun (mockup tree lines 108/118/128) — true
  * regardless of the card's count, like "PAGES" or "INPUT" — except
@@ -73,16 +81,6 @@ import { buildStatCard } from "./viewer-stat-card.js";
  * candidate count).
  */
 const STAT_CARDS = [
-  {
-    key: "concepts",
-    label: "Concepts",
-    badge: "PAGES",
-    value: (m) => m.counts.concepts ?? 0,
-    // Scoped to concept pages only (not envelope-wide totalCitations/pageCount,
-    // which also include queries) — the card is named "Concepts", so its
-    // sub-line must describe concepts, not the whole envelope.
-    sub: (m) => `${plural(m.conceptsCitations, "citation")} · ${plural(m.counts.concepts ?? 0, "page")}`,
-  },
   {
     key: "sources",
     label: "Sources",
@@ -193,7 +191,10 @@ function buildModel(envelope, health) {
     // Concepts-only citation total for the "Concepts" stat card's sub-line —
     // totalCitations above is envelope-wide (concepts + queries) and would
     // mislabel a query's citations as belonging to the concepts card.
-    conceptsCitations: citationsInDirectory(pages, "concepts"),
+    conceptsCitations: citationsWhere(pages, (directory) => directory === "concepts"),
+    // Null on a default project, which is what leaves every surface that reads
+    // it exactly as it was.
+    vocabulary: profileVocabulary(envelope, pages),
     unresolved,
     dangling,
     attention: dangling + unresolved,
@@ -206,10 +207,9 @@ function sumBy(items, project) {
   return items.reduce((total, item) => total + project(item), 0);
 }
 
-/** Sum citationCount over the pages in one pageDirectory (e.g. "concepts"). */
-function citationsInDirectory(pages, directory) {
-  const inDirectory = pages.filter((p) => p.pageDirectory === directory);
-  return sumBy(inDirectory, (p) => p.citationCount ?? 0);
+/** Sum citationCount over the pages whose directory `matches`. */
+function citationsWhere(pages, matches) {
+  return sumBy(pages.filter((p) => matches(p.pageDirectory)), (p) => p.citationCount ?? 0);
 }
 
 /**
@@ -227,10 +227,12 @@ function pageMetaIndex(pages) {
   return index;
 }
 
-/** Build the four-card stat grid. */
+/** Build the four-card stat grid: the profile's inventory card, then the fixed three. */
 function buildStatGrid(model) {
   const grid = el("div", "stat-grid");
-  for (const card of STAT_CARDS) grid.appendChild(buildStatCard(card, model));
+  for (const card of [inventoryCard(model.vocabulary), ...STAT_CARDS]) {
+    grid.appendChild(buildStatCard(card, model));
+  }
   return grid;
 }
 
@@ -239,10 +241,11 @@ function buildHero(model) {
   const hero = el("div", "hero");
   const copy = el("div", "hero-copy");
   copy.appendChild(el("div", "hero-title", "Your knowledge base is ready."));
+  const totals = heroTotals(model);
   copy.appendChild(
     el("div", "hero-body",
-      `${plural(model.counts.concepts ?? 0, "page")}, ` +
-        `${plural(model.totalCitations, "citation")} traced to source spans.`),
+      `${plural(totals.pages, "page")}, ` +
+        `${plural(totals.citations, "citation")} traced to source spans.`),
   );
   hero.appendChild(copy);
   const actions = el("div", "hero-actions");
@@ -268,12 +271,14 @@ function buildSplit(model) {
 
 /**
  * Build the recently-compiled panel. The head's "View all" (mockup tree
- * line 161) and the footer's "All N concepts →" (tree line 223) both point
- * at #/concepts — two affordances to the same place, matching the mockup's
- * own duplication rather than dropping one as redundant.
+ * line 161) and the footer's "All N concepts →" (tree line 223) point at the
+ * same place — two affordances to one destination, matching the mockup's own
+ * duplication rather than dropping one as redundant. WHICH place, and what the
+ * footer one counts, is the active profile's vocabulary (see `inventoryLink`).
  */
 function buildRecentPanel(model) {
-  const panel = buildPanel("Recently compiled", buildTrailingLink("View all", "#/concepts"));
+  const inventory = inventoryLink(model);
+  const panel = buildPanel("Recently compiled", buildTrailingLink("View all", inventory.href));
   const body = el("div", "panel-body");
   if (model.recentPages.length === 0) {
     body.appendChild(
@@ -291,12 +296,12 @@ function buildRecentPanel(model) {
   // The mockup's footer caption ("cited / total claims per page", tree line
   // 221) describes the per-row claims ratio this build omits (no claims
   // inventory to back it — see file header); this caption instead describes
-  // what the row actually shows. The "N concepts" count is real data,
-  // already computed for the hero/stat cards above, not a mockup literal.
+  // what the row actually shows. The "All N …" count is real data, already
+  // computed for the hero/stat cards above, not a mockup literal.
   panel.appendChild(
     buildPanelFooter(
       "cited pages, most recent first",
-      buildTrailingLink(`All ${plural(model.counts.concepts ?? 0, "concept")} →`, "#/concepts"),
+      buildTrailingLink(inventory.allText, inventory.href),
     ),
   );
   return panel;

@@ -1,16 +1,21 @@
 /**
  * Typed entity LIST routes — the destination every profile type row needs.
  *
- * `#/articles` was not a route before this: `STATIC_ROUTES` is an exact map with
- * no typed entries and the page pattern needs two segments, so a single-segment
- * typed hash fell through to home. A nav row pointing at one would have been a
- * dead link that renders the dashboard and looks fine — the defect this branch
- * has already shipped once.
+ * There was no such route at first: `STATIC_ROUTES` is an exact map with no
+ * typed entries and the page pattern needs two segments, so a typed list hash
+ * fell through to home. A nav row pointing at one would have been a dead link
+ * that renders the dashboard and looks fine — the defect this branch has already
+ * shipped once.
  *
- * Entity types are per-project, so the route table cannot be static: a single
- * segment is a list route only when the envelope DECLARES it. `#/nonsense` must
- * still fall back to home, because that fallback is what the nav-integrity guard
- * uses to tell a real route from a dead href.
+ * Entity types are per-project, so the route table cannot be static: a hash is a
+ * list route only when the envelope DECLARES the type it names. `#/nonsense`
+ * must still fall back to home, because that fallback is what the nav-integrity
+ * guard uses to tell a real route from a dead href.
+ *
+ * These routes are namespaced under `#/_type/` so a type named after a route the
+ * viewer owns still reaches its own pages; the namespace itself is pinned in
+ * test/viewer-typed-list-namespace.test.ts. Here it is only the form the hashes
+ * take.
  */
 
 import { describe, expect, it } from "vitest";
@@ -38,13 +43,13 @@ async function mainAt(hash: string): Promise<HTMLElement> {
 
 describe("a typed entity list route", () => {
   it("renders that type's pages under its title-cased name", async () => {
-    const main = await mainAt("#/articles");
+    const main = await mainAt("#/_type/articles");
     expect(main.querySelector("h1")?.textContent).toBe("Articles");
     expect(main.querySelectorAll(".list-row")).toHaveLength(2);
   });
 
   it("links each row at the typed page route that already resolves", async () => {
-    const main = await mainAt("#/articles");
+    const main = await mainAt("#/_type/articles");
     const hrefs = Array.from(main.querySelectorAll(".list-row a")).map((a) =>
       a.getAttribute("href"),
     );
@@ -52,7 +57,7 @@ describe("a typed entity list route", () => {
   });
 
   it("marks its own sidebar entry current", async () => {
-    const doc = await mountVocabulary(NEWSROOM, { pages: PAGES, hash: "#/articles" });
+    const doc = await mountVocabulary(NEWSROOM, { pages: PAGES, hash: "#/_type/articles" });
     const current = doc.querySelector('.sidebar a[aria-current="page"]');
     expect(current?.getAttribute("data-route")).toBe("articles");
   });
@@ -66,25 +71,25 @@ describe("a typed entity list route", () => {
 
 describe("a declared but empty type", () => {
   it("renders the teaching empty state, not the transient placeholder", async () => {
-    const main = await mainAt("#/desks");
+    const main = await mainAt("#/_type/desks");
     expect(main.querySelector(".empty-state-title")?.textContent).toBe("No desks yet");
     expect(main.querySelector(".placeholder")).toBeNull();
   });
 
   it("names the type in its body rather than talking about concepts", async () => {
-    const main = await mainAt("#/desks");
+    const main = await mainAt("#/_type/desks");
     expect(main.querySelector(".empty-state-body")?.textContent).toContain("desks");
   });
 });
 
-describe("an undeclared single segment", () => {
+describe("a hash naming no declared type", () => {
   it("still falls back to home", async () => {
     const main = await mainAt("#/nonsense");
     expect(main.className).toContain("dashboard");
   });
 
   it("falls back to home on a default project, where no type is declared", async () => {
-    const doc = await mountVocabulary(undefined, { hash: "#/articles" });
+    const doc = await mountVocabulary(undefined, { hash: "#/_type/articles" });
     const main = doc.querySelector("[data-main-pane]") as HTMLElement;
     expect(main.className).toContain("dashboard");
   });
@@ -99,7 +104,7 @@ describe("a cold deep link to a typed list route", () => {
     const { responder, release } = deferredVocabularyResponder(
       vocabularyEnvelope(NEWSROOM, PAGES),
     );
-    const { dom } = await mountViewerDom([], responder, "#/articles");
+    const { dom } = await mountViewerDom([], responder, "#/_type/articles");
     const main = dom.window.document.querySelector("[data-main-pane]") as HTMLElement;
     expect(main.querySelector(".placeholder")?.textContent).toContain("Loading");
     release();

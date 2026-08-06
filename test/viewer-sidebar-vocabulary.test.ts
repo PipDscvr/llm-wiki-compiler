@@ -68,10 +68,12 @@ describe("BROWSE on a profile project", () => {
     expect(entries.at(-1)?.label).toBe("Graph explorer");
   });
 
-  it("links each type row at its own single-segment route", async () => {
+  it("links each type row at its own namespaced list route", async () => {
+    // Namespaced under `#/_type/` so a type named after a route the viewer owns
+    // still reaches its own pages — see test/viewer-typed-list-namespace.test.ts.
     const sidebar = await mountVocabularySidebar(types(["articles", 6]));
     const row = sidebar.querySelector('a[data-route="articles"]');
-    expect(row?.getAttribute("href")).toBe("#/articles");
+    expect(row?.getAttribute("href")).toBe("#/_type/articles");
   });
 
   it("title-cases the label while the type id stays the route", async () => {

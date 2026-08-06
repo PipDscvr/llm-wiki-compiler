@@ -35,6 +35,8 @@ export interface TypedPage {
   title: string;
   updatedAt: string;
   entityType?: string;
+  /** Only the dashboard reads this; a list row shows it but never sums it. */
+  citationCount?: number;
 }
 
 /** Build the entity-type block from `[id, count]` pairs, in declaration order. */
@@ -48,7 +50,12 @@ export function manyTypes(count: number): EntityType[] {
 }
 
 /** Build a typed entity page row for `/api/pages.pages`. */
-export function typedPage(entityType: string, slug: string, updatedAt: string): TypedPage {
+export function typedPage(
+  entityType: string,
+  slug: string,
+  updatedAt: string,
+  citationCount?: number,
+): TypedPage {
   return {
     id: `${entityType}/${slug}`,
     pageDirectory: entityType,
@@ -56,13 +63,21 @@ export function typedPage(entityType: string, slug: string, updatedAt: string): 
     title: slug.toUpperCase(),
     updatedAt,
     entityType,
+    ...(citationCount === undefined ? {} : { citationCount }),
   };
 }
 
-/** The bootstrap envelope; `entityTypes` absent means a DEFAULT project. */
+/**
+ * The bootstrap envelope; `entityTypes` absent means a DEFAULT project.
+ *
+ * `overrides` is merged last so a test can vary the fields its own surface
+ * reads — source filenames for the list routes, counts and graph totals for the
+ * dashboard — without a second envelope literal drifting away from this one.
+ */
 export function vocabularyEnvelope(
   entityTypes: EntityType[] | undefined,
   pages: TypedPage[] = [],
+  overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
     project: { title: "demo", rootName: "demo" },
@@ -74,6 +89,7 @@ export function vocabularyEnvelope(
     recentPages: [],
     pages,
     ...(entityTypes ? { profilePipeline: { entityTypes } } : {}),
+    ...overrides,
   };
 }
 

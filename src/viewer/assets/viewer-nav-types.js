@@ -12,6 +12,8 @@
  * reading (and testing) without the DOM building around them.
  */
 
+import { typeListHref } from "./viewer-routes.js";
+
 /**
  * Rows BROWSE shows before it caps the list.
  *
@@ -69,7 +71,10 @@ function typeNavItem(entry) {
   const label = navTypeLabel(entry.type);
   return {
     route: entry.type,
-    href: `#/${encodeURIComponent(entry.type)}`,
+    // Namespaced, so a type named after a route the viewer owns (`sources`,
+    // `reviews` — both shipped by the autosci template) still reaches its own
+    // pages. See viewer-routes.js.
+    href: typeListHref(entry.type),
     label,
     // The full text, kept for the `title` the truncating label carries.
     title: label,
