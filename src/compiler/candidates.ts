@@ -41,11 +41,13 @@ export {
   readCandidate,
   readCandidateBySlug,
   listCandidates,
+  listCandidatePage,
   countCandidates,
   listLinkResolvablePendingSlugs,
   loadCandidateOrFail,
   loadCandidateUnderLockOrFail,
 } from "./candidate-read.js";
+export type { CandidatePage } from "./candidate-read.js";
 export { UnsafeCandidateIdError } from "./candidate-paths.js";
 
 /** Length (bytes) of the random suffix appended to candidate ids. */

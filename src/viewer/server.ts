@@ -25,8 +25,8 @@ import { renderPageHtml } from "./render.js";
 import { searchPages } from "./search.js";
 import { workflowStatus } from "../workflows/status.js";
 import { buildWorkflowRunsEnvelope } from "./workflow-runs.js";
-import { listCandidates } from "../compiler/candidates.js";
-import { buildReviewsEnvelope } from "./reviews.js";
+import { listCandidatePage } from "../compiler/candidates.js";
+import { buildReviewsEnvelope, REVIEW_LIST_LIMIT } from "./reviews.js";
 import type { PageDirectory } from "../export/types.js";
 import { UNRESOLVED_CITATION_CODE } from "./types.js";
 import type { ViewerSnapshot, ViewerPage } from "./types.js";
@@ -429,16 +429,19 @@ async function handleApiWorkflowRuns(res: ServerResponse, root: string): Promise
 }
 
 /**
- * `/api/reviews` — read-only projection of every pending review candidate.
+ * `/api/reviews` — read-only projection of the pending review queue.
  * Candidates live under `.llmwiki/candidates/` (NOT in the frozen snapshot),
- * so this reads them at REQUEST time via the shared sanitizing
- * `listCandidates(root)`. Deliberately NOT folded into `/api/health`: that
- * payload is fetched by every route at bootstrap and must stay cheap. Strictly
+ * so this reads them at REQUEST time. It reads a BOUNDED page rather than the
+ * whole queue: `listCandidatePage` opens only the candidates it serves, so a
+ * corpus held wholesale by `heldReasons: "all"` costs the same per request as a
+ * handful. `total` still reports the real queue depth, which the client renders
+ * as "showing N of M". Deliberately NOT folded into `/api/health`: that payload
+ * is fetched by every route at bootstrap and must stay cheap. Strictly
  * read-only — no approve/reject, and the projection drops the candidate `body`
  * and every absolute path (see `buildReviewsEnvelope`).
  */
 async function handleApiReviews(res: ServerResponse, root: string): Promise<void> {
-  writeJson(res, 200, buildReviewsEnvelope(await listCandidates(root)));
+  writeJson(res, 200, buildReviewsEnvelope(await listCandidatePage(root, REVIEW_LIST_LIMIT)));
 }
 
 /** `/api/health` — cheap status summary. */

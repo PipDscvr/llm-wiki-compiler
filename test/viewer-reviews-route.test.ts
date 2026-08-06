@@ -47,19 +47,23 @@ const REVIEWS = [
   },
 ];
 
-/** Responder serving an empty project plus the given `/api/reviews` rows. */
-function responderWithReviews(reviews: unknown[]): FetchResponder {
+/**
+ * Responder serving an empty project plus the given `/api/reviews` payload.
+ * `total` defaults to the row count — the un-truncated case — and is passed
+ * explicitly to mimic a queue the endpoint's cap cut short.
+ */
+function responderWithReviews(reviews: unknown[], total = reviews.length): FetchResponder {
   return (url) => {
     if (url.endsWith("/api/pages")) return jsonResponse(EMPTY_DEMO_ENVELOPE);
     if (url.endsWith("/api/health")) return jsonResponse({ lint: null });
-    if (url.endsWith("/api/reviews")) return jsonResponse({ reviews });
+    if (url.endsWith("/api/reviews")) return jsonResponse({ reviews, total });
     return null;
   };
 }
 
 /** Mount at `#/reviews` with the given rows and return the main pane. */
-async function mountReviews(reviews: unknown[]): Promise<HTMLElement> {
-  const { dom } = await mountViewerDom([], responderWithReviews(reviews), "#/reviews");
+async function mountReviews(reviews: unknown[], total?: number): Promise<HTMLElement> {
+  const { dom } = await mountViewerDom([], responderWithReviews(reviews, total), "#/reviews");
   return dom.window.document.querySelector("[data-main-pane]") as HTMLElement;
 }
 
@@ -111,6 +115,35 @@ describe("#/reviews — empty queue", () => {
     expect(main.querySelector(".placeholder")).toBeNull();
     expect(main.textContent?.trim()).not.toBe("");
     expect(main.querySelector("h1")?.textContent).toBe("Reviews");
+  });
+});
+
+describe("#/reviews — a queue larger than the endpoint's cap", () => {
+  // `/api/reviews` is bounded (see src/viewer/reviews.ts), so a long queue
+  // arrives already cut short. A list that quietly stops at the cap reads as
+  // "you have 200 pending reviews", so the pane must state the slice — the
+  // same honesty the Lint panel's `other · N rules` roll-up follows.
+  it("says how many it is showing out of how many exist", async () => {
+    const main = await mountReviews(REVIEWS, 5000);
+    expect(main.querySelector(".list-caption")?.textContent).toContain(
+      "Showing 2 of 5000 pending candidates",
+    );
+  });
+
+  it("names the CLI that shows the whole queue, since the viewer cannot", async () => {
+    const main = await mountReviews(REVIEWS, 5000);
+    expect(main.querySelector(".list-caption")?.textContent).toContain("llmwiki review list");
+  });
+
+  it("shows no truncation notice when the whole queue is on screen", async () => {
+    const main = await mountReviews(REVIEWS);
+    expect(main.querySelector(".list-caption")).toBeNull();
+    expect(main.querySelectorAll(".list-row")).toHaveLength(2);
+  });
+
+  it("shows no truncation notice for an empty queue", async () => {
+    const main = await mountReviews([]);
+    expect(main.querySelector(".list-caption")).toBeNull();
   });
 });
 

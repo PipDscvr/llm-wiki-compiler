@@ -20,8 +20,9 @@
 import { describe, it, expect } from "vitest";
 import path from "path";
 import { makeTempRoot } from "./fixtures/temp-root.js";
-import { writeCandidate } from "../src/compiler/candidates.js";
+import { writeCandidate, writeFreshCandidate } from "../src/compiler/candidates.js";
 import type { CandidateDraft } from "../src/compiler/candidates.js";
+import { REVIEW_LIST_LIMIT } from "../src/viewer/reviews.js";
 import { useViewerProcessLifecycle } from "./fixtures/run-cli-server.js";
 import { fetchJson } from "./fixtures/viewer-fetch.js";
 
@@ -44,6 +45,29 @@ interface ReviewRow {
 /** Read the `reviews` array out of the `/api/reviews` envelope. */
 function rowsOf(body: unknown): ReviewRow[] {
   return (body as { reviews: ReviewRow[] }).reviews;
+}
+
+/** Read the true pending-candidate total out of the `/api/reviews` envelope. */
+function totalOf(body: unknown): number {
+  return (body as { total: number }).total;
+}
+
+/**
+ * Seed `count` distinct pending candidates. `writeFreshCandidate` rather than
+ * `writeCandidate`: the latter re-lists the whole queue on every write to
+ * canonicalize duplicates, which is O(n²) at the sizes this cap is about.
+ * Every slug here is distinct, so there is nothing to canonicalize.
+ */
+async function seedQueue(root: string, count: number): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    await writeFreshCandidate(root, {
+      title: `Candidate ${i}`,
+      slug: `candidate-${String(i).padStart(4, "0")}`,
+      summary: `Summary ${i}`,
+      sources: ["karpathy.md"],
+      body: `---\ntitle: Candidate ${i}\n---\n\nBody ${i}.`,
+    });
+  }
 }
 
 /** Seed one pending candidate through the project's own writer, so the on-disk
@@ -116,10 +140,35 @@ describe("llmwiki view — /api/reviews", () => {
     const reviews = await fetchJson(handle, "/api/reviews");
     expect(reviews.status).toBe(200);
     expect(rowsOf(reviews.body)).toEqual([]);
+    expect(totalOf(reviews.body)).toBe(0);
     // The sidebar's pending-review count and this list read the same store,
     // so the bootstrap envelope must agree with the empty queue.
     const pages = await fetchJson(handle, "/api/pages");
     expect(pages.status).toBe(200);
     expect((pages.body as { counts: { pendingReviews: number } }).counts.pendingReviews).toBe(0);
+  });
+});
+
+describe("llmwiki view — /api/reviews is bounded", () => {
+  // `heldReasons: "all"` holds every page, so a large corpus compiled under it
+  // puts one candidate file per page behind this route — and the route re-reads
+  // disk on every visit. The response is capped; `total` still tells the truth.
+  it("caps the rows at the limit while reporting the true total", async () => {
+    const root = await makeTempRoot("viewer-reviews-cap");
+    await seedQueue(root, REVIEW_LIST_LIMIT + 3);
+    const handle = await startViewer(root);
+    const { status, body } = await fetchJson(handle, "/api/reviews");
+    expect(status).toBe(200);
+    expect(rowsOf(body)).toHaveLength(REVIEW_LIST_LIMIT);
+    expect(totalOf(body)).toBe(REVIEW_LIST_LIMIT + 3);
+  });
+
+  it("reports a total equal to the row count when the queue fits under the cap", async () => {
+    const root = await makeTempRoot("viewer-reviews-undercap");
+    await seedQueue(root, 3);
+    const handle = await startViewer(root);
+    const { body } = await fetchJson(handle, "/api/reviews");
+    expect(rowsOf(body)).toHaveLength(3);
+    expect(totalOf(body)).toBe(3);
   });
 });

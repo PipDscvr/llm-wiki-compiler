@@ -14,7 +14,7 @@
  */
 
 import { el, emptyState, heading } from "./viewer-dom.js";
-import { relativeAge } from "./viewer-format.js";
+import { plural, relativeAge } from "./viewer-format.js";
 
 /**
  * Human wording for each policy held-reason code (see `src/review/policy.ts`
@@ -38,16 +38,26 @@ const HELD_REASON_LABELS = {
 const DEFAULT_TARGET_DIRECTORY = "concepts";
 
 /**
+ * The command that shows a queue too long for this route. The viewer is
+ * read-only and unpaginated, so when the endpoint's cap bites the CLI is where
+ * the rest of the queue lives.
+ */
+const FULL_QUEUE_COMMAND = "llmwiki review list";
+
+/**
  * Render the review-queue route from an `/api/reviews` payload.
  *
  * @param {HTMLElement} main - The main pane to render into.
- * @param {{reviews?: unknown[]}} payload - The `/api/reviews` envelope.
+ * @param {{reviews?: unknown[], total?: number}} payload - The `/api/reviews`
+ *   envelope. `total` is the whole queue's depth, which can exceed the rows
+ *   served (the endpoint is bounded — see `src/viewer/reviews.ts`).
  */
 export function renderReviewsList(main, payload) {
   const reviews = reviewsIn(payload);
   main.innerHTML = "";
   main.className = "main-pane list-pane";
   main.appendChild(heading("h1", "Reviews"));
+  appendTruncationNotice(main, reviews.length, totalIn(payload, reviews.length));
   const body = el("div", "list-body");
   main.appendChild(body);
   if (reviews.length === 0) {
@@ -60,6 +70,30 @@ export function renderReviewsList(main, payload) {
 /** The rows in an `/api/reviews` envelope, defended against a malformed payload. */
 function reviewsIn(payload) {
   return Array.isArray(payload?.reviews) ? payload.reviews : [];
+}
+
+/**
+ * The queue's true depth, falling back to the rows on screen when the payload
+ * does not carry one — an absent `total` must never be read as "zero pending",
+ * which would turn a full queue into a phantom truncation notice.
+ */
+function totalIn(payload, shownCount) {
+  const total = payload?.total;
+  return typeof total === "number" && Number.isFinite(total) ? total : shownCount;
+}
+
+/**
+ * State the slice when the endpoint served fewer candidates than exist. A list
+ * that quietly stops at the cap reads as "you have 200 pending reviews", so the
+ * pane names both numbers — the same honesty the Lint panel's `other · N rules`
+ * roll-up follows. Nothing is drawn when the whole queue is on screen: a
+ * caption restating a count the reader can see is noise.
+ */
+function appendTruncationNotice(main, shownCount, total) {
+  if (total <= shownCount) return;
+  const shown = `Showing ${shownCount} of ${plural(total, "pending candidate")}`;
+  const notice = `${shown} · ${FULL_QUEUE_COMMAND} shows the whole queue`;
+  main.appendChild(el("p", "list-caption", notice));
 }
 
 /**

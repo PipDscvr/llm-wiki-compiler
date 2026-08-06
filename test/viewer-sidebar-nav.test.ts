@@ -8,6 +8,16 @@
  * meaningful, reassuring "0", not an absence — and an unrun lint omits its
  * badge entirely), and active-route marking including page routes marking
  * their parent nav entry.
+ *
+ * The nav-integrity test at the bottom is the load-bearing one. It replaces a
+ * test called "links each nav entry to its route" that never read a single
+ * `href`: it collected `data-route` values and checked membership with
+ * `arrayContaining`, so an entry pointing at a dead hash passed, and it did —
+ * for the entire life of the bug where "Reviews" pointed at `#/health` and
+ * highlighted "Health & lint". The replacement NAVIGATES to each entry's own
+ * href and asserts the entry that lights up is that same entry, and it derives
+ * the entry list from the rendered DOM so a nav entry added later is covered
+ * without joining a list.
  */
 
 import { describe, expect, it } from "vitest";
@@ -28,11 +38,17 @@ const ENVELOPE = {
   pages: [],
 };
 
-/** Responder serving the envelope plus a health payload with the given lint block. */
+/**
+ * Responder serving the envelope plus a health payload with the given lint
+ * block. `/api/reviews` is served too — it is the one nav destination that
+ * fetches per visit, and a 404 there would paint an error banner that the
+ * nav-integrity test below could mistake for a rendered route.
+ */
 function responderWithLint(lint: unknown): FetchResponder {
   return (url) => {
     if (url.endsWith("/api/pages")) return jsonResponse(ENVELOPE);
     if (url.endsWith("/api/health")) return jsonResponse({ lint });
+    if (url.endsWith("/api/reviews")) return jsonResponse({ reviews: [], total: 0 });
     return null;
   };
 }
@@ -51,16 +67,6 @@ describe("sidebar navigation", () => {
     );
     expect(labels).toContain("BROWSE");
     expect(labels).toContain("MAINTAIN");
-  });
-
-  it("links each nav entry to its route", async () => {
-    const sidebar = await mountSidebar(null);
-    const routes = Array.from(sidebar.querySelectorAll("a[data-route]")).map(
-      (a) => a.getAttribute("data-route"),
-    );
-    expect(routes).toEqual(
-      expect.arrayContaining(["home", "concepts", "sources", "queries", "graph", "health"]),
-    );
   });
 
   it("renders the project title and read-only marker", async () => {
@@ -128,5 +134,59 @@ describe("sidebar navigation", () => {
     const sidebar = await mountSidebar(null);
     expect(sidebar.textContent).not.toContain("Settings");
     expect(sidebar.textContent).not.toContain("Compile & export");
+  });
+});
+
+/** One nav entry as the sidebar actually rendered it. */
+interface NavEntry {
+  route: string;
+  href: string;
+}
+
+/** Every nav entry the sidebar renders, read from the DOM rather than a fixed list. */
+async function renderedNavEntries(): Promise<NavEntry[]> {
+  const sidebar = await mountSidebar(null);
+  return Array.from(sidebar.querySelectorAll("a[data-route]")).map((a) => ({
+    route: a.getAttribute("data-route") ?? "",
+    href: a.getAttribute("href") ?? "",
+  }));
+}
+
+/** Mount at `href` and report what the main pane and the sidebar did with it. */
+async function visitHref(href: string): Promise<{ painted: boolean; current: string | null }> {
+  const { dom } = await mountViewerDom([], responderWithLint(null), href);
+  const doc = dom.window.document;
+  const main = doc.querySelector("[data-main-pane]") as HTMLElement;
+  const current = doc.querySelector('.sidebar a[aria-current="page"]');
+  return { painted: isPanePainted(main), current: current?.getAttribute("data-route") ?? null };
+}
+
+/**
+ * Evidence the router painted this route rather than leaving the pane as the
+ * router found it: rendered children, or the route-specific pane class the
+ * renderer claims before drawing. `#/graph` needs that second half — D3 is
+ * stubbed under JSDOM (see fixtures/viewer-jsdom.ts), so the graph route
+ * legitimately draws no DOM here while still setting `graph-pane`. A route
+ * nothing handles leaves a bare, empty `main-pane`.
+ */
+function isPanePainted(main: HTMLElement): boolean {
+  return main.childElementCount > 0 || main.className !== "main-pane";
+}
+
+describe("sidebar navigation — every rendered entry resolves to its own route", () => {
+  // The router falls back to home for an unknown hash (viewer.js), so
+  // "something rendered" cannot tell a real route from a dead href — a dead
+  // href renders the dashboard and looks fine. The aria-current assertion is
+  // what separates them, and it is exactly what the Reviews bug broke.
+  it("navigating an entry's own href renders a route and marks that same entry current", async () => {
+    const entries = await renderedNavEntries();
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      const { painted, current } = await visitHref(entry.href);
+      expect(painted, `${entry.href} (${entry.route}) rendered nothing`).toBe(true);
+      expect(current, `${entry.href} did not mark the ${entry.route} entry current`).toBe(
+        entry.route,
+      );
+    }
   });
 });

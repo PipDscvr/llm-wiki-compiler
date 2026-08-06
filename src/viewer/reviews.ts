@@ -2,10 +2,16 @@
  * Read-only `/api/reviews` projection for the viewer.
  *
  * Review candidates live under `.llmwiki/candidates/` — NOT in the frozen
- * `ViewerSnapshot` — so this surface is fed by a REQUEST-time
- * `listCandidates(root)`, the same read-only, sanitizing loader `review list`
- * and `review show` use. It is strictly read-only: the viewer has no write
- * path, so there is deliberately no approve/reject counterpart here.
+ * `ViewerSnapshot` — so this surface is fed at REQUEST time by
+ * `listCandidatePage(root, REVIEW_LIST_LIMIT)`, the bounded sibling of the
+ * read-only, sanitizing loader `review list` and `review show` use. It is
+ * strictly read-only: the viewer has no write path, so there is deliberately no
+ * approve/reject counterpart here.
+ *
+ * The response is BOUNDED in both directions — rows served and files read (see
+ * {@link REVIEW_LIST_LIMIT}) — and carries `total` so the client can say how
+ * much of the queue it is showing. Truncating without saying so would make a
+ * capped list read as the whole queue.
  *
  * The projection serves ONLY what the `#/reviews` list renders. Two omissions
  * are load-bearing rather than incidental:
@@ -22,8 +28,24 @@
  */
 
 import path from "path";
+import type { CandidatePage } from "../compiler/candidates.js";
 import type { ReviewCandidate } from "../utils/types.js";
 import type { HeldReason } from "../review/policy.js";
+
+/**
+ * How many candidates one `/api/reviews` response serves — and, because
+ * `listCandidatePage` reads only what it serves, how many candidate files one
+ * request opens.
+ *
+ * The route re-reads disk per visit and `heldReasons: "all"` is a real policy
+ * code meaning "hold every page", so a 5,000-page corpus compiled under it puts
+ * 5,000 files behind a single request. 200 is chosen from both ends: it is far
+ * beyond what anyone scrolls through in a read-only queue — `llmwiki review
+ * list` is the tool for working a long queue, and the pane says so once the cap
+ * bites — while fixing the per-request cost at 200 reads and parses however
+ * large the corpus grows.
+ */
+export const REVIEW_LIST_LIMIT = 200;
 
 /** A single stable JSON row in the `/api/reviews` envelope. */
 export interface ReviewCandidateRow {
@@ -77,16 +99,26 @@ function toReviewRow(candidate: ReviewCandidate): ReviewCandidateRow {
   return row;
 }
 
+/** The `/api/reviews` response body. */
+export interface ReviewsEnvelope {
+  /** The candidates served — at most {@link REVIEW_LIST_LIMIT} of them. */
+  reviews: ReviewCandidateRow[];
+  /**
+   * How many candidates are pending in total. Equals `reviews.length` until the
+   * cap bites; above it, the difference is what the client reports as
+   * "showing N of M" rather than passing a truncated list off as the queue.
+   */
+  total: number;
+}
+
 /**
- * Project pending candidates into the `/api/reviews` envelope. Pure (no I/O)
- * so the route handler stays a thin read-and-serialize, mirroring
- * {@link file://./workflow-runs.ts}.
+ * Project a bounded page of pending candidates into the `/api/reviews`
+ * envelope. Pure (no I/O) so the route handler stays a thin read-and-serialize,
+ * mirroring {@link file://./workflow-runs.ts}.
  *
- * @param candidates - Pending candidates from `listCandidates(root)`.
- * @returns The `{ reviews }` envelope body, one row per candidate (order preserved).
+ * @param page - A bounded slice plus true total, from `listCandidatePage(root, REVIEW_LIST_LIMIT)`.
+ * @returns The envelope body, one row per served candidate (order preserved).
  */
-export function buildReviewsEnvelope(
-  candidates: ReviewCandidate[],
-): { reviews: ReviewCandidateRow[] } {
-  return { reviews: candidates.map(toReviewRow) };
+export function buildReviewsEnvelope(page: CandidatePage): ReviewsEnvelope {
+  return { reviews: page.candidates.map(toReviewRow), total: page.total };
 }
