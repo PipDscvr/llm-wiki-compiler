@@ -27,6 +27,7 @@ const REQUIRED_ASSETS = [
   "dist/viewer/assets/viewer-rail.js",
   "dist/viewer/assets/viewer-lists.js",
   "dist/viewer/assets/viewer-reviews.js",
+  "dist/viewer/assets/viewer-workflows.js",
   "dist/viewer/assets/viewer-graph.js",
   "dist/viewer/assets/d3.min.js",
   "dist/viewer/assets/THIRD_PARTY_NOTICES.txt",

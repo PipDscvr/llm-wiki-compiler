@@ -50,6 +50,10 @@ const NAV_SECTIONS = [
     items: [
       { route: "health", href: "#/health", label: "Health & lint", badge: "lint" },
       { route: "reviews", href: "#/reviews", label: "Reviews", count: "pendingReviews" },
+      // No count: workflow runs are not in the bootstrap envelope (they live
+      // outside the frozen snapshot and #/workflows fetches them per visit),
+      // so the sidebar has no number to show without a second startup request.
+      { route: "workflows", href: "#/workflows", label: "Workflows" },
     ],
   },
 ];
@@ -74,6 +78,7 @@ const STATIC_ROUTE_FOR_HASH = new Map([
   ["#/graph", "graph"],
   ["#/health", "health"],
   ["#/reviews", "reviews"],
+  ["#/workflows", "workflows"],
   ["#/index", "home"],
 ]);
 

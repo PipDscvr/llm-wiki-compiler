@@ -9,11 +9,12 @@
  *      sidebar's counts and lint badge, the header's whole-wiki verdict
  *      pill (which reads both), and render the dashboard home.
  *   3. Hash router (`#/`, `#/concepts/<slug>`, `#/queries/<slug>`,
- *      `#/index`, `#/health`, `#/reviews`) that fetches `/api/page/...`,
- *      `/api/index`, `/api/health`, or `/api/reviews` and drops the result
- *      into the main pane. The server returns already-sanitized HTML in `html`
- *      (see `src/viewer/render.ts`), so the client only has to set
- *      `innerHTML` and link up the support rail.
+ *      `#/index`, `#/health`, `#/reviews`, `#/workflows`) that fetches
+ *      `/api/page/...`, `/api/index`, `/api/health`, `/api/reviews`, or
+ *      `/api/workflow-runs` and drops the result into the main pane. The
+ *      server returns already-sanitized HTML in `html` (see
+ *      `src/viewer/render.ts`), so the client only has to set `innerHTML`
+ *      and link up the support rail.
  *
  * No external dependencies, no client-side markdown rendering, no
  * inline event handlers — the spec's CSP only allows scripts from
@@ -29,6 +30,7 @@ import { loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js";
 import { renderHeader } from "./viewer-header.js";
 import { renderConceptsList, renderQueriesList, renderSourcesList } from "./viewer-lists.js";
 import { renderReviewsList } from "./viewer-reviews.js";
+import { renderWorkflowRunsList } from "./viewer-workflows.js";
 import { renderDashboard } from "./viewer-dashboard.js";
 import { buildHealthView } from "./viewer-health.js";
 
@@ -46,6 +48,7 @@ const STATIC_ROUTES = new Map([
   ["#/queries", { kind: "queries" }],
   ["#/sources", { kind: "sources" }],
   ["#/reviews", { kind: "reviews" }],
+  ["#/workflows", { kind: "workflows" }],
 ]);
 
 /** Pattern matching `#/(concepts|queries)/<slug>` hash routes. */
@@ -111,22 +114,24 @@ const ROUTE_RENDERERS = {
   concepts: (main) => renderListRoute(main, renderConceptsList),
   queries: (main) => renderListRoute(main, renderQueriesList),
   sources: (main) => renderListRoute(main, renderSourcesList),
-  reviews: (main) => renderReviewsPane(main),
+  reviews: (main) => renderFetchedRoute(main, "/api/reviews", renderReviewsList),
+  workflows: (main) => renderFetchedRoute(main, "/api/workflow-runs", renderWorkflowRunsList),
 };
 
 /**
- * Fetch /api/reviews and render the pending-candidate list. Unlike the other
- * list routes this fetches per visit rather than reading the cached bootstrap
- * envelope: review candidates live under `.llmwiki/candidates/`, outside the
- * frozen snapshot, and the endpoint is kept off the bootstrap path so every
- * other route stays as cheap as it was.
+ * Fetch one endpoint and hand its payload to `render`. Unlike the list routes
+ * above, these routes fetch per VISIT rather than reading the cached bootstrap
+ * envelope: review candidates live under `.llmwiki/candidates/` and workflow
+ * runs under `.llmwiki/workflows/runs/`, both outside the frozen snapshot, and
+ * both endpoints are kept off the bootstrap path so every other route stays as
+ * cheap as it was.
  */
-async function renderReviewsPane(main) {
+async function renderFetchedRoute(main, endpoint, render) {
   clearSupportRail();
   try {
-    renderReviewsList(main, await fetchJson("/api/reviews"));
+    render(main, await fetchJson(endpoint));
   } catch (err) {
-    renderError(`Could not load /api/reviews: ${err.message}`);
+    renderError(`Could not load ${endpoint}: ${err.message}`);
   }
 }
 

@@ -351,6 +351,21 @@ export const EMPTY_DEMO_ENVELOPE = {
   index: { available: false },
 };
 
+/**
+ * Serve the two bootstrap endpoints for an empty demo project, or null when
+ * `url` is neither — the tail every per-request route test's responder falls
+ * through to once it has handled its own endpoint.
+ *
+ * Kept here for the same reason {@link EMPTY_DEMO_ENVELOPE} is: the #/reviews
+ * and #/workflows route tests each need exactly this pair ahead of their own
+ * endpoint, and writing it out twice tripped fallow's clone-group check.
+ */
+export function emptyBootstrapResponse(url: string): Response | null {
+  if (url.endsWith("/api/pages")) return jsonResponse(EMPTY_DEMO_ENVELOPE);
+  if (url.endsWith("/api/health")) return jsonResponse({ lint: null });
+  return null;
+}
+
 /** Standard JSON 200 helper for fetch responders. */
 export function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {

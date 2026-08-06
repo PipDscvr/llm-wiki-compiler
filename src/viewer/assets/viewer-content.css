@@ -395,3 +395,47 @@ a.list-title:hover, a.list-title:focus-visible { color: var(--accent-hover); tex
   padding: 3px 6px;
   border-radius: var(--radius-badge);
 }
+
+/* ---- Workflow runs (#/workflows) ---- */
+
+/*
+ * A run row STACKS for the same reason a review row does: there is no page to
+ * open, so the row itself carries the evidence — which workflow, which stage,
+ * what it is parked on, and the command that moves it.
+ *
+ * `.is-parked` and `.is-problem` are the only rows that earn an accent rail. A
+ * run merely running or completed needs nothing from the reader; a parked one
+ * is blocked on a human and an unreadable one is broken, and the rail is what
+ * makes those two scannable down a long list. The two-class selectors sit after
+ * `.list-row`, so the left border wins on specificity as well as order.
+ */
+.workflow-row { flex-direction: column; align-items: stretch; gap: 4px; }
+.workflow-row.is-parked { border-left: 2px solid var(--warn); padding-left: var(--space-12); }
+.workflow-row.is-problem { border-left: 2px solid var(--danger); padding-left: var(--space-12); }
+
+.workflow-head { display: flex; align-items: baseline; gap: var(--space-9); }
+/* A run row's head ends in the run id, which belongs at the far edge like any
+ * other row metadatum. A problem row's ends in a CHIP, which reads as detached
+ * out there — so only there does the title stop growing into the gap. */
+.workflow-row.is-problem .list-title { flex: none; }
+/* Mono: a run id is a machine fact, not prose (see the lockup tagline note). */
+.workflow-run-id { flex: none; font: var(--type-metadata); color: var(--fg-faint); }
+.workflow-meta { margin: 0; font: var(--type-body); color: var(--fg-dim); }
+.workflow-problem { margin: 0; font: var(--type-body); color: var(--danger); }
+
+.workflow-flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.workflow-flag {
+  font: var(--type-badge);
+  color: var(--fg-faint);
+  background: var(--bg-chip);
+  border: 1px solid var(--border-chip);
+  padding: 3px 6px;
+  border-radius: var(--radius-badge);
+}
+.workflow-flag.is-parked { color: var(--warn); background: var(--warn-a12); border-color: var(--warn-border); }
+/* No border: matches `.badge-orphaned`, the existing danger chip. */
+.workflow-flag.is-problem { color: var(--danger); background: var(--danger-a12); border-color: transparent; }
+
+/* The command that unparks the run. Mono and dimmed — it is a fact to copy,
+ * not a control: the viewer is read-only and cannot run it. */
+.workflow-next { margin: 2px 0 0; font: var(--type-provenance); color: var(--fg-faint); }

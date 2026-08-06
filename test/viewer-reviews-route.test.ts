@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  EMPTY_DEMO_ENVELOPE,
+  emptyBootstrapResponse,
   jsonResponse,
   mountViewerDom,
   type FetchResponder,
@@ -48,16 +48,14 @@ const REVIEWS = [
 ];
 
 /**
- * Responder serving an empty project plus the given `/api/reviews` payload.
+ * Responder serving the given `/api/reviews` payload over an empty project.
  * `total` defaults to the row count — the un-truncated case — and is passed
  * explicitly to mimic a queue the endpoint's cap cut short.
  */
 function responderWithReviews(reviews: unknown[], total = reviews.length): FetchResponder {
   return (url) => {
-    if (url.endsWith("/api/pages")) return jsonResponse(EMPTY_DEMO_ENVELOPE);
-    if (url.endsWith("/api/health")) return jsonResponse({ lint: null });
     if (url.endsWith("/api/reviews")) return jsonResponse({ reviews, total });
-    return null;
+    return emptyBootstrapResponse(url);
   };
 }
 

@@ -40,15 +40,17 @@ const ENVELOPE = {
 
 /**
  * Responder serving the envelope plus a health payload with the given lint
- * block. `/api/reviews` is served too — it is the one nav destination that
- * fetches per visit, and a 404 there would paint an error banner that the
- * nav-integrity test below could mistake for a rendered route.
+ * block. `/api/reviews` and `/api/workflow-runs` are served too — they are the
+ * nav destinations that fetch per visit, and a 404 on either would paint an
+ * error banner that the nav-integrity test below could mistake for a rendered
+ * route.
  */
 function responderWithLint(lint: unknown): FetchResponder {
   return (url) => {
     if (url.endsWith("/api/pages")) return jsonResponse(ENVELOPE);
     if (url.endsWith("/api/health")) return jsonResponse({ lint });
     if (url.endsWith("/api/reviews")) return jsonResponse({ reviews: [], total: 0 });
+    if (url.endsWith("/api/workflow-runs")) return jsonResponse({ runs: [] });
     return null;
   };
 }
