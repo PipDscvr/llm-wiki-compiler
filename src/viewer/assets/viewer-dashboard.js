@@ -270,7 +270,44 @@ function buildSplit(model) {
 }
 
 /**
- * Build the recently-compiled panel. The head's "View all" (mockup tree
+ * The panel's title, which cannot say "compiled" on a profile project.
+ *
+ * A default project's pages ARE compiled — the LLM pipeline writes them — so
+ * the mockup's "Recently compiled" (tree line 160) is accurate there and stays
+ * verbatim. A profile's typed entity pages are AUTHORED by hand under their
+ * entity directory; `llmwiki compile` never produces one. "Updated" is the term
+ * true of both, so the profile branch uses it rather than describing authored
+ * pages as compiled. Same distinction `noTypedPagesState` already draws in
+ * viewer-lists.js.
+ */
+function recentPanelTitle(model) {
+  return model.vocabulary ? "Recently updated" : "Recently compiled";
+}
+
+/**
+ * The panel's empty state. The default branch is the mockup's copy verbatim,
+ * command included. The profile branch names no command at all: there is
+ * nothing for the CLI to run, because the reader authors these pages
+ * themselves — offering `llmwiki compile` would send them to a command that
+ * cannot produce what the panel is waiting for.
+ */
+function recentEmptyState(model) {
+  if (!model.vocabulary) {
+    return emptyState(
+      "Nothing compiled yet",
+      "Compiled pages appear here newest first, each with its citation count and freshness.",
+      "$ llmwiki compile",
+    );
+  }
+  return emptyState(
+    "Nothing authored yet",
+    "Entity pages appear here newest first, each with its citation count. " +
+      "Author them as Markdown under the directories your profile declares.",
+  );
+}
+
+/**
+ * Build the recently-updated panel. The head's "View all" (mockup tree
  * line 161) and the footer's "All N concepts →" (tree line 223) point at the
  * same place — two affordances to one destination, matching the mockup's own
  * duplication rather than dropping one as redundant. WHICH place, and what the
@@ -278,16 +315,10 @@ function buildSplit(model) {
  */
 function buildRecentPanel(model) {
   const inventory = inventoryLink(model);
-  const panel = buildPanel("Recently compiled", buildTrailingLink("View all", inventory.href));
+  const panel = buildPanel(recentPanelTitle(model), buildTrailingLink("View all", inventory.href));
   const body = el("div", "panel-body");
   if (model.recentPages.length === 0) {
-    body.appendChild(
-      emptyState(
-        "Nothing compiled yet",
-        "Compiled pages appear here newest first, each with its citation count and freshness.",
-        "$ llmwiki compile",
-      ),
-    );
+    body.appendChild(recentEmptyState(model));
   }
   for (const page of model.recentPages) {
     body.appendChild(buildRecentRow(page, model.pageMetaById.get(page.id)));
