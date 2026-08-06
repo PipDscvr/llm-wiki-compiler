@@ -446,6 +446,7 @@ function sidebarModel(data) {
     project: data.pages?.project,
     counts: data.pages?.counts,
     lint: data.health?.lint ?? null,
+    profileId: data.pages?.profileId,
   };
 }
 

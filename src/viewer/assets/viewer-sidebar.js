@@ -22,6 +22,9 @@ const SIDEBAR_SELECTOR = "[data-sidebar]";
 /** Rendered when a count is present and zero. */
 const EMPTY_COUNT = "—";
 
+/** `profileId` the envelope reports when no profile is installed (server.ts). */
+const DEFAULT_PROFILE_ID = "default";
+
 /**
  * Nav entries per section. `count` names the `counts` key whose value is
  * shown; entries without one render no count. `route` doubles as the
@@ -53,7 +56,15 @@ const NAV_SECTIONS = [
       // No count: workflow runs are not in the bootstrap envelope (they live
       // outside the frozen snapshot and #/workflows fetches them per visit),
       // so the sidebar has no number to show without a second startup request.
-      { route: "workflows", href: "#/workflows", label: "Workflows" },
+      //
+      // `profileOnly`: workflows are declared BY a profile, so a default-profile
+      // project cannot have one — not "has none yet", but cannot. Showing the
+      // entry there would advertise a capability the project is structurally
+      // incapable of, and `llmwiki template init` refuses to add a profile to a
+      // project that already has pages, so the empty state would be permanent.
+      // The profile-vocabulary design gates it the same way: its default
+      // sidebar has no Pipeline row, only the two profile ones do.
+      { route: "workflows", href: "#/workflows", label: "Workflows", profileOnly: true },
     ],
   },
 ];
@@ -140,16 +151,36 @@ function buildProjectBlock(project) {
   return wrap;
 }
 
-/** Build one labelled nav section with its entries. */
+/** Build one labelled nav section with the entries this project can actually use. */
 function buildNavSection(section, model) {
   const wrap = el("section", "nav-section");
   wrap.appendChild(el("div", "nav-section-label", section.label));
   const list = el("ul", "nav-list");
   for (const item of section.items) {
+    if (!isNavItemApplicable(item, model)) continue;
     list.appendChild(buildNavItem(item, section.zeroCountDisplay, model));
   }
   wrap.appendChild(list);
   return wrap;
+}
+
+/**
+ * Whether an entry's surface can exist in THIS project.
+ *
+ * Only `profileOnly` entries can be inapplicable, and the test is deliberately
+ * "can this project ever have one", not "does it have one now" — an empty
+ * Reviews queue still earns its row because a candidate can appear at any time,
+ * whereas a default-profile project can never declare a workflow.
+ *
+ * Absent `profileId` (first paint, before /api/pages settles) hides the entry
+ * rather than showing one that may vanish a moment later: appearing late is
+ * quieter than flickering away, and the nav is re-rendered once the envelope
+ * lands.
+ */
+function isNavItemApplicable(item, model) {
+  if (item.profileOnly !== true) return true;
+  const profileId = model?.profileId;
+  return typeof profileId === "string" && profileId !== DEFAULT_PROFILE_ID;
 }
 
 /** Build one nav `<li><a>` with its optional count or badge. */

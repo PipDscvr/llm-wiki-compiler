@@ -20,7 +20,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  emptyBootstrapResponse,
+  profileBootstrapResponse,
   jsonResponse,
   mountViewerDom,
   type FetchResponder,
@@ -68,7 +68,7 @@ const RUNS = [PARKED_ON_GATE, PARKED_ON_OUTPUT, COMPLETED];
 function responderWithRuns(runs: unknown[]): FetchResponder {
   return (url) => {
     if (url.endsWith("/api/workflow-runs")) return jsonResponse({ runs });
-    return emptyBootstrapResponse(url);
+    return profileBootstrapResponse(url);
   };
 }
 
