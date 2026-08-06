@@ -3,7 +3,9 @@
   "entry": [
     "src/viewer/assets/viewer.js",
     "scripts/copy-viewer-assets.mjs",
-    "src/viewer/assets/viewer-theme-boot.js"
+    "src/viewer/assets/viewer-theme-boot.js",
+    "examples/showcase/seed.mjs",
+    "examples/showcase/ts-loader.mjs"
   ],
   "ignorePatterns": [
     "docs/**",

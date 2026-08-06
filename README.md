@@ -156,7 +156,7 @@ llmwiki quickstart https://en.wikipedia.org/wiki/Andrej_Karpathy
 llmwiki query "What terms did Andrej coin?"
 ```
 
-The [`examples/basic/`](examples/basic/) directory includes a small pre-generated wiki you can inspect without an API key.
+Two example projects are included, both inspectable without an API key. [`examples/basic/`](examples/basic/) is a small pre-generated wiki — real output from one source. [`examples/showcase/`](examples/showcase/) is a deliberately fully-populated project with saved queries, a pending review queue, mixed page freshness, and eleven lint rules firing; run `node examples/showcase/seed.mjs` to generate its `.llmwiki/` working state, then `llmwiki view` inside it.
 
 ## Core commands
 
