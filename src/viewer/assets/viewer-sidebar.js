@@ -6,6 +6,13 @@
  * that used to live here now belong to the #/concepts list route, so the
  * sidebar stays a fixed height regardless of wiki size.
  *
+ * BROWSE keeps a fixed spine — Overview, Sources, Graph explorer — and varies
+ * only the type rows between them: they are whatever entity types the ACTIVE
+ * PROFILE declares. A default project declares none through
+ * `profilePipeline`, so its own Concepts and Queries rows stand and the sidebar
+ * is exactly what it was. See viewer-nav-types.js for the ordering and
+ * labelling rules the generated rows follow.
+ *
  * Counts are advisory: every field of the render model is optional so first
  * paint can render the nav before /api/pages settles, and a failed
  * /api/health drops only the lint badge rather than blanking the nav.
@@ -16,6 +23,7 @@
 
 import { el } from "./viewer-dom.js";
 import { lintTotal } from "./viewer-format.js";
+import { NAV_TYPE_CAP, typeNavItems } from "./viewer-nav-types.js";
 
 const SIDEBAR_SELECTOR = "[data-sidebar]";
 
@@ -39,11 +47,20 @@ const NAV_SECTIONS = [
   {
     label: "BROWSE",
     zeroCountDisplay: "dash",
+    // BROWSE is the section the active profile's vocabulary projects into: it
+    // shows the profile name on its header and swaps its `profileTypeSlot`
+    // rows for the profile's declared types. MAINTAIN does neither.
+    showsProfileTypes: true,
     items: [
       { route: "home", href: "#/", label: "Overview" },
-      { route: "concepts", href: "#/concepts", label: "Concepts", count: "concepts" },
+      // `profileTypeSlot`: Concepts and Queries are not fixed labels — they are
+      // the two entity types the DEFAULT profile declares. On a project running
+      // another profile they are replaced, in place, by that profile's own
+      // types (see `sectionItems`). Overview, Sources and Graph explorer are
+      // the fixed spine and never vary.
+      { route: "concepts", href: "#/concepts", label: "Concepts", count: "concepts", profileTypeSlot: true },
       { route: "sources", href: "#/sources", label: "Sources", count: "sourceFiles" },
-      { route: "queries", href: "#/queries", label: "Queries", count: "queries" },
+      { route: "queries", href: "#/queries", label: "Queries", count: "queries", profileTypeSlot: true },
       { route: "graph", href: "#/graph", label: "Graph explorer" },
     ],
   },
@@ -78,13 +95,15 @@ const NAV_SECTIONS = [
 ];
 
 /**
- * Page routes mark their parent nav entry. `#/concepts/alpha` highlights
- * the Concepts entry rather than leaving the nav with nothing current.
+ * Leading segment of `#/<segment>` or `#/<segment>/<slug>`.
+ *
+ * That segment IS the nav route for every list route the sidebar renders, typed
+ * ones included, and a page route's leading segment is its parent entry — so
+ * `#/articles`, `#/articles/alpha` and `#/concepts/alpha` all resolve to the
+ * entry that owns them without a table to keep in step. A segment no entry
+ * claims (`#/nonsense`) simply matches no link and leaves the nav unmarked.
  */
-const PAGE_ROUTE_PARENTS = new Map([
-  ["concepts", "concepts"],
-  ["queries", "queries"],
-]);
+const HASH_ROUTE_SEGMENT = /^#\/([^/]+)(?:\/.+)?$/;
 
 /** Hashes that resolve to the home route. */
 const HOME_HASHES = new Set(["", "#", "#/"]);
@@ -106,7 +125,8 @@ const STATIC_ROUTE_FOR_HASH = new Map([
  * Render the sidebar navigation.
  *
  * @param {{project?: {title?: string}, counts?: Record<string, number>,
- *          lint?: {warnings?: number, errors?: number} | null}} model
+ *          lint?: {warnings?: number, errors?: number} | null, profileId?: string,
+ *          entityTypes?: {type: string, pageCount: number}[]}} model
  */
 export function renderSidebar(model) {
   const sidebar = document.querySelector(SIDEBAR_SELECTOR);
@@ -162,15 +182,130 @@ function buildProjectBlock(project) {
 
 /** Build one labelled nav section with the entries this project can actually use. */
 function buildNavSection(section, model) {
+  const typeItems = section.showsProfileTypes === true ? typeNavItems(model?.entityTypes) : [];
   const wrap = el("section", "nav-section");
-  wrap.appendChild(el("div", "nav-section-label", section.label));
+  wrap.appendChild(buildSectionHead(section, model, typeItems));
+  wrap.appendChild(buildNavList(section, model, typeItems));
+  return wrap;
+}
+
+/**
+ * The section's eyebrow row. BROWSE carries the active profile's name on it,
+ * right-aligned — the vocabulary in play is a property of the whole section, so
+ * it belongs on the header rather than costing a row of its own.
+ */
+function buildSectionHead(section, model, typeItems) {
+  const head = el("div", "nav-section-head");
+  head.appendChild(el("div", "nav-section-label", section.label));
+  const name = profileHeaderName(model?.profileId, typeItems);
+  if (name !== null) head.appendChild(el("span", "nav-section-profile", name));
+  return head;
+}
+
+/**
+ * What the BROWSE header says about the active profile, or null when there is
+ * nothing to say (a default project, or a section that shows no types).
+ *
+ * A CAPPED list appends the true total: the rows no longer add up to it, so the
+ * header is the only place left that can state how many types the profile
+ * actually declares. An uncapped list is countable by eye and gets the bare
+ * name — one word, no arithmetic (mockup: "newsroom" versus "research · 12").
+ */
+function profileHeaderName(profileId, typeItems) {
+  if (typeItems.length === 0) return null;
+  if (typeof profileId !== "string") return null;
+  return typeItems.length > NAV_TYPE_CAP ? `${profileId} · ${typeItems.length}` : profileId;
+}
+
+/** Build the section's `<ul>`, expanding the type-group marker where it appears. */
+function buildNavList(section, model, typeItems) {
   const list = el("ul", "nav-list");
-  for (const item of section.items) {
+  for (const item of sectionItems(section, typeItems)) {
+    if (item === TYPE_GROUP) {
+      appendTypeGroup(list, typeItems, section.zeroCountDisplay, model);
+      continue;
+    }
     if (!isNavItemApplicable(item, model)) continue;
     list.appendChild(buildNavItem(item, section.zeroCountDisplay, model));
   }
-  wrap.appendChild(list);
-  return wrap;
+  return list;
+}
+
+/** Marker standing in for the generated type rows inside a section's item list. */
+const TYPE_GROUP = Object.freeze({ typeGroup: true });
+
+/** True when an item is one of the default profile's own type rows. */
+function isProfileTypeSlot(item) {
+  return item.profileTypeSlot === true;
+}
+
+/**
+ * The section's entries with the profile's types spliced into the slot the
+ * default profile's first type row occupies — so a newsroom's Articles/Desks/
+ * Bylines land exactly where Concepts sat, between Overview and Sources, and
+ * the remaining default type row (Queries) drops out rather than duplicating
+ * the same pages under a second vocabulary.
+ *
+ * With no declared types the items are returned untouched, which is the whole
+ * default-project guarantee: one code path, and nothing to diff.
+ */
+function sectionItems(section, typeItems) {
+  if (typeItems.length === 0) return section.items;
+  const slot = section.items.findIndex(isProfileTypeSlot);
+  // Nothing before the FIRST slot is itself a slot, so the head needs no filter.
+  return [
+    ...section.items.slice(0, slot),
+    TYPE_GROUP,
+    ...section.items.slice(slot + 1).filter((item) => !isProfileTypeSlot(item)),
+  ];
+}
+
+/**
+ * Append the type rows, plus the overflow footer when there are more of them
+ * than {@link NAV_TYPE_CAP} keeps in view.
+ *
+ * Every declared type is rendered whatever the count: the cap is a scroll, not
+ * a truncation, so a type is never absent from the nav — only out of view, with
+ * the residual count saying how many and "All types" offering the screen that
+ * lists the full set.
+ */
+function appendTypeGroup(list, typeItems, zeroCountDisplay, model) {
+  list.appendChild(buildTypeGroup(typeItems, zeroCountDisplay, model));
+  if (typeItems.length > NAV_TYPE_CAP) list.appendChild(buildTypeOverflow(typeItems.length));
+}
+
+/**
+ * The type rows as one `<li>` holding a nested list, so BROWSE stays a single
+ * `<ul>` and the fixed spine rows either side stay its direct siblings. Past
+ * the cap the group also carries the bottom fade, which lives OUTSIDE the
+ * scrolling list so it stays pinned to the edge instead of travelling with the
+ * rows (see viewer-chrome.css).
+ */
+function buildTypeGroup(typeItems, zeroCountDisplay, model) {
+  const isCapped = typeItems.length > NAV_TYPE_CAP;
+  const group = el("li", isCapped ? "nav-type-group is-capped" : "nav-type-group");
+  const inner = el("ul", "nav-type-list");
+  for (const item of typeItems) inner.appendChild(buildNavItem(item, zeroCountDisplay, model));
+  group.appendChild(inner);
+  if (isCapped) group.appendChild(el("span", "nav-type-fade"));
+  return group;
+}
+
+/**
+ * The footer under a capped list: how many rows sit below the fold, and a link
+ * to the screen that lists every type.
+ *
+ * The link deliberately carries NO `data-route`. It shares the Pipeline entry's
+ * destination, and a second element claiming that route would take the
+ * highlight from the real MAINTAIN entry.
+ */
+function buildTypeOverflow(total) {
+  const li = el("li", "nav-type-overflow");
+  li.appendChild(el("span", "nav-type-residual", `${total - NAV_TYPE_CAP} more · scroll`));
+  const all = el("a", "nav-type-all", "All types");
+  all.href = "#/pipeline";
+  li.appendChild(all);
+  return li;
 }
 
 /**
@@ -192,23 +327,42 @@ function isNavItemApplicable(item, model) {
   return typeof profileId === "string" && profileId !== DEFAULT_PROFILE_ID;
 }
 
-/** Build one nav `<li><a>` with its optional count or badge. */
+/**
+ * Build one nav `<li><a>` with its optional count or badge.
+ *
+ * A `title` marks the item as a generated type row: its label truncates with an
+ * ellipsis (`.nav-link-type`, viewer-chrome.css) and keeps its full text on
+ * hover, while the count never truncates because the count is what the eye
+ * scans for. Fixed rows carry neither.
+ */
 function buildNavItem(item, zeroCountDisplay, model) {
   const li = el("li");
-  const link = el("a", "nav-link");
+  const link = el("a", item.isType ? "nav-link nav-link-type" : "nav-link");
   link.href = item.href;
   link.dataset.route = item.route;
-  link.appendChild(el("span", "nav-label", item.label));
+  if (item.isType) link.dataset.navType = "";
+  const label = el("span", "nav-label", item.label);
+  if (item.title) label.title = item.title;
+  link.appendChild(label);
   appendNavMetric(link, item, zeroCountDisplay, model);
   li.appendChild(link);
   return li;
 }
 
-/** Append the count or lint badge to a nav link, when one applies. */
-// Optional chaining in the two delegated lookups inflates cyclomatic count
-// for what is a two-way dispatch (cognitive complexity: 2).
+/**
+ * Append the count or lint badge to a nav link, when one applies.
+ *
+ * `countValue` is the count a generated type row already carries; `count` names
+ * a key in the shared `counts` map, which is how the fixed rows get theirs.
+ */
+// Optional chaining in the delegated lookups inflates cyclomatic count for what
+// is a three-way dispatch (cognitive complexity: 3).
 // fallow-ignore-next-line complexity
 function appendNavMetric(link, item, zeroCountDisplay, model) {
+  if (item.countValue !== undefined) {
+    appendNavCount(link, item.countValue, zeroCountDisplay);
+    return;
+  }
   if (item.count) {
     appendNavCount(link, model?.counts?.[item.count], zeroCountDisplay);
     return;
@@ -279,26 +433,50 @@ function buildDocsCard() {
  * duplicating the hash-parsing rules.
  */
 export function markActive() {
-  const links = document.querySelectorAll(`${SIDEBAR_SELECTOR} a[data-route]`);
+  // Compared in JS rather than composed into a selector: a type route's name
+  // comes from the hash, and a quoted attribute selector built from it would be
+  // a syntax error (or worse) for a hand-edited URL.
+  const links = Array.from(document.querySelectorAll(`${SIDEBAR_SELECTOR} a[data-route]`));
   for (const link of links) link.removeAttribute("aria-current");
   const active = activeRouteName(location.hash);
   if (!active) return;
-  const match = document.querySelector(`${SIDEBAR_SELECTOR} a[data-route="${active}"]`);
+  const match = markableLinks(links, location.hash).find((link) => link.dataset.route === active);
   match?.setAttribute("aria-current", "page");
 }
 
-/** Resolve a hash to the nav route that should be marked current. */
+/**
+ * The links a hash is allowed to mark.
+ *
+ * Nothing stops a profile declaring an entity type named after a route the
+ * viewer already owns — the built-in `autosci` template declares both `sources`
+ * and `reviews` — and that type gets a BROWSE row with the same `data-route` as
+ * the fixed entry. The FIXED route still owns the hash (STATIC_ROUTES is
+ * consulted first in viewer.js, so it is what actually rendered), so a hash the
+ * static table claims may only light a fixed row. Marking the shadowed type row
+ * would tell the reader they are somewhere they are not.
+ */
+function markableLinks(links, hash) {
+  if (!STATIC_ROUTE_FOR_HASH.has(hash ?? "")) return links;
+  return links.filter((link) => link.dataset.navType === undefined);
+}
+
+/**
+ * Resolve a hash to the nav route that should be marked current.
+ *
+ * The static map is consulted first because two of its hashes do NOT name their
+ * own segment (`#/index` belongs to Overview). Everything else falls back to the
+ * leading segment, which is the route name for list routes and the parent entry
+ * for page routes alike — including the per-project typed ones the sidebar
+ * cannot enumerate here.
+ */
 function activeRouteName(hash) {
   const key = hash ?? "";
   if (HOME_HASHES.has(key)) return "home";
-  const staticRoute = STATIC_ROUTE_FOR_HASH.get(key);
-  if (staticRoute) return staticRoute;
-  return pageRouteParent(key);
+  return STATIC_ROUTE_FOR_HASH.get(key) ?? hashRouteSegment(key);
 }
 
-/** Resolve a `#/(concepts|queries)/<slug>` hash to its parent nav route, or null. */
-function pageRouteParent(key) {
-  const match = key.match(/^#\/(concepts|queries)\/.+$/);
-  if (!match) return null;
-  return PAGE_ROUTE_PARENTS.get(match[1]) ?? null;
+/** The leading segment of a hash route, or null when it has none. */
+function hashRouteSegment(key) {
+  const match = key.match(HASH_ROUTE_SEGMENT);
+  return match ? match[1] : null;
 }

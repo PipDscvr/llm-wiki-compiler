@@ -42,6 +42,7 @@ Every view in the viewer has its own hash route, so you can bookmark or reload a
 | `#/` | Overview dashboard |
 | `#/concepts` | Concept pages, with the freshness filter |
 | `#/queries` | Saved query pages |
+| `#/<entity-type>` | Pages of one entity type your profile declares, such as `#/articles` |
 | `#/sources` | Source files, and how many are compiled |
 | `#/index` | The compiled `wiki/index.md` |
 | `#/health` | Wiki health: lint findings by rule, profile problems, freshness, and traceability |
@@ -50,7 +51,9 @@ Every view in the viewer has its own hash route, so you can bookmark or reload a
 | `#/pipeline` | Each entity type's lifecycle, where its pages sit, and which of them failed validation |
 | `#/graph` | Full graph explorer |
 
-Individual pages open at `#/concepts/<slug>` or `#/queries/<slug>`.
+Individual pages open at `#/concepts/<slug>`, `#/queries/<slug>`, or `#/<entity-type>/<slug>`.
+
+`#/<entity-type>` accepts only the entity types your active profile actually declares - anything else falls back to the Overview dashboard. On a project running the built-in default profile, no entity type is declared and no such route exists.
 
 `#/pipeline` appears only on a project running a non-default profile. The built-in default profile declares no entity types and no lifecycles, so there is nothing for the route to draw and the sidebar omits its entry entirely.
 
@@ -64,9 +67,7 @@ An entity page that violates its profile's field contract - a missing required f
 
 Typed entity pages carry the same citation chips and provenance as compiled pages. They do not carry a freshness verdict: freshness is derived from the sources a page was compiled from, and entity pages are authored rather than compiled, so they always read as unverified rather than being labelled fresh on no evidence.
 
-<Note>
-The sidebar does not yet list typed entity pages, and the browser routes `#/concepts/<slug>` and `#/queries/<slug>` do not yet have an equivalent for them. Read them through the local API - `/api/pages` and `/api/page/<entity-type>/<slug>` - or through `llmwiki export`, until viewer navigation for profile vocabularies ships.
-</Note>
+Each entity type your profile declares gets a row in the sidebar's **BROWSE** section and a list route of its own at `#/<entity-type>`, and every page on it opens at `#/<entity-type>/<slug>`. See **Sidebar navigation** below for how BROWSE is built.
 
 ## What the viewer includes
 
@@ -104,7 +105,11 @@ The viewer cannot move a run, so each parked row names the CLI command that does
 
 Like `#/reviews`, this route re-reads disk on every visit rather than serving the startup snapshot, because the CLI advances runs while the viewer is open - approve a gate and revisit `#/workflows` to see the run move without a restart. It reads a local `/api/workflow-runs` endpoint that serves only these status fields: run id, classification, status, current stage, workflow id, the two parked flags, and the problem reason. Never the run record itself, and never a filesystem path from your machine.
 
-**Sidebar navigation.** The sidebar no longer lists every compiled page - that listing grew with the size of the wiki, so it moved to `#/concepts`, beside the freshness filter that narrows it. What's left is a fixed set of links in two sections: **BROWSE** (Overview, Concepts, Sources, Queries, Graph explorer - with Concepts, Sources, and Queries each carrying a live count) and **MAINTAIN** (Health & lint, which carries a badge once a lint run exists; Reviews, which carries the pending-review count; and Workflows, which carries no count because runs are not part of the startup snapshot). Click any entry to navigate instantly.
+**Sidebar navigation.** The sidebar no longer lists every compiled page - that listing grew with the size of the wiki, so it moved to `#/concepts`, beside the freshness filter that narrows it. What's left is links in two sections: **BROWSE** and **MAINTAIN** (Health & lint, which carries a badge once a lint run exists; Reviews, which carries the pending-review count; Workflows, which carries no count because runs are not part of the startup snapshot; and Pipeline, on a profile project only). Click any entry to navigate instantly.
+
+**BROWSE is your profile's vocabulary.** Overview, Sources, and Graph explorer are fixed, and between them sit one row per entity type. On the built-in default profile those are Concepts and Queries - the two types it declares - so a default project's sidebar reads Overview, Concepts, Sources, Queries, Graph explorer. On a project running another profile, that profile's own types take their place: a newsroom profile reads Overview, Articles, Desks, Bylines, Sources, Graph explorer, and the profile's name sits on the BROWSE header.
+
+Type rows are ordered by page count, highest first, with ties falling back to the order your profile declares them - never alphabetically, so you can predict the result from your own profile file. A type with no pages still gets a row, showing a dim dash: its absence is worth knowing. Long names truncate with an ellipsis and show their full text on hover; the count never truncates. Past eleven rows the list scrolls - every type stays reachable - with a count of how many are below the fold and an **All types** link to `#/pipeline`, which lists the full set.
 
 **Header verdict pill.** The header carries one verdict for the whole wiki, on every route. It reads `NEEDS ATTENTION` when lint has any findings, any page is stale or orphaned, or the profile collector reported a problem, and `ALL CLEAR` when everything was checked and nothing is wrong. When a check couldn't run at all, the pill names what it doesn't know rather than claiming health it didn't measure: `FRESHNESS UNVERIFIED` when `.llmwiki/state.json` is missing or unreadable, `LINT NEVER RUN` when no lint run has completed, or both. A wiki with real problems reads `NEEDS ATTENTION` even when something else couldn't be checked.
 

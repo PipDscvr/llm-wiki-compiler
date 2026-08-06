@@ -10,7 +10,8 @@
  *      pill (which reads both), and render the dashboard home.
  *   3. Hash router (`#/`, `#/<directory>/<slug>` — where directory is
  *      `concepts`, `queries`, or any entity type the active profile declares —
- *      `#/index`, `#/health`, `#/reviews`, `#/workflows`, `#/pipeline`) that
+ *      `#/<entity-type>` for that type's list, `#/index`, `#/health`,
+ *      `#/reviews`, `#/workflows`, `#/pipeline`) that
  *      fetches `/api/page/...`, `/api/index`, `/api/health`, `/api/reviews`, or
  *      `/api/workflow-runs` and drops the result into the main pane. The
  *      server returns already-sanitized HTML in `html` (see
@@ -29,7 +30,12 @@ import { renderSidebar, markActive } from "./viewer-sidebar.js";
 import { renderSupportRail, clearSupportRail } from "./viewer-rail.js";
 import { loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js";
 import { renderHeader } from "./viewer-header.js";
-import { renderConceptsList, renderQueriesList, renderSourcesList } from "./viewer-lists.js";
+import {
+  renderConceptsList,
+  renderEntityTypeList,
+  renderQueriesList,
+  renderSourcesList,
+} from "./viewer-lists.js";
 import { renderReviewsList } from "./viewer-reviews.js";
 import { renderWorkflowRunsList } from "./viewer-workflows.js";
 import { renderPipeline } from "./viewer-pipeline.js";
@@ -74,12 +80,15 @@ const STATIC_ROUTES = new Map([
  */
 const PAGE_HASH_PATTERN = /^#\/([^/]+)\/(.+)$/;
 
+/** Pattern matching a `#/<segment>` hash — one segment, no slug. */
+const SINGLE_SEGMENT_HASH_PATTERN = /^#\/([^/]+)$/;
+
 /**
  * Bootstrap payloads shared by the sidebar, dashboard, and health route.
  * Fetched once in parallel at startup; each entry stays null if its fetch
  * failed, so one failing endpoint degrades only the surfaces that need it.
  */
-const bootstrapData = { pages: null, health: null };
+const bootstrapData = { pages: null, health: null, settled: false };
 
 /** Fetch both bootstrap endpoints in parallel, tolerating either failing. */
 async function loadBootstrapData() {
@@ -89,6 +98,9 @@ async function loadBootstrapData() {
   ]);
   bootstrapData.pages = pages;
   bootstrapData.health = health;
+  // Distinct from `pages !== null`: a FAILED fetch has also settled, and the
+  // router must stop waiting on an answer that is never coming.
+  bootstrapData.settled = true;
   return bootstrapData;
 }
 
@@ -102,9 +114,63 @@ async function loadBootstrapData() {
 function parseRoute(hash) {
   const key = hash ?? "";
   if (HOME_HASHES.has(key)) return { kind: "home" };
-  const staticRoute = STATIC_ROUTES.get(key);
-  if (staticRoute) return staticRoute;
+  return namedRoute(key) ?? unsettledOrPageRoute(key);
+}
+
+/**
+ * A route the hash names outright: the fixed table first, then the typed list
+ * routes the active profile contributes. Returns undefined when the hash names
+ * neither, leaving the page-route path to answer.
+ */
+function namedRoute(key) {
+  return STATIC_ROUTES.get(key) ?? entityListRoute(key);
+}
+
+/**
+ * A single-segment hash whose classification the envelope has not yet answered.
+ *
+ * `renderRoute` runs once before /api/pages settles and again after, so a cold
+ * deep link to `#/articles` reaches the first pass with no entity types known.
+ * Falling back to home THERE is not merely a wrong first frame: the home render
+ * is async and lands after the corrected second pass, overwriting the list it
+ * just drew. Holding the route instead means the first pass paints nothing and
+ * the second pass paints once, whichever way it resolves.
+ *
+ * Only single-segment hashes wait. A page route (`#/articles/alpha`) is already
+ * resolved without the envelope, and once settled an unknown segment falls
+ * through to home exactly as before.
+ */
+function unsettledOrPageRoute(key) {
+  if (!bootstrapData.settled && SINGLE_SEGMENT_HASH_PATTERN.test(key)) return { kind: "pending" };
   return parsePageRoute(key);
+}
+
+/**
+ * Resolve `#/<entity-type>` — a profile's typed list route.
+ *
+ * Entity types are per-project, so this cannot join STATIC_ROUTES: the match is
+ * against what the ENVELOPE declares. Only a declared type resolves, which is
+ * what keeps `#/nonsense` falling back to home — a fallback the nav-integrity
+ * guard (test/viewer-sidebar-nav.test.ts) relies on to tell a real route from a
+ * dead href.
+ *
+ * The envelope is not there on the first pass: `renderRoute` runs once before
+ * /api/pages settles and again after, so a cold deep link to `#/articles`
+ * resolves to home first and corrects itself on the second pass.
+ */
+function entityListRoute(key) {
+  const match = key.match(SINGLE_SEGMENT_HASH_PATTERN);
+  if (!match) return null;
+  const type = decodeSlug(match[1]);
+  if (type === null || !declaredEntityTypes().includes(type)) return null;
+  return { kind: "entityList", type };
+}
+
+/** The entity type ids the cached envelope declares; empty until it settles. */
+function declaredEntityTypes() {
+  const entityTypes = bootstrapData.pages?.profilePipeline?.entityTypes;
+  if (!Array.isArray(entityTypes)) return [];
+  return entityTypes.map((entry) => entry?.type);
 }
 
 /** Resolve a `#/<directory>/<slug>` hash; non-matches return home. */
@@ -128,6 +194,8 @@ function decodeSlug(raw) {
 /** Dispatch table: route.kind → handler for routes that fit the (main) signature. */
 const ROUTE_RENDERERS = {
   home: () => loadAndRenderHome(),
+  // Deliberately paints nothing — see `unsettledOrPageRoute`.
+  pending: () => undefined,
   index: (main) => renderIndexPane(main),
   health: (main) => renderHealthPane(main),
   graph: (main) => renderGraphPane(main),
@@ -174,9 +242,17 @@ async function renderRoute() {
   const main = document.querySelector(MAIN_SELECTOR);
   if (!main) return;
   main.className = "main-pane";
+  // Not in ROUTE_RENDERERS: every entry there is keyed by kind alone, and this
+  // route needs the type the hash named as well.
+  if (route.kind === "entityList") return renderEntityListRoute(main, route.type);
   const handler = ROUTE_RENDERERS[route.kind];
   if (handler) return handler(main);
   return renderPagePane(main, route.directory, route.slug);
+}
+
+/** Render one entity type's list from the cached envelope. */
+function renderEntityListRoute(main, type) {
+  return renderListRoute(main, (pane, envelope) => renderEntityTypeList(pane, envelope, type));
 }
 
 /**
@@ -450,6 +526,9 @@ function sidebarModel(data) {
     counts: navCounts(data.pages),
     lint: data.health?.lint ?? null,
     profileId: data.pages?.profileId,
+    // BROWSE projects these into its type rows; absent on a default project,
+    // which is what leaves that section exactly as it was.
+    entityTypes: data.pages?.profilePipeline?.entityTypes,
   };
 }
 

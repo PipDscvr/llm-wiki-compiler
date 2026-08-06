@@ -1,0 +1,138 @@
+/**
+ * Typed entity LIST routes — the destination every profile type row needs.
+ *
+ * `#/articles` was not a route before this: `STATIC_ROUTES` is an exact map with
+ * no typed entries and the page pattern needs two segments, so a single-segment
+ * typed hash fell through to home. A nav row pointing at one would have been a
+ * dead link that renders the dashboard and looks fine — the defect this branch
+ * has already shipped once.
+ *
+ * Entity types are per-project, so the route table cannot be static: a single
+ * segment is a list route only when the envelope DECLARES it. `#/nonsense` must
+ * still fall back to home, because that fallback is what the nav-integrity guard
+ * uses to tell a real route from a dead href.
+ */
+
+import { describe, expect, it } from "vitest";
+import { flushMicrotasks, mountViewerDom } from "./fixtures/viewer-jsdom.js";
+import {
+  deferredVocabularyResponder,
+  mountVocabulary,
+  typedPage,
+  types,
+  vocabularyEnvelope,
+} from "./fixtures/viewer-vocabulary.js";
+
+const NEWSROOM = types(["articles", 2], ["desks", 0]);
+
+const PAGES = [
+  typedPage("articles", "alpha", "2026-08-02T00:00:00.000Z"),
+  typedPage("articles", "beta", "2026-08-03T00:00:00.000Z"),
+];
+
+/** Mount at `hash` and return the main pane. */
+async function mainAt(hash: string): Promise<HTMLElement> {
+  const doc = await mountVocabulary(NEWSROOM, { pages: PAGES, hash });
+  return doc.querySelector("[data-main-pane]") as HTMLElement;
+}
+
+describe("a typed entity list route", () => {
+  it("renders that type's pages under its title-cased name", async () => {
+    const main = await mainAt("#/articles");
+    expect(main.querySelector("h1")?.textContent).toBe("Articles");
+    expect(main.querySelectorAll(".list-row")).toHaveLength(2);
+  });
+
+  it("links each row at the typed page route that already resolves", async () => {
+    const main = await mainAt("#/articles");
+    const hrefs = Array.from(main.querySelectorAll(".list-row a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toEqual(["#/articles/beta", "#/articles/alpha"]);
+  });
+
+  it("marks its own sidebar entry current", async () => {
+    const doc = await mountVocabulary(NEWSROOM, { pages: PAGES, hash: "#/articles" });
+    const current = doc.querySelector('.sidebar a[aria-current="page"]');
+    expect(current?.getAttribute("data-route")).toBe("articles");
+  });
+
+  it("marks the type entry current for one of its pages too", async () => {
+    const doc = await mountVocabulary(NEWSROOM, { pages: PAGES, hash: "#/articles/alpha" });
+    const current = doc.querySelector('.sidebar a[aria-current="page"]');
+    expect(current?.getAttribute("data-route")).toBe("articles");
+  });
+});
+
+describe("a declared but empty type", () => {
+  it("renders the teaching empty state, not the transient placeholder", async () => {
+    const main = await mainAt("#/desks");
+    expect(main.querySelector(".empty-state-title")?.textContent).toBe("No desks yet");
+    expect(main.querySelector(".placeholder")).toBeNull();
+  });
+
+  it("names the type in its body rather than talking about concepts", async () => {
+    const main = await mainAt("#/desks");
+    expect(main.querySelector(".empty-state-body")?.textContent).toContain("desks");
+  });
+});
+
+describe("an undeclared single segment", () => {
+  it("still falls back to home", async () => {
+    const main = await mainAt("#/nonsense");
+    expect(main.className).toContain("dashboard");
+  });
+
+  it("falls back to home on a default project, where no type is declared", async () => {
+    const doc = await mountVocabulary(undefined, { hash: "#/articles" });
+    const main = doc.querySelector("[data-main-pane]") as HTMLElement;
+    expect(main.className).toContain("dashboard");
+  });
+});
+
+describe("a cold deep link to a typed list route", () => {
+  it("holds the shell's loading state until the envelope settles, then paints once", async () => {
+    // The first pass cannot know `articles` is a type. It must not answer
+    // "home" either: that render is async and would land AFTER the corrected
+    // second pass, overwriting the list it had just drawn. Holding leaves the
+    // shell's own "Loading…" line up, which is what the wait actually is.
+    const { responder, release } = deferredVocabularyResponder(
+      vocabularyEnvelope(NEWSROOM, PAGES),
+    );
+    const { dom } = await mountViewerDom([], responder, "#/articles");
+    const main = dom.window.document.querySelector("[data-main-pane]") as HTMLElement;
+    expect(main.querySelector(".placeholder")?.textContent).toContain("Loading");
+    release();
+    await flushMicrotasks();
+    expect(main.className).toContain("list-pane");
+    expect(main.querySelector("h1")?.textContent).toBe("Articles");
+  });
+});
+
+/** Every nav entry the profile sidebar renders, read from the DOM. */
+async function profileNavEntries(): Promise<{ route: string; href: string }[]> {
+  const doc = await mountVocabulary(NEWSROOM, { pages: PAGES });
+  return Array.from(doc.querySelectorAll(".sidebar a[data-route]")).map((a) => ({
+    route: a.getAttribute("data-route") ?? "",
+    href: a.getAttribute("href") ?? "",
+  }));
+}
+
+describe("profile sidebar navigation — every rendered entry resolves to its own route", () => {
+  // The same guard test/viewer-sidebar-nav.test.ts applies to a default project.
+  // A dead href renders the dashboard and looks fine; only the aria-current
+  // assertion separates a real route from one that fell through to home.
+  it("navigating an entry's own href renders a route and marks that same entry current", async () => {
+    const entries = await profileNavEntries();
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      const doc = await mountVocabulary(NEWSROOM, { pages: PAGES, hash: entry.href });
+      const main = doc.querySelector("[data-main-pane]") as HTMLElement;
+      const current = doc.querySelector('.sidebar a[aria-current="page"]');
+      expect(main.childElementCount > 0 || main.className !== "main-pane").toBe(true);
+      expect(current?.getAttribute("data-route"), `${entry.href} did not mark ${entry.route}`).toBe(
+        entry.route,
+      );
+    }
+  });
+});

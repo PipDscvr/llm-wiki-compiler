@@ -69,11 +69,17 @@ const THEME_BOOT_SCRIPT = "viewer-theme-boot.js";
  * `viewer-pipeline-model.js` is pinned on the same principle: the Pipeline
  * panel's reachability model is imported by `viewer-pipeline.js`, and it too
  * only happens to sort first because "-" precedes ".".
+ *
+ * `viewer-nav-types.js` is the fifth instance of the original problem, not a
+ * precautionary pin: the profile-vocabulary projection is imported by
+ * `viewer-lists.js` (for a typed list's heading and empty state), and
+ * "viewer-lists.js" sorts alphabetically BEFORE "viewer-nav-types.js".
  */
 const MODULE_ORDER = [
   "viewer-dom.js",
   "viewer-format.js",
   "viewer-theme.js",
+  "viewer-nav-types.js",
   "viewer-rail.js",
   "viewer-pattern.js",
   "viewer-stat-card.js",

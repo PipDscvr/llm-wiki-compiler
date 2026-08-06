@@ -1,8 +1,9 @@
 /**
  * llmwiki viewer — list routes.
  *
- * Renders #/concepts, #/queries, and #/sources from the already-fetched
- * /api/pages envelope. No route here issues its own request.
+ * Renders #/concepts, #/queries, #/sources, and the per-profile typed entity
+ * lists (#/articles, #/papers, …) from the already-fetched /api/pages envelope.
+ * No route here issues its own request.
  *
  * The freshness filter lives on #/concepts rather than the sidebar: it
  * narrows a page list, so it belongs beside the list it narrows. Filtering
@@ -12,6 +13,7 @@
 
 import { el, emptyState, heading } from "./viewer-dom.js";
 import { isWarnFreshness, relativeAge } from "./viewer-format.js";
+import { navTypeLabel } from "./viewer-nav-types.js";
 
 /** Filter options offered on the concepts route. */
 const FRESHNESS_FILTERS = [
@@ -56,6 +58,45 @@ export function renderQueriesList(main, envelope) {
   const body = el("div", "list-body");
   main.appendChild(body);
   renderRows(body, pages, noQueriesState);
+}
+
+/**
+ * Render one entity type's list — the destination a profile's BROWSE type row
+ * lands on, and the peer of #/concepts and #/queries for a profile vocabulary.
+ *
+ * Reads the same envelope the other list routes read: typed entity pages arrive
+ * with their entity type as their `pageDirectory`, so no extra request and no
+ * second shape are involved. Rows link at `#/<type>/<slug>`, which the page
+ * router and `/api/page/:directory/:slug` already resolve.
+ *
+ * @param {HTMLElement} main - The main pane.
+ * @param {object} envelope - The `/api/pages` bootstrap envelope.
+ * @param {string} type - The declared entity type id, already confirmed by the
+ *   router against what the profile declares.
+ */
+export function renderEntityTypeList(main, envelope, type) {
+  const pages = pagesIn(envelope, type);
+  main.innerHTML = "";
+  main.className = "main-pane list-pane";
+  main.appendChild(heading("h1", navTypeLabel(type)));
+  const body = el("div", "list-body");
+  main.appendChild(body);
+  renderRows(body, pages, () => noTypedPagesState(type));
+}
+
+/**
+ * Empty state for a type the profile declares but that has no valid page yet.
+ *
+ * No command: entity pages are AUTHORED, not compiled, so there is nothing for
+ * the CLI to run — naming the directory is the actionable part. The literal
+ * type id is what appears here, not the nav's title-cased label, because it is
+ * also the directory name the reader has to create.
+ */
+function noTypedPagesState(type) {
+  return emptyState(
+    `No ${type} yet`,
+    `Your profile declares ${type} as an entity type. Author them as Markdown under wiki/${type}/ and they appear here with their citations.`,
+  );
 }
 
 /**

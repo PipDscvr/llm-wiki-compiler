@@ -276,10 +276,33 @@
   font: 500 9.5px/1 var(--font-mono);
   letter-spacing: 0.13em;
 }
-.nav-section-label {
-  color: var(--fg-ghost);
+.nav-section-label { color: var(--fg-ghost); }
+
+/*
+ * The eyebrow row. BROWSE puts the active profile's name on it, right-aligned
+ * (mockup tree lines 96-100 and 154-158) — the vocabulary in play is a property
+ * of the whole section, so it costs a header slot rather than a row. The
+ * horizontal padding and the 7px before the list live here rather than on
+ * `.nav-section-label`, so the label and the name share one baseline row;
+ * MAINTAIN renders the same wrapper with nothing to its right.
+ */
+.nav-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 0 8px;
   margin-bottom: 7px;
+}
+
+/* Same treatment as the eyebrow it sits beside — a machine fact, so mono. */
+.nav-section-profile {
+  min-width: 0;
+  font: 500 9.5px/1 var(--font-mono);
+  color: var(--fg-ghost);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* `margin-bottom: 20px` (mockup tree lines 26/46) is each list's own space
@@ -322,6 +345,83 @@
   border-radius: 2px;
   background: var(--accent-text);
 }
+
+/*
+ * The active profile's type rows: a nested list inside a single `<li>`, so
+ * BROWSE stays one `<ul>` at any type count and the fixed spine rows above and
+ * below stay its siblings, sharing `.nav-list`'s 2px gap.
+ *
+ * `position: relative` makes this the fade's containing block. The fade must NOT
+ * be a child of the scroller — an absolutely positioned child of a scroll
+ * container travels with the content instead of staying pinned to the edge.
+ */
+.nav-type-group { position: relative; }
+.nav-type-list {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+
+/*
+ * Past the cap (NAV_TYPE_CAP = 11, viewer-nav-types.js) the list SCROLLS. It is
+ * never truncated: every declared type is in the DOM and reachable, and the
+ * residual count below says how many are out of view.
+ *
+ * The height is derived from the box `.nav-link` actually renders — 8px + 8px
+ * padding, a 12.5px line, and the 1px transparent border it carries so it does
+ * not resize when it becomes current — plus this list's 2px gaps, so it tracks
+ * the row rather than being a constant that drifts when the row changes.
+ */
+.nav-type-group.is-capped {
+  margin-top: 6px;
+}
+.nav-type-group.is-capped .nav-type-list {
+  /* 11 rows of 30.5px — `.nav-link`'s 8px + 12.5px line + 8px, plus the 1px
+   * transparent border each side — separated by this list's 2px gaps. */
+  max-height: calc(11 * 30.5px + 10 * 2px);
+  overflow-y: auto;
+}
+
+/* Signals the list continues past the fold. `transparent` rather than a colour
+ * literal: gradients interpolate in premultiplied space, so this fades the
+ * sidebar surface into itself in either theme with one declaration. */
+.nav-type-fade {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 42px;
+  border-radius: 0 0 var(--radius-row) var(--radius-row);
+  background: linear-gradient(180deg, transparent, var(--bg-sidebar) 78%);
+  pointer-events: none;
+}
+
+/* `6px 10px 0 23px` lines the residual up with the rows above it (mockup tree
+ * line 221); `.nav-list`'s own 2px sibling gap supplies the rest of the 14px
+ * the mockup leaves below it. */
+.nav-type-overflow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 0 23px;
+  margin-bottom: 12px;
+}
+.nav-type-residual { font: 400 10.5px/1 var(--font-mono); color: var(--fg-faint); }
+.nav-type-all { font: 500 10.5px/1 var(--font-mono); color: var(--accent-text); }
+
+/*
+ * A type name is project data, so it can be any length. It truncates with an
+ * ellipsis and keeps its full text on hover; the count never truncates, because
+ * the count is what the eye scans for. No wrapping either — row height stays
+ * uniform however many types a profile declares. Scoped to type rows: the fixed
+ * labels are known-short, and clipping is not free on the row that is current
+ * (its accent bar renders inside the label).
+ */
+.nav-link-type .nav-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav-link-type .nav-count { flex: none; }
 
 .nav-count { font: 500 10.5px/1 var(--font-mono); color: var(--fg-faint); }
 /*
