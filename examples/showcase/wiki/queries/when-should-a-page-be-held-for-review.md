@@ -1,11 +1,8 @@
 ---
 title: When should a page be held for review?
 summary: Whenever a structured policy signal fires — low confidence, a declared contradiction, a schema breach, or a citation that does not check out.
-kind: query
-sources:
-  - review-gates.md
+type: query
 createdAt: "2026-07-27T16:55:41.204Z"
-updatedAt: "2026-07-27T16:55:41.204Z"
 ---
 
 # When should a page be held for review?

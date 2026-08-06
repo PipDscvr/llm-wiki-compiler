@@ -7,11 +7,10 @@
  * served directly by `/api/graph` with no per-request computation.
  */
 
+import { resolvePageKind } from "./page-fields.js";
 import type { ViewerPage } from "./types.js";
 import type { GraphData, GraphEdge, GraphNode, GraphNodeId, PageId } from "./types.js";
 import type { EntityId } from "../profile/types.js";
-
-const DEFAULT_KIND = "concept";
 
 /**
  * Wikilink edge with CONCRETE `PageId` endpoints — the shape every wikilink and
@@ -74,13 +73,6 @@ export interface GraphBuildOptions {
   entityPages?: EntityPageNode[];
   /** Typed relations to surface as edges (CLP 4b). */
   relations?: RelationEdge[];
-}
-
-/** Resolve the display kind for a page, defaulting to "concept" when absent or non-string. */
-export function resolvePageKind(frontmatter: Record<string, unknown>): string {
-  return typeof frontmatter.kind === "string" && frontmatter.kind.length > 0
-    ? frontmatter.kind
-    : DEFAULT_KIND;
 }
 
 /**

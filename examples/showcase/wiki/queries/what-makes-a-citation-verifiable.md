@@ -1,11 +1,8 @@
 ---
 title: What makes a citation verifiable?
 summary: A named line span in a file that still exists — the span narrows the claim to a few sentences, and existence is what the linter checks.
-kind: query
-sources:
-  - provenance-and-citations.md
+type: query
 createdAt: "2026-07-24T09:18:03.556Z"
-updatedAt: "2026-07-24T09:18:03.556Z"
 ---
 
 # What makes a citation verifiable?

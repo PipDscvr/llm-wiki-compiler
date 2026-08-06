@@ -1,11 +1,8 @@
 ---
 title: How do I tell if a page has gone stale?
 summary: Compare each owning source's current digest against the digest recorded at compile time — the wiki reports fresh, stale, orphaned, or unverified.
-kind: query
-sources:
-  - incremental-builds.md
+type: query
 createdAt: "2026-08-01T07:30:12.889Z"
-updatedAt: "2026-08-01T07:30:12.889Z"
 ---
 
 # How do I tell if a page has gone stale?

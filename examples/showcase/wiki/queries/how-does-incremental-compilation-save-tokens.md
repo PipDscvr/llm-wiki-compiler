@@ -1,12 +1,8 @@
 ---
 title: How does incremental compilation save tokens?
 summary: By hashing every source and re-extracting only the ones whose digest moved, so the expensive model call never runs over unchanged material.
-kind: query
-sources:
-  - incremental-builds.md
-  - knowledge-compilation.md
+type: query
 createdAt: "2026-07-20T15:41:22.317Z"
-updatedAt: "2026-07-20T15:41:22.317Z"
 ---
 
 # How does incremental compilation save tokens?

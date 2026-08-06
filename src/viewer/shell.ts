@@ -17,7 +17,7 @@
 
 import { readFile } from "fs/promises";
 import path from "path";
-import { resolvePageKind } from "./graph.js";
+import { resolvePageKind } from "./page-fields.js";
 import type { ViewerPage } from "./types.js";
 
 const PAGE_INDEX_MARKER = "<!--PAGE_INDEX-->";
@@ -31,7 +31,7 @@ interface EmbeddedPage {
   pageDirectory: ViewerPage["pageDirectory"];
   slug: string;
   title: string;
-  /** Frontmatter `kind`, used by the sidebar to group concepts on first paint. */
+  /** Resolved page kind (see `resolvePageKind`), used by the sidebar to group concepts on first paint. */
   kind: string;
 }
 

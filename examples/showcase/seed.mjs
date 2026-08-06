@@ -32,12 +32,12 @@ import { register } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  CANDIDATE_DRAFTS,
   COMPILED_AT,
   DELETED_SOURCE,
   EDITED_SOURCE,
   FRESH_SOURCE_CONCEPTS,
 } from "./seed-data.mjs";
+import { CANDIDATE_DRAFTS } from "./seed-candidates.mjs";
 
 const EXAMPLE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(EXAMPLE_DIR, "..", "..");

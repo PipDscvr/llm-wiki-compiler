@@ -18,7 +18,7 @@ import http from "http";
 import type { IncomingMessage, ServerResponse } from "http";
 import { AddressInfo } from "net";
 import { buildHealthResponse } from "./health.js";
-import { resolvePageKind } from "./graph.js";
+import { pageTimestamp, resolvePageKind } from "./page-fields.js";
 import { loadShellTemplate, substitutePageIndex } from "./shell.js";
 import { ASSETS_DIR, handleAsset } from "./static-assets.js";
 import { renderPageHtml } from "./render.js";
@@ -380,8 +380,7 @@ function pageListRow(page: ViewerPage): Record<string, unknown> {
     title: page.title,
     kind: resolvePageKind(page.frontmatter),
     summary: typeof page.frontmatter.summary === "string" ? page.frontmatter.summary : "",
-    updatedAt:
-      typeof page.frontmatter.updatedAt === "string" ? (page.frontmatter.updatedAt as string) : "",
+    updatedAt: pageTimestamp(page.frontmatter),
     warnings: page.warnings,
     freshness: page.freshness,
     citationCount: page.citations.length,
@@ -544,8 +543,9 @@ function pagePayload(
     frontmatter: page.frontmatter,
     warnings: page.warnings,
     freshness: page.freshness,
-    updatedAt:
-      typeof page.frontmatter.updatedAt === "string" ? (page.frontmatter.updatedAt as string) : "",
+    updatedAt: pageTimestamp(page.frontmatter),
+    // Literal, NOT `pageTimestamp`: this field means "when was the page first
+    // written", so it must never inherit an `updatedAt`.
     createdAt:
       typeof page.frontmatter.createdAt === "string" ? (page.frontmatter.createdAt as string) : "",
     generatedAt: snapshot.generatedAt,

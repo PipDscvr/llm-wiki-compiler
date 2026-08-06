@@ -24,9 +24,16 @@ wiki/
   index.md                            ← generated table of contents
 
 seed.mjs                              ← generates .llmwiki/ (see below)
-seed-data.mjs                         ← the ownership map + review queue
+seed-data.mjs                         ← the source-ownership map
+seed-candidates.mjs                   ← the six review-candidate drafts
 ts-loader.mjs                         ← lets seed.mjs import llmwiki's sources
 ```
+
+The pages under `queries/` carry exactly the frontmatter `llmwiki query --save`
+writes — `title`, `summary`, `type: query`, `createdAt`, and nothing else. That
+is deliberately narrower than a compiled concept page, which also carries `kind`,
+`sources`, and `updatedAt`. A fixture that quietly added those fields would make
+saved queries look healthier here than they are anywhere else.
 
 A sixth source, `legacy-import-notes.md`, is recorded in the project state but
 is **not** on disk. It was deleted after the last compile, which is what makes
@@ -70,11 +77,12 @@ the real writers means the example breaks loudly instead, or not at all.
 
 The script only ever writes inside `examples/showcase/`, derives every path
 from its own location rather than the working directory, and is idempotent —
-running it twice leaves the same three candidates and the same state file.
+running it twice leaves the same six candidates and the same state file.
 
 It needs no API key. Nothing it produces requires a model: hashes are
-mechanical, ownership is declared in `seed-data.mjs`, and `llmwiki lint` is a
-pure static-analysis pass.
+mechanical, ownership is declared in `seed-data.mjs`, the candidate drafts are
+written out in `seed-candidates.mjs`, and `llmwiki lint` is a pure
+static-analysis pass.
 
 ## What it demonstrates
 
@@ -97,14 +105,23 @@ the freshness rules exist for.
 
 ### A review queue with varied hold reasons
 
-Three candidates, each held differently, so the reviews list has something to
-sort by:
+Six candidates covering every held-reason code in `src/review/policy.ts`, all
+four review modes, and both approval targets — so the reviews list has real
+range to sort and filter by, and `llmwiki review show` has real bodies to read:
 
-| Candidate | Mode | Held reasons |
-| --- | --- | --- |
-| Semantic Reranking | `policy` | `low-confidence` |
-| Connector Provenance | `connector` | `connector-fetched`, `contradicted` |
-| Pending Embeddings | `forced` | `manual-review-requested`, `provenance-violating` |
+| Candidate | Mode | Held reasons | Approves into |
+| --- | --- | --- | --- |
+| Semantic Reranking | `policy` | `low-confidence` | `concepts/` |
+| Connector Provenance | `connector` | `connector-fetched`, `contradicted` | `concepts/` |
+| Pending Embeddings | `forced` | `manual-review-requested`, `provenance-violating` | `concepts/` |
+| Chunk Boundaries | `policy` | `schema-violating` | `concepts/` |
+| Merged Page Ownership | `policy` | `all` | `concepts/` |
+| What happens when a source is deleted? | `imported` | `imported-okf` | `queries/` |
+
+Merged Page Ownership is the interesting one: nothing is wrong with it. It is
+queued only because the project holds every generated page, which is exactly
+what the `all` code is for — a clean draft and a broken one look identical in
+the queue until you read the reason.
 
 `review-candidates.md` links to `[[Semantic Reranking]]` — a page that only
 exists in the queue. That link is reported as *informational*, not broken,

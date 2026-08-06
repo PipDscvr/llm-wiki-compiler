@@ -27,6 +27,7 @@ import { collectViewerPages, resolveBareSlugList } from "./collect.js";
 import { extractWikilinkSlugs } from "../wiki/collect.js";
 import { isMalformedCitationEntry, splitCitationMarker } from "../utils/markdown.js";
 import { buildGraphData } from "./graph.js";
+import { pageTimestamp } from "./page-fields.js";
 import type { EntityPageNode, GraphBuildOptions, RelationEdge } from "./graph.js";
 import { buildFreshnessSnapshot, computeFreshness } from "../freshness/index.js";
 import { collectProfileSummary, loadNonDefaultProfile } from "../profile/block.js";
@@ -344,9 +345,12 @@ async function readIndexFile(root: string): Promise<{ available: boolean; body: 
 }
 
 /**
- * Top-N recently updated pages for the dashboard. Pages without an
- * `updatedAt` frontmatter field sort to the end with an empty string so
- * the list remains deterministic.
+ * Top-N recently updated pages for the dashboard, ranked by each page's
+ * EFFECTIVE timestamp (see {@link pageTimestamp}) — so a saved query, which
+ * carries `createdAt` and no `updatedAt`, ranks by when it was actually
+ * written instead of being pinned below every dated concept. Pages declaring
+ * no timestamp at all still sort to the end with an empty string, keeping the
+ * list deterministic.
  */
 function buildRecentPages(pages: ViewerPage[]): ViewerRecentPage[] {
   const rows: ViewerRecentPage[] = pages.map((page) => ({
@@ -354,8 +358,7 @@ function buildRecentPages(pages: ViewerPage[]): ViewerRecentPage[] {
     pageDirectory: page.pageDirectory,
     slug: page.slug,
     title: page.title,
-    updatedAt:
-      typeof page.frontmatter.updatedAt === "string" ? (page.frontmatter.updatedAt as string) : "",
+    updatedAt: pageTimestamp(page.frontmatter),
   }));
   rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return rows.slice(0, RECENT_PAGES_LIMIT);
