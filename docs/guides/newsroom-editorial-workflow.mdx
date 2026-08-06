@@ -11,6 +11,16 @@ and editorial rather than research-shaped: articles, desks, bylines, one
 Use it when you want a lightweight structured newsroom wiki, or when you want to
 see how Configurable Lifecycle Profiles work outside AutoSci.
 
+<Tip>
+  Prefer a finished project to read rather than steps to follow?
+  `examples/profile-newsroom/` in the repository is this guide's end state,
+  seeded in one offline command: typed articles, desks and bylines, six
+  `filed-under` relations, three deliberately malformed pages, and five workflow
+  runs — including one parked on the `edited` gate and one awaiting a stage
+  output. Run `node examples/profile-newsroom/seed.mjs`, then `llmwiki view`
+  inside it.
+</Tip>
+
 ## 1. Install Newsroom
 
 Start in an empty llmwiki project:
