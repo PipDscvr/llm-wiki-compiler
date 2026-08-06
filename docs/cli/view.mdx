@@ -51,6 +51,20 @@ Every view in the viewer has its own hash route, so you can bookmark or reload a
 
 Individual pages open at `#/concepts/<slug>` or `#/queries/<slug>`.
 
+### Typed entity pages
+
+If your project runs a non-default profile, the viewer also reads the entity pages that profile declares - a newsroom profile's `wiki/articles`, a research profile's `wiki/papers`. They appear in the viewer's page data alongside your concepts and queries, tagged with the entity type they belong to, and search matches their titles and bodies.
+
+Each one is addressable by its **entity type**, not by its directory on disk: an article in `wiki/articles` is served at `/api/page/articles/<slug>`. The entity type is the only directory name the viewer accepts, and it accepts only the types your active profile actually declares - anything else is rejected before a page is looked up. Entity types can never collide with `concepts` or `queries`, because `llmwiki profile` refuses to load a profile that names one of them.
+
+An entity page that violates its profile's field contract - a missing required field, a value outside a declared enum - is left out. That is the same page the graph leaves out and `llmwiki status` counts as a problem, so every surface describes the same set of pages. The violation itself is listed on `#/health` under **Profile problems**, so a page that has been dropped is never silently missing.
+
+Typed entity pages carry the same citation chips and provenance as compiled pages. They do not carry a freshness verdict: freshness is derived from the sources a page was compiled from, and entity pages are authored rather than compiled, so they always read as unverified rather than being labelled fresh on no evidence.
+
+<Note>
+The sidebar does not yet list typed entity pages, and the browser routes `#/concepts/<slug>` and `#/queries/<slug>` do not yet have an equivalent for them. Read them through the local API - `/api/pages` and `/api/page/<entity-type>/<slug>` - or through `llmwiki export`, until viewer navigation for profile vocabularies ships.
+</Note>
+
 ## What the viewer includes
 
 **Overview dashboard.** The `#/` route opens on a dashboard: four counters (concepts, sources, needs attention, and awaiting review), your most recently compiled pages, a compact version of the knowledge graph, a compile receipt (root, profile, state, index availability, lint status, and the percentage of citations that resolve to a source file), and a list of suggested next actions. The needs-attention counter is dangling links plus unresolved citations, not lint findings, so it always has a value even when lint has never run. Next actions are informational - the viewer is read-only and cannot act on them for you - so each row names a CLI command where one applies (`llmwiki compile` for stale pages, `llmwiki lint` if lint has never run, `llmwiki export` to export for agents) or the manual fix otherwise, such as creating the missing pages or correcting the targets behind dangling links.
@@ -85,7 +99,7 @@ For the per-count detail behind the verdict, open `#/health`. To narrow the conc
 
 **Light and dark themes.** A toggle in the header switches between light and dark and remembers your choice for the next visit. Until you pick one, the viewer follows your operating system's colour scheme, defaulting to dark if that preference isn't available.
 
-**Full-text search.** The search field lives in the header next to the theme toggle rather than in the sidebar, so it reads as a global action rather than page navigation. It matches page titles and body text across your compiled concept and query pages - the compiled `wiki/index.md` is not included - and results appear inline as you type. Press `⌘K` on macOS or `Ctrl+K` on Windows and Linux to jump to the field from anywhere in the viewer.
+**Full-text search.** The search field lives in the header next to the theme toggle rather than in the sidebar, so it reads as a global action rather than page navigation. It matches page titles and body text across your compiled concept and query pages, and across the typed entity pages of a non-default profile - the compiled `wiki/index.md` is not included - and results appear inline as you type. Press `⌘K` on macOS or `Ctrl+K` on Windows and Linux to jump to the field from anywhere in the viewer.
 
 **Markdown rendering.** Pages are rendered with full Markdown formatting, including headers, code blocks, tables, and `[[wikilink]]` resolution. Wikilinks are clickable and resolve to any page that matches either the linked title or an entry in the page's `aliases` frontmatter.
 

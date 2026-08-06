@@ -17,7 +17,7 @@
 
 import { readFile } from "fs/promises";
 import path from "path";
-import { resolvePageKind } from "./page-fields.js";
+import { viewerPageKind } from "./page-fields.js";
 import type { ViewerPage } from "./types.js";
 
 const PAGE_INDEX_MARKER = "<!--PAGE_INDEX-->";
@@ -31,8 +31,10 @@ interface EmbeddedPage {
   pageDirectory: ViewerPage["pageDirectory"];
   slug: string;
   title: string;
-  /** Resolved page kind (see `resolvePageKind`), used by the sidebar to group concepts on first paint. */
+  /** Resolved page kind (see `viewerPageKind`), used by the sidebar to group concepts on first paint. */
   kind: string;
+  /** Entity type for a typed page; absent on default pages, so the default blob is unchanged. */
+  entityType?: string;
 }
 
 /**
@@ -79,7 +81,8 @@ export function substitutePageIndex(template: string, pages: ViewerPage[]): stri
     pageDirectory: page.pageDirectory,
     slug: page.slug,
     title: page.title,
-    kind: resolvePageKind(page.frontmatter),
+    kind: viewerPageKind(page),
+    ...(page.entityType !== undefined ? { entityType: page.entityType } : {}),
   }));
   const json = JSON.stringify({ pages: embedded }).replace(/</g, "\\u003c");
   const block = `<script type="application/json" id="page-index">${json}</script>`;

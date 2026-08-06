@@ -1,14 +1,14 @@
 /**
  * Graph data builder for the viewer's `#/graph` route.
  *
- * Converts the flat `ViewerPage[]` list from the startup snapshot into an
+ * Converts the flat `DefaultViewerPage[]` list from the startup snapshot into an
  * adjacency representation suitable for D3 force-directed rendering. Called
  * once by `buildViewerSnapshot` — the result is frozen in the snapshot and
  * served directly by `/api/graph` with no per-request computation.
  */
 
 import { resolvePageKind } from "./page-fields.js";
-import type { ViewerPage } from "./types.js";
+import type { DefaultViewerPage } from "./types.js";
 import type { GraphData, GraphEdge, GraphNode, GraphNodeId, PageId } from "./types.js";
 import type { EntityId } from "../profile/types.js";
 
@@ -92,7 +92,7 @@ export interface GraphBuildOptions {
  * `opts` is absent/empty the output is byte-identical to the wikilink-only
  * graph (no field on an existing node/edge is touched).
  */
-export function buildGraphData(pages: ViewerPage[], opts?: GraphBuildOptions): GraphData {
+export function buildGraphData(pages: DefaultViewerPage[], opts?: GraphBuildOptions): GraphData {
   const pageIds = new Set<PageId>(pages.map((p) => p.id));
   const edges = buildEdges(pages);
   const ghostDisplayMap = buildGhostDisplayMap(pages);
@@ -128,7 +128,7 @@ function appendTypedGraph(
   };
 }
 
-function buildGhostDisplayMap(pages: ViewerPage[]): Map<PageId, string> {
+function buildGhostDisplayMap(pages: DefaultViewerPage[]): Map<PageId, string> {
   const map = new Map<PageId, string>();
   for (const page of pages) {
     for (const { slug, display } of page.danglingLinks ?? []) {
@@ -146,7 +146,7 @@ function ghostId(slug: string): PageId {
   return `${GHOST_DIRECTORY}/${slug}` as PageId;
 }
 
-function buildEdges(pages: ViewerPage[]): WikilinkEdge[] {
+function buildEdges(pages: DefaultViewerPage[]): WikilinkEdge[] {
   const edges: WikilinkEdge[] = [];
   for (const page of pages) {
     for (const target of page.outgoingLinks) {
@@ -194,7 +194,7 @@ function buildInDegreeMap(edges: WikilinkEdge[]): Map<PageId, number> {
 }
 
 function buildNode(
-  page: ViewerPage,
+  page: DefaultViewerPage,
   pageIds: Set<PageId>,
   inDegreeMap: Map<PageId, number>,
 ): GraphNode {

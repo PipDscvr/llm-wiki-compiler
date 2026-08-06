@@ -12,25 +12,26 @@
  * The single exception is `/api/health`, which calls `readLintCache`
  * per request — that's a documented cheap atomic-JSON contract, not a
  * filesystem rescan of the wiki.
+ *
+ * The two page endpoints live in `api-pages.ts` and the shared response
+ * writers in `respond.ts`, so this file stays about transport: bind,
+ * headers, origin policy, and route dispatch.
  */
 
 import http from "http";
 import type { IncomingMessage, ServerResponse } from "http";
 import { AddressInfo } from "net";
 import { buildHealthResponse } from "./health.js";
-import { pageTimestamp, resolvePageKind } from "./page-fields.js";
+import { handleApiPage, handleApiPages } from "./api-pages.js";
 import { loadShellTemplate, substitutePageIndex } from "./shell.js";
 import { ASSETS_DIR, handleAsset } from "./static-assets.js";
-import { renderPageHtml } from "./render.js";
 import { searchPages } from "./search.js";
 import { workflowStatus } from "../workflows/status.js";
 import { buildWorkflowRunsEnvelope } from "./workflow-runs.js";
 import { listCandidatePage } from "../compiler/candidates.js";
 import { buildReviewsEnvelope, REVIEW_LIST_LIMIT } from "./reviews.js";
-import type { PageDirectory } from "../export/types.js";
-import { UNRESOLVED_CITATION_CODE } from "./types.js";
-import type { ViewerSnapshot, ViewerPage } from "./types.js";
-import { assertSafeSlug, PathSafetyError } from "./path-safety.js";
+import { tryRenderBody, writeJson, writeJsonError, writeRenderFailed } from "./respond.js";
+import type { ViewerSnapshot } from "./types.js";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1"]);
 
@@ -39,9 +40,6 @@ const CONTENT_SECURITY_POLICY =
   "default-src 'self'; script-src 'self'; style-src 'self'; " +
   "img-src 'self' data:; font-src 'self'; connect-src 'self'; " +
   "frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'none'";
-
-/** Profile id reported when the project runs the built-in default profile. */
-const DEFAULT_PROFILE_ID = "default";
 
 /** Configuration knobs accepted by `startViewerServer`. */
 interface ViewerServerConfig {
@@ -329,84 +327,6 @@ async function handleShell(res: ServerResponse, snapshot: ViewerSnapshot): Promi
   res.end(body);
 }
 
-/** `/api/pages` — the full bootstrap envelope: project/profile identity, stateStatus, counts, graph summary, recent pages, and the page list. */
-function handleApiPages(res: ServerResponse, snapshot: ViewerSnapshot): void {
-  writeJson(res, 200, {
-    project: snapshot.project,
-    stateStatus: snapshot.stateStatus,
-    profileId: snapshot.profile?.profileId ?? DEFAULT_PROFILE_ID,
-    counts: {
-      concepts: snapshot.counts.concepts,
-      queries: snapshot.counts.queries,
-      sourceFiles: snapshot.counts.sourceFiles,
-      pendingReviews: snapshot.counts.pendingReviews,
-      compiledSources: snapshot.counts.compiledSources,
-      stale: snapshot.counts.stale,
-      orphaned: snapshot.counts.orphaned,
-    },
-    graph: graphSummary(snapshot),
-    sourceFilenames: snapshot.sourceFilenames,
-    index: { available: snapshot.index.available, href: snapshot.index.href },
-    recentPages: snapshot.recentPages,
-    pages: snapshot.pages.map(pageListRow),
-    updatedAt: snapshot.generatedAt,
-    ...profileProblemFields(snapshot.profile),
-  });
-}
-
-/**
- * The profile collector's problems, serialised ONLY when there is at least one.
- *
- * The data exists so a non-default project with a bad entity directory or an
- * invalid entity page is never reported as silently healthy — but it stopped at
- * the snapshot until now, so the header could still read ALL CLEAR over a broken
- * project. Omitted-when-clean keeps a default-profile envelope byte-identical and
- * lets the client treat absence as "nothing wrong" without a second flag.
- *
- * Both fields ship together because `problems` is CAPPED (`PROFILE_PROBLEM_CAP`)
- * while `problemTotal` is the true count: without the total, a truncated list
- * would read as the whole set.
- */
-function profileProblemFields(profile: ViewerSnapshot["profile"]): Record<string, unknown> {
-  if (!profile?.problems?.length) return {};
-  return { profileProblems: profile.problems, profileProblemTotal: profile.problemTotal };
-}
-
-/**
- * Node/edge/dangling totals for the dashboard's graph panel and its
- * "needs attention" card. Summarised here so the dashboard does not have
- * to fetch the full `/api/graph` adjacency payload for three integers.
- */
-function graphSummary(snapshot: ViewerSnapshot): Record<string, number> {
-  return {
-    nodeCount: snapshot.graph.nodes.length,
-    edgeCount: snapshot.graph.edges.length,
-    danglingCount: snapshot.graph.nodes.filter((node) => node.isDangling === true).length,
-  };
-}
-
-/** Count a page's warnings carrying the given stable code. */
-function countWarnings(page: ViewerPage, code: string): number {
-  return page.warnings.filter((warning) => warning.code === code).length;
-}
-
-/** Per-page row shape returned in `/api/pages.pages`. */
-function pageListRow(page: ViewerPage): Record<string, unknown> {
-  return {
-    id: page.id,
-    pageDirectory: page.pageDirectory,
-    slug: page.slug,
-    title: page.title,
-    kind: resolvePageKind(page.frontmatter),
-    summary: typeof page.frontmatter.summary === "string" ? page.frontmatter.summary : "",
-    updatedAt: pageTimestamp(page.frontmatter),
-    warnings: page.warnings,
-    freshness: page.freshness,
-    citationCount: page.citations.length,
-    unresolvedCitationCount: countWarnings(page, UNRESOLVED_CITATION_CODE),
-  };
-}
-
 /** `/api/index` — rendered `wiki/index.md` with resolved outgoing links. */
 function handleApiIndex(
   res: ServerResponse,
@@ -483,132 +403,4 @@ function handleApiSearch(
 ): void {
   const query = parsedUrl.searchParams.get("q") ?? "";
   writeJson(res, 200, searchPages(snapshot, query));
-}
-
-/**
- * `/api/page/:directory/:slug` — single page payload with server-rendered
- * sanitized HTML. The `render_pending` Slice-2 placeholder is gone; any
- * remaining warnings come from the collector (missing/malformed
- * frontmatter, missing title).
- */
-function handleApiPage(
-  res: ServerResponse,
-  pathname: string,
-  snapshot: ViewerSnapshot,
-  isLoopback: boolean,
-): void {
-  const segments = pathname.replace(/^\/api\/page\//, "").split("/");
-  if (segments.length !== 2) {
-    writeJsonError(res, 400, "bad_request", "Expected /api/page/:directory/:slug");
-    return;
-  }
-  const [directorySegment, encodedSlug] = segments;
-  const decodedSlug = safeDecodeSlug(directorySegment, encodedSlug);
-  if (!decodedSlug) {
-    writeJsonError(res, 400, "bad_request", "Invalid directory or slug.");
-    return;
-  }
-  const page = snapshot.pages.find(
-    (p) => p.pageDirectory === decodedSlug.directory && p.slug === decodedSlug.slug,
-  );
-  if (!page) {
-    writeJsonError(res, 404, "page_not_found", `${decodedSlug.directory}/${decodedSlug.slug}`);
-    return;
-  }
-  const rendered = tryRenderBody(page.body, snapshot, isLoopback);
-  if (rendered === null) {
-    writeRenderFailed(res);
-    return;
-  }
-  writeJson(res, 200, pagePayload(page, snapshot, rendered.html));
-}
-
-/**
- * Decode the directory and slug segments together so a bad input on
- * either fails with a uniform 400. Resolves with `null` for any
- * structural rejection.
- */
-function safeDecodeSlug(
-  directorySegment: string,
-  encodedSlug: string,
-): { directory: PageDirectory; slug: string } | null {
-  if (directorySegment !== "concepts" && directorySegment !== "queries") return null;
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(encodedSlug);
-  } catch {
-    return null;
-  }
-  try {
-    assertSafeSlug(decoded);
-  } catch (err) {
-    if (err instanceof PathSafetyError) return null;
-    throw err;
-  }
-  return { directory: directorySegment, slug: decoded };
-}
-
-/** Build the JSON payload for `/api/page/:dir/:slug`. */
-function pagePayload(
-  page: ViewerPage,
-  snapshot: ViewerSnapshot,
-  renderedHtml: string,
-): Record<string, unknown> {
-  return {
-    id: page.id,
-    title: page.title,
-    pageDirectory: page.pageDirectory,
-    slug: page.slug,
-    html: renderedHtml,
-    citations: page.citations,
-    outgoingLinks: page.outgoingLinks,
-    frontmatter: page.frontmatter,
-    warnings: page.warnings,
-    freshness: page.freshness,
-    updatedAt: pageTimestamp(page.frontmatter),
-    // Literal, NOT `pageTimestamp`: this field means "when was the page first
-    // written", so it must never inherit an `updatedAt`.
-    createdAt:
-      typeof page.frontmatter.createdAt === "string" ? (page.frontmatter.createdAt as string) : "",
-    generatedAt: snapshot.generatedAt,
-  };
-}
-
-/**
- * Wrap the renderer in a catch and return null on any thrown error.
- * Render or sanitize failures must emit the spec's `render_failed`
- * envelope rather than leak the raw thrown text — see `writeRenderFailed`.
- */
-function tryRenderBody(
-  body: string,
-  snapshot: ViewerSnapshot,
-  isLoopback: boolean,
-): { html: string } | null {
-  try {
-    return renderPageHtml(body, snapshot, { isLoopback });
-  } catch {
-    return null;
-  }
-}
-
-/** Write the spec's exact `render_failed` 500 envelope. */
-function writeRenderFailed(res: ServerResponse): void {
-  writeJsonError(res, 500, "render_failed", "Could not render page.");
-}
-
-/** Write a JSON response body with the given status. */
-function writeJson(res: ServerResponse, status: number, body: unknown): void {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.end(JSON.stringify(body));
-}
-
-/** Standard `{ error: { code, message } }` envelope. */
-function writeJsonError(
-  res: ServerResponse,
-  status: number,
-  code: string,
-  message: string,
-): void {
-  writeJson(res, status, { error: { code, message } });
 }

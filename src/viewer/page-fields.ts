@@ -67,3 +67,22 @@ export function resolvePageKind(frontmatter: Record<string, unknown>): string {
     ?? readNonEmptyString(frontmatter, "type")
     ?? DEFAULT_KIND;
 }
+
+/**
+ * The display kind of a viewer page: its profile entity type when it has one,
+ * otherwise the frontmatter-derived {@link resolvePageKind}.
+ *
+ * A typed entity page declares no `kind`/`type` frontmatter — those spellings
+ * belong to the default compiler — so `resolvePageKind` alone would label every
+ * newsroom article a "concept". Its entity type is the honest answer, and using
+ * it here matches what the graph already puts on a typed node's `kind`.
+ *
+ * @param page - Any viewer page record carrying frontmatter and an optional entity type.
+ * @returns The display kind.
+ */
+export function viewerPageKind(page: {
+  entityType?: string;
+  frontmatter: Record<string, unknown>;
+}): string {
+  return page.entityType ?? resolvePageKind(page.frontmatter);
+}
