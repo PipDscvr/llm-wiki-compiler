@@ -3,18 +3,8 @@
   "entry": [
     "src/viewer/assets/viewer.js",
     "scripts/copy-viewer-assets.mjs",
-    "src/viewer/assets/viewer-theme-boot.js",
-    "examples/showcase/seed.mjs",
-    "examples/showcase/ts-loader.mjs",
-    "examples/profile-newsroom/seed.mjs",
-    "examples/profile-newsroom/ts-loader.mjs"
+    "src/viewer/assets/viewer-theme-boot.js"
   ],
-  "duplicates": {
-    "ignore": [
-      "examples/*/seed.mjs",
-      "examples/*/ts-loader.mjs"
-    ]
-  },
   "ignorePatterns": [
     "docs/**",
     "src/viewer/assets/index.html",

@@ -78,7 +78,7 @@ llmwiki workflow list
 
 Templates can also be distributed securely. Publishers build signed, offline distributions with `llmwiki template publish` — Ed25519 signing, key rotation, and package revocation — and verify them with `template publish verify`. Consumers add explicitly trusted taps, discover and inspect signed catalogs, and install or update templates with continuity, revocation, and compatibility checks enforced under lock.
 
-Read the [CLP concept guide](docs/concepts/configurable-lifecycle-profiles.mdx), follow the [AutoSci research workflow](docs/guides/autosci-research-workflow.mdx), or explore the [Newsroom editorial workflow](docs/guides/newsroom-editorial-workflow.mdx). For a working project you can run in one command, see [`examples/profile-newsroom/`](examples/profile-newsroom/) — a seeded `newsroom` project with typed pages, typed relations, deliberate profile problems, and workflow runs parked on a gate and on a stage output.
+Read the [CLP concept guide](docs/concepts/configurable-lifecycle-profiles.mdx), follow the [AutoSci research workflow](docs/guides/autosci-research-workflow.mdx), or explore the [Newsroom editorial workflow](docs/guides/newsroom-editorial-workflow.mdx).
 
 ## Karpathy's LLM Wiki pattern
 
@@ -156,7 +156,7 @@ llmwiki quickstart https://en.wikipedia.org/wiki/Andrej_Karpathy
 llmwiki query "What terms did Andrej coin?"
 ```
 
-Three example projects are included, all inspectable without an API key. [`examples/basic/`](examples/basic/) is a small pre-generated wiki — real output from one source. [`examples/showcase/`](examples/showcase/) is a deliberately fully-populated project with saved queries, a pending review queue, mixed page freshness, and eleven lint rules firing; run `node examples/showcase/seed.mjs` to generate its `.llmwiki/` working state, then `llmwiki view` inside it. [`examples/profile-newsroom/`](examples/profile-newsroom/) is the [CLP](#configurable-lifecycle-profiles-clp) example: it installs the `newsroom` template and exercises typed entity pages, typed relations, lifecycle states, deliberate profile problems, and five workflow runs — including one parked on a gate and one awaiting a stage output; run `node examples/profile-newsroom/seed.mjs` the same way.
+The [`examples/basic/`](examples/basic/) directory includes a small pre-generated wiki you can inspect without an API key.
 
 ## Core commands
 
