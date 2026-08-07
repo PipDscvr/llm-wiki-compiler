@@ -21,11 +21,46 @@ export async function safeRealpath(p: string): Promise<string | null> {
   }
 }
 
-/** True when `child` equals `dir` or sits beneath it. */
+/**
+ * True when `child` equals `dir` or sits beneath it.
+ *
+ * Takes NATIVE paths — absolute realpaths — and so compares with `path.sep`.
+ * For canonical repo-relative POSIX strings, such as profile-declared
+ * directories, use `isInsidePosixDir` from `../profile/paths.js` instead:
+ * comparing `/`-joined strings with `path.sep` rejects every nested path on
+ * win32 (issue #163).
+ */
 export function isInsideDir(child: string, dir: string): boolean {
   if (child === dir) return true;
   const prefix = dir.endsWith(path.sep) ? dir : dir + path.sep;
   return child.startsWith(prefix);
+}
+
+/**
+ * Rewrite a NATIVE relative path to its POSIX form (`\` → `/` on win32, identity
+ * elsewhere).
+ *
+ * `path.relative`/`path.join` emit the PLATFORM separator, which is wrong the
+ * moment the result stops being a filesystem argument and becomes portable
+ * content — a markdown link, a stored id, a serialized record. On win32 those
+ * silently gain backslashes and break for every consumer that expects `/`
+ * (issue #163, same class as the profile-path fix).
+ *
+ * Only for RELATIVE paths: an absolute win32 path (`C:\...`) is not made
+ * meaningful by swapping separators.
+ *
+ * Splits on `sep` ALONE, never on `[\\/]`: on POSIX a backslash is a legal
+ * filename character, so rewriting it there would corrupt a real file name.
+ * `sep` is a parameter purely as a test seam. CI runs Linux only (see the note
+ * in `.github/workflows/ci.yml`), so asserting the win32 behaviour from a POSIX
+ * runner is the ONLY coverage this has — not a stopgap until a Windows job
+ * lands.
+ *
+ * @param relativePath - A relative path in the separator convention of `sep`.
+ * @param sep - Separator to split on. Defaults to the running platform's.
+ */
+export function toPosixPath(relativePath: string, sep: string = path.sep): string {
+  return relativePath.split(sep).join(path.posix.sep);
 }
 
 /**
