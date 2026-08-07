@@ -59,15 +59,13 @@ export interface LLMProvider {
 const SUPPORTED_PROVIDERS: ReadonlySet<string> = new Set(["anthropic", "claude-agent", "openai", "ollama", "minimax", "copilot"]);
 
 /**
- * Factory that returns the appropriate LLMProvider based on env vars.
- * Reads LLMWIKI_PROVIDER (default "anthropic") and LLMWIKI_MODEL
- * (defaults per provider from PROVIDER_MODELS).
+ * Construct the provider named `providerName`, independent of which provider is
+ * "active". Shared by {@link getProvider} for chat and by the embedding-provider
+ * factory, so the two can never drift in how a given backend is built.
  *
  * Direct process.env access is acceptable here as this is a system boundary.
  */
-export function getProvider(): LLMProvider {
-  const providerName = getProviderName();
-
+export function buildProvider(providerName: string): LLMProvider {
   switch (providerName) {
     case "anthropic":
       return getAnthropicProvider();
@@ -77,6 +75,7 @@ export function getProvider(): LLMProvider {
       return new OpenAIProvider(getModelForProvider("openai"), {
         baseURL: readOptionalEnv("OPENAI_BASE_URL"),
         embeddingsBaseURL: readOptionalEnv("OPENAI_EMBEDDINGS_BASE_URL"),
+        embeddingsApiKey: readOptionalEnv("OPENAI_EMBEDDINGS_API_KEY"),
         embeddingModel: readOptionalEnv("LLMWIKI_EMBEDDING_MODEL"),
       });
     case "ollama":
@@ -92,6 +91,15 @@ export function getProvider(): LLMProvider {
     default:
       throw new Error(`Unhandled provider: ${providerName}`);
   }
+}
+
+/**
+ * Factory returning the provider for CHAT and tool calls, from LLMWIKI_PROVIDER
+ * (default "anthropic") and LLMWIKI_MODEL. Embedding callers use
+ * `getEmbeddingProvider` from `./embedding-provider.js` instead.
+ */
+export function getProvider(): LLMProvider {
+  return buildProvider(getProviderName());
 }
 
 function readOptionalEnv(name: string): string | undefined {

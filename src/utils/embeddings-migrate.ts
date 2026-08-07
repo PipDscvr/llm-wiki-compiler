@@ -67,7 +67,7 @@ export function migrateEmbeddingStore(
 ): MigrationResult {
   const dims = storeDimensions(parsedOld);
   if (shouldRebuild(parsedOld, activeModel)) {
-    return rebuild(parsedOld, eligibleLivePages, activeModel);
+    return rebuild(eligibleLivePages, activeModel);
   }
   const slugToPageIds = indexBySlug(eligibleLivePages);
   const liveByPageId = new Map(eligibleLivePages.map((p) => [p.pageId, p]));
@@ -78,10 +78,19 @@ export function migrateEmbeddingStore(
   return { store: { version: 3, model: activeModel, dimensions: dims, entries, chunks }, reembedPageIds: [...reembed] };
 }
 
-/** Rebuild-only: empty v3 store + EVERY eligible pageId queued for re-embedding. */
-function rebuild(parsedOld: ParsedStore | null, pages: EligibleLivePage[], model: string): MigrationResult {
+/**
+ * Rebuild-only: empty v3 store + EVERY eligible pageId queued for re-embedding.
+ *
+ * `dimensions` is always 0 here, never the old store's dimension: a rebuild
+ * discards every old vector, so the previous dimension describes nothing that
+ * survives it. A stale nonzero value would carry forward into
+ * embeddings.ts's `expectedDim` and reject every freshly embedded vector whose
+ * new model has a different length; embeddings-write.ts recomputes the real
+ * dimension from the first vector the re-embed pass actually produces.
+ */
+function rebuild(pages: EligibleLivePage[], model: string): MigrationResult {
   return {
-    store: { version: 3, model, dimensions: storeDimensions(parsedOld), entries: [], chunks: [] },
+    store: { version: 3, model, dimensions: 0, entries: [], chunks: [] },
     reembedPageIds: pages.map((p) => p.pageId),
   };
 }

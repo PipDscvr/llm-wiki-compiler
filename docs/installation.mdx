@@ -148,6 +148,23 @@ llmwiki calls an LLM during the compile and query phases. It does **not** requir
   </Tab>
 </Tabs>
 
+### Different backends for chat and embeddings
+
+You can serve embeddings from a different provider than chat - for example, Claude Agent SDK for generation with a local vLLM instance serving vectors:
+
+```bash
+export LLMWIKI_PROVIDER=claude-agent
+export LLMWIKI_EMBEDDING_PROVIDER=openai
+export OPENAI_EMBEDDINGS_BASE_URL=http://localhost:8000/v1
+export LLMWIKI_EMBEDDING_MODEL=<your-local-embedding-model>
+```
+
+A self-hosted endpoint needs no API key. Without `OPENAI_EMBEDDINGS_BASE_URL`, you must set `OPENAI_API_KEY`. If the endpoint belongs to a hosted service rather than your own machine, set `OPENAI_EMBEDDINGS_API_KEY` too - otherwise your `OPENAI_API_KEY` is sent there.
+
+Switching an existing project to a different embedding backend re-embeds every page on the next `llmwiki compile`, because vectors from different backends are not comparable.
+
+See [Environment Variables](/configuration/environment-variables) for the full `LLMWIKI_EMBEDDING_PROVIDER` credential reference.
+
 ## Overriding the Model
 
 To use a different model than the provider's default, set `LLMWIKI_MODEL`:

@@ -16,6 +16,12 @@
  *    `eligibleLivePages`) → dropped from the store AND never in `reembedPageIds`.
  *  - a deleted page (v2 entry, no eligible live page) → dropped, not re-embedded.
  *  - S5: stored model ≠ activeModel → rebuild-only; wrong-length vector → rebuild-only.
+ *  - a rebuild returns `dimensions: 0`, never the old store's dimension. This is
+ *    not cosmetic: a rebuild discards every old vector, so the old dimension
+ *    describes nothing, and carrying a stale nonzero value forward would make
+ *    the writer validate freshly-embedded vectors of a new model's length
+ *    against the wrong expected size and reject them — wedging embeddings
+ *    permanently, since every later compile would repeat the same failure.
  *  - idempotent on a healthy v3 input.
  */
 
@@ -171,6 +177,18 @@ describe("migrateEmbeddingStore — S5 rebuild-only gates", () => {
     const pages = [live("concepts/foo", "foo", "Foo", "S")];
     const { reembedPageIds } = migrateEmbeddingStore(null, pages, MODEL);
     expect(reembedPageIds).toEqual(["concepts/foo"]);
+  });
+
+  it("returns dimensions: 0 on a rebuild, not the old store's dimension", () => {
+    // The old store below declares dimensions: 2 (see v2()). A model change
+    // forces a rebuild; asserting 0 here pins the fix — the previous bug carried
+    // the stale "2" forward, which would fail validation on every vector from a
+    // differently-sized model (e.g. voyage-3-lite's 512 vs. text-embedding-3
+    // -small's 1536) and wedge the store permanently.
+    const old = v2([v2Entry("foo", "Foo", "S")]);
+    const pages = [live("concepts/foo", "foo", "Foo", "S")];
+    const { store } = migrateEmbeddingStore(old, pages, "a-different-model");
+    expect(store.dimensions).toBe(0);
   });
 });
 

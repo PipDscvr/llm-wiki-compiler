@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Separate embedding provider** — `LLMWIKI_EMBEDDING_PROVIDER` selects the backend that serves embeddings, independently of `LLMWIKI_PROVIDER`. This makes split setups possible, such as Claude Agent SDK for generation with a local vLLM instance serving embeddings over its OpenAI-compatible endpoint. Valid values are `anthropic`, `claude-agent`, `openai`, and `ollama`. `minimax` and `copilot` expose no embeddings API, and naming one now fails with a clear error listing the valid values instead of an opaque failure from the provider's `embed()`. When the variable is set, the provider's own credential is required — `VOYAGE_API_KEY` for `anthropic` and `claude-agent`, `OPENAI_API_KEY` for `openai` — unless `OPENAI_EMBEDDINGS_BASE_URL` points at a self-hosted endpoint, which needs no key. Behaviour is unchanged when the variable is unset.
+
+  Thanks to **@knew-inventai** for the request (#154).
+
+  Changing the embedding backend invalidates the embedding index. It records the provider, model, and endpoint that produced its vectors, so the next `llmwiki compile` re-embeds every page. The model name alone is not enough to tell two backends apart — a local server answering to `text-embedding-3-small` and cloud OpenAI tag a store identically while producing vectors that do not share a space, and nothing downstream would notice. Moving between `anthropic` and `claude-agent` does not rebuild: both embed via Voyage with the same model.
+
+  Set `OPENAI_EMBEDDINGS_API_KEY` to give a separate embeddings endpoint its own credential. Without it the embeddings client reuses `OPENAI_API_KEY`, which sends your cloud OpenAI key to whatever host `OPENAI_EMBEDDINGS_BASE_URL` names; llmwiki now warns when that happens, except on `localhost`. The warning redacts any credential carried in the endpoint URL itself, and the endpoint is hashed rather than stored verbatim in `.llmwiki/embeddings.json`.
+
+  An index written before llmwiki recorded the endpoint carries only its model name. It is preserved while you run without `LLMWIKI_EMBEDDING_PROVIDER` or an endpoint override, so upgrading does not re-embed an existing project; under either override the model name cannot establish where the vectors came from, so the next compile rebuilds the index once and records the full configuration from then on.
+
 ### Fixed
 
 - **Windows: profile path validation rejected every declared directory** — on win32, `llmwiki template init` failed for every template with `entity directory must be under 'wiki/'`, any profile declaring a workflow `projectionFile` failed to load, and an entity directory declared as `wiki/` was wrongly accepted despite containing every reserved subtree — on win32 it was the only entity directory that loaded at all. Declared directories canonicalize to `/`-joined repo-relative paths, but the containment check built its prefix with the platform separator (`\` on Windows), so no nested path ever matched. The lexical profile-path checks now compare POSIX paths directly; native path confinement is unchanged. Reported and diagnosed by @squ1ddy (#163).
@@ -16,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Windows: native separators in public problem paths** — the same separator bug one layer further out, on the reported-problem surface. `EntityProblemView.path` is documented as project-relative portable content, but both producers returned `path.relative` output raw, so on win32 `llmwiki status`, the viewer, context packs, and the JSON export reported `wiki\notes\untitled.md` where the contract promises `wiki/notes/untitled.md`. Both now normalize to POSIX. The regression gate was widened to match: instead of naming the two symbols the first fix touched, it now requires every `path.relative` in the lexical profile layer to be routed through `toPosixPath` (#163).
 
 - **`npm test` could not run on Windows at all** — vitest's global setup shelled out to `npx`, which is `npx.cmd` there and has not been resolvable by `child_process` without `shell: true` since the Node 22 hardening for CVE-2024-27980. The setup threw, collection aborted, and vitest reported the unrelated "No test files found". It now invokes the build directly with the running Node binary, needing no shell on any platform.
+
+- **Embedding store dimensions after a full rebuild** — when the embedding model changed, the rebuilt store carried the previous vector dimension forward, so switching to a provider whose vectors have a different dimension failed validation on every subsequent compile and never recovered. The rebuilt store now takes its dimension from the newly written vectors.
+
+- **A rebuilt-but-empty embedding index broke every query** — a rebuild with nothing eligible to embed persisted a store declaring `dimensions: 0`, and each later query asserted its query vector against that zero and threw. No compile rewrote the store, so it never recovered. A non-positive stored dimension is now treated as unknown, and a read with no candidates returns before embedding the query at all — which also drops a provider round-trip that could only be scored against an empty pool.
+
+- **`OPENAI_EMBEDDINGS_API_KEY` was accepted at startup and then ignored** — the embeddings client was built only when `OPENAI_EMBEDDINGS_BASE_URL` was also set, so a configuration supplying just the dedicated key passed validation and then authenticated with the chat client's placeholder credential, failing later as a 401. The dedicated client is now built whenever either the endpoint or the key is configured.
+
+- **A misconfigured `LLMWIKI_EMBEDDING_PROVIDER` failed late and inconsistently** — validation ran inside the embedding call, so the same typo made `llmwiki query` exit 1, made context retrieval degrade, and made compile warn, retry, and eventually quarantine the affected pages. An unusable name also fell through to the default model and was reported as "the index was built with a different model", which described the wrong problem. The provider guard now checks it at startup, before any work begins, alongside the chat provider's credentials.
 
 ## [1.1.0] - 2026-07-15
 

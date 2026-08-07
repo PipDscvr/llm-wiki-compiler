@@ -25,12 +25,12 @@
  * exist only for migration/reuse and are NOT a tamper boundary (S8).
  */
 
-import { getProvider } from "./provider.js";
+import { getEmbeddingProvider } from "./embedding-provider.js";
 import { assertVectorValid } from "./embeddings-validate.js";
 import {
   parseEmbeddingStore,
   validateV3ForSearch,
-  resolveEmbeddingModel,
+  storeMatchesActiveEmbedding,
   readConfinedRaw,
   type EmbeddingStoreV3,
   type PageEmbeddingV3,
@@ -114,7 +114,8 @@ export async function loadEmbeddingsForContext(root: string): Promise<EmbeddingL
  * Parse + gate the on-disk store READ-ONLY. Returns a usable v3 store, or a
  * degraded outcome (`store: null`) with a structured warning when the store is
  * not v3 (older version — the writer has not flipped yet), failed the search
- * gate (corrupt vectors / over-cap), is stale-model, or is absent.
+ * gate (corrupt vectors / over-cap), was built by a different embedding
+ * configuration (provider, endpoint, or model), or is absent.
  */
 async function gateActiveStore(root: string): Promise<EmbeddingLoadOutcome> {
   const raw = await readConfinedRaw(root);
@@ -127,8 +128,11 @@ async function gateActiveStore(root: string): Promise<EmbeddingLoadOutcome> {
   if (!validation.available) {
     return degraded("embedding-store-unavailable", "Embedding index failed integrity validation; rebuilt on next compile.");
   }
-  if (isStaleModel(parsed.store)) {
-    return degraded("embedding-index-outdated", "Embedding index was built with a different model; rebuild with 'llmwiki compile'.");
+  if (isStaleConfiguration(parsed.store)) {
+    return degraded(
+      "embedding-index-outdated",
+      "Embedding index was built with a different embedding configuration; rebuild with 'llmwiki compile'.",
+    );
   }
   return { store: parsed.store as unknown as EmbeddingStoreV3, warnings: [], stalePageIds: [] };
 }
@@ -142,10 +146,18 @@ function parseStoreRaw(raw: string): ReturnType<typeof parseEmbeddingStore> {
   }
 }
 
-/** True when the persisted store's model differs from the active model. */
-function isStaleModel(store: Record<string, unknown>): boolean {
+/**
+ * True when the persisted store came from a different embedding configuration
+ * (provider, model, or endpoint) than the active one.
+ *
+ * Still fails CLOSED on a throw: `resolveEmbeddingFingerprint` validates the
+ * configured provider name, so a misspelled LLMWIKI_EMBEDDING_PROVIDER degrades
+ * retrieval rather than propagating out of a read path that several callers do
+ * not guard.
+ */
+function isStaleConfiguration(store: Record<string, unknown>): boolean {
   try {
-    return store.model !== resolveEmbeddingModel();
+    return !storeMatchesActiveEmbedding(store);
   } catch {
     return true;
   }
@@ -174,6 +186,9 @@ export async function findRelevantPagesV3(
   const namespaceDirs = buildNamespaceDirs(profile?.profile);
   const liveIds = await buildLiveIdSet(root, await activeNamespaces(root, profile), namespaceDirs, profile);
   const eligible = store.entries.filter((e) => passesPrefilter(e.pageId, liveIds, surface, profile));
+  // Nothing to rank against — return before embedding. Skips a billed provider
+  // round-trip whose result could only be scored against an empty pool.
+  if (eligible.length === 0) return { hits: [], stalePageIds: [] };
   const queryVec = await embedQuery(question, store.dimensions);
   const ranked = scorePageEntries(queryVec, eligible);
   return walkFreshPages(root, ranked, k, namespaceDirs);
@@ -196,15 +211,25 @@ export async function findRelevantChunksV3(
   const namespaceDirs = buildNamespaceDirs(profile?.profile);
   const liveIds = await buildLiveIdSet(root, await activeNamespaces(root, profile), namespaceDirs, profile);
   const eligible = chunks.filter((c) => passesPrefilter(c.pageId, liveIds, surface, profile));
+  // See findRelevantPagesV3 — no candidates means no reason to embed the query.
+  if (eligible.length === 0) return { hits: [], stalePageIds: [] };
   const queryVec = await embedQuery(question, store.dimensions);
   const ranked = scoreChunkEntries(queryVec, eligible);
   return walkFreshChunks(root, ranked, k, namespaceDirs);
 }
 
-/** Embed the query string and assert the returned vector matches the store dim. */
+/**
+ * Embed the query string and assert the returned vector matches the store dim.
+ *
+ * A non-positive `dimensions` means the store declares none — an empty store
+ * written by a rebuild that had nothing to embed carries 0. Passing that through
+ * would assert `vector.length === 0` and throw on every query, permanently:
+ * nothing rewrites the store, so it never recovers. Treat it as UNKNOWN instead
+ * and let the vector's own integrity check stand alone.
+ */
 async function embedQuery(question: string, dimensions: number): Promise<number[]> {
-  const vec = await getProvider().embed(question, "query");
-  assertVectorValid(vec, dimensions);
+  const vec = await getEmbeddingProvider().embed(question, "query");
+  assertVectorValid(vec, dimensions > 0 ? dimensions : undefined);
   return vec;
 }
 
