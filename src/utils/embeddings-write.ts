@@ -13,7 +13,7 @@
  * and the page `embeddingTextHash` differ.
  */
 
-import { getProvider } from "./provider.js";
+import { getEmbeddingProvider } from "./embedding-provider.js";
 import { embedWorkItems, makeCountingProvider } from "./embeddings-batch.js";
 import type {
   EmbeddingStoreV3,
@@ -59,7 +59,7 @@ export async function reembedIntoStore(
 ): Promise<{ store: EmbeddingStoreV3; report: ReembedReport }> {
   const byId = new Map(collected.map((p) => [p.pageId, p]));
   const targets = [...reembedIds].map((id) => byId.get(id)).filter((p): p is CollectedPage => Boolean(p));
-  const { provider, requestCount } = makeCountingProvider(getProvider());
+  const { provider, requestCount } = makeCountingProvider(getEmbeddingProvider());
   const now = new Date().toISOString();
 
   const pageEntries = await embedPageLevel(provider, targets, batchSize, expectedDim, now);

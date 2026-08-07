@@ -6,7 +6,7 @@
 
 import { readdir } from "fs/promises";
 import path from "path";
-import { getProvider } from "./provider.js";
+import { getEmbeddingProvider } from "./embedding-provider.js";
 import { parseFrontmatter } from "./markdown.js";
 import { CONCEPTS_DIR, QUERIES_DIR } from "./constants.js";
 import { type EmbeddingEntry } from "./embeddings-store.js";
@@ -101,7 +101,7 @@ export async function embedPages(
   batchSize: number,
   expectedDim?: number,
 ): Promise<{ entries: EmbeddingEntry[]; requests: number }> {
-  const { provider, requestCount } = makeCountingProvider(getProvider());
+  const { provider, requestCount } = makeCountingProvider(getEmbeddingProvider());
   const now = new Date().toISOString();
   const selected = records.filter((r) => slugsToEmbed.has(r.slug));
   if (selected.length === 0) return { entries: [], requests: 0 };

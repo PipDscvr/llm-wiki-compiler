@@ -4,7 +4,7 @@
  * pipeline beyond embedding the live query string.
  */
 
-import { getProvider } from "./provider.js";
+import { getEmbeddingProvider } from "./embedding-provider.js";
 import { EMBEDDING_TOP_K } from "./constants.js";
 import * as output from "./output.js";
 import {
@@ -13,6 +13,7 @@ import {
   type EmbeddingStore,
   readEmbeddingStore,
   resolveEmbeddingModel,
+  storeMatchesActiveEmbedding,
 } from "./embeddings-store.js";
 import { EmbeddingIntegrityError, assertVectorValid } from "./embeddings-validate.js";
 
@@ -75,7 +76,7 @@ export async function findRelevantPages(
   const store = await loadActiveStore(root, (s) => s.entries.length > 0);
   if (!store) return [];
 
-  const queryVec = await getProvider().embed(question, "query");
+  const queryVec = await getEmbeddingProvider().embed(question, "query");
   assertVectorValid(queryVec, store.dimensions);
   return findTopK(queryVec, store, EMBEDDING_TOP_K).map((entry) => ({
     slug: entry.slug,
@@ -95,15 +96,16 @@ export async function findRelevantChunks(
 ): Promise<Array<{ chunk: ChunkEmbeddingEntry; score: number }>> {
   const store = await loadActiveStore(root, (s) => Boolean(s.chunks && s.chunks.length > 0));
   if (!store) return [];
-  const queryVec = await getProvider().embed(question, "query");
+  const queryVec = await getEmbeddingProvider().embed(question, "query");
   assertVectorValid(queryVec, store.dimensions);
   return findTopKChunks(queryVec, store.chunks ?? [], k);
 }
 
 /**
  * Read the embedding store, returning null when it is missing, empty (per the
- * caller's predicate), or built with a stale model. Centralises the "is this
- * store usable for semantic lookup right now?" check.
+ * caller's predicate), or built by a different embedding configuration —
+ * another provider, endpoint, or model. Centralises the "is this store usable
+ * for semantic lookup right now?" check.
  */
 async function loadActiveStore(
   root: string,
@@ -111,9 +113,10 @@ async function loadActiveStore(
 ): Promise<EmbeddingStore | null> {
   const store = await readActiveStore(root);
   if (!store || !hasContent(store)) return null;
-  const activeModel = resolveEmbeddingModel();
-  if (store.model !== activeModel) {
-    warnStaleEmbeddingStore(store.model, activeModel);
+  // Compares the full embedding identity — provider, model, endpoint — not just
+  // the model name, which two different backends can share.
+  if (!storeMatchesActiveEmbedding(store as unknown as Record<string, unknown>)) {
+    warnStaleEmbeddingStore(store.model, resolveEmbeddingModel());
     return null;
   }
   return store;

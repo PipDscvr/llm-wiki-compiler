@@ -5,7 +5,7 @@
  * deterministic (page order, then chunkIndex).
  */
 
-import { getProvider } from "./provider.js";
+import { getEmbeddingProvider } from "./embedding-provider.js";
 import { hashChunkText, splitIntoChunks } from "./retrieval.js";
 import { type ChunkEmbeddingEntry } from "./embeddings-store.js";
 import type { PageRecord } from "../pages/read.js";
@@ -58,7 +58,7 @@ export async function refreshChunkEmbeddings(
     }
   }
 
-  const { provider, requestCount } = makeCountingProvider(getProvider());
+  const { provider, requestCount } = makeCountingProvider(getEmbeddingProvider());
   const vectors = await embedWorkItems(
     provider, work, (w) => w.text, (i) => work[i]?.slug, "chunk", batchSize, expectedDim,
   );

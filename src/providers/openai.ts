@@ -8,6 +8,7 @@
 import OpenAI from "openai";
 import type { LLMProvider, LLMMessage, LLMTool } from "../utils/provider.js";
 import { EMBEDDING_MODELS, OPENAI_DEFAULT_TIMEOUT_MS } from "../utils/constants.js";
+import * as output from "../utils/output.js";
 import { assertVectorValid, normalizeEmbeddingData } from "../utils/embeddings-validate.js";
 
 /** Construction options for an OpenAI-compatible provider. */
@@ -15,6 +16,12 @@ interface OpenAIProviderOptions {
   baseURL?: string;
   apiKey?: string;
   embeddingsBaseURL?: string;
+  /**
+   * Credential for the EMBEDDINGS endpoint, when it differs from the chat one.
+   * Without this the embeddings client reuses `apiKey`/OPENAI_API_KEY, which
+   * sends the cloud OpenAI key to whatever host `embeddingsBaseURL` names.
+   */
+  embeddingsApiKey?: string;
   embeddingModel?: string;
   /**
    * Per-request timeout in milliseconds. Defaults to 10 minutes for cloud
@@ -52,6 +59,75 @@ function resolveOpenAITimeoutMs(): number | undefined {
  */
 const PLACEHOLDER_API_KEY = "llmwiki-unset";
 
+/** Endpoints already warned about, so a per-call provider build stays quiet. */
+const warnedForwardedKeyHosts = new Set<string>();
+
+/** True when `url`'s host is this machine — a forwarded key never leaves it. */
+function isLoopbackEndpoint(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
+  } catch {
+    return false; // unparseable → treat as remote and warn (fail loud, not silent)
+  }
+}
+
+/** Stands in for a credential removed from a URL before it is printed. */
+const REDACTED = "***";
+
+/**
+ * `url` with any embedded credential removed: userinfo replaced, and every query
+ * value replaced while its NAME is kept so the endpoint stays recognisable.
+ *
+ * An endpoint override is free-form, and both `https://user:pass@host/v1` and
+ * `https://host/v1?api-key=...` are ordinary ways to carry one. A warning whose
+ * whole purpose is to report a credential disclosure must not create a second
+ * one by pasting that URL into the terminal, CI logs, and pasted bug reports.
+ */
+function redactUrlCredentials(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const hasUserinfo = parsed.username !== "" || parsed.password !== "";
+    parsed.username = "";
+    parsed.password = "";
+    for (const name of [...parsed.searchParams.keys()]) parsed.searchParams.set(name, REDACTED);
+    const rendered = parsed.toString();
+    return hasUserinfo ? rendered.replace("//", `//${REDACTED}@`) : rendered;
+  } catch {
+    // Unparseable: the credential cannot be located, so drop the two places it
+    // is normally carried rather than echoing a string we cannot reason about.
+    return url.replace(/\/\/[^/@]*@/, `//${REDACTED}@`).replace(/\?.*$/, `?${REDACTED}`);
+  }
+}
+
+/**
+ * Warn ONCE that the chat API key is being sent to a separate embeddings host.
+ *
+ * Silent credential forwarding is the failure mode here: nothing in the config
+ * says "OPENAI_API_KEY will also be sent to this other operator", and the fix
+ * (OPENAI_EMBEDDINGS_API_KEY) is invisible unless named. Also flags plaintext
+ * http to a remote host, which puts both the key and the wiki text on the wire.
+ */
+function warnForwardedKey(embeddingsBaseURL: string): void {
+  if (isLoopbackEndpoint(embeddingsBaseURL) || warnedForwardedKeyHosts.has(embeddingsBaseURL)) return;
+  // Dedupe on the RAW url — two endpoints differing only in their credential are
+  // different destinations and each deserves its own warning.
+  warnedForwardedKeyHosts.add(embeddingsBaseURL);
+  output.status(
+    "!",
+    output.warn(
+      `Sending OPENAI_API_KEY to the embeddings endpoint ${redactUrlCredentials(embeddingsBaseURL)}. ` +
+      `Set OPENAI_EMBEDDINGS_API_KEY to use a different credential there.` +
+      (embeddingsBaseURL.startsWith("http://") ? " That endpoint is plaintext http." : ""),
+    ),
+  );
+}
+
+/** Test-only hook: clear the warned-endpoint cache so each test sees a fresh warning. */
+export function resetForwardedKeyWarnings(): void {
+  warnedForwardedKeyHosts.clear();
+}
+
 /** Translate an Anthropic-style LLMTool to an OpenAI ChatCompletionTool. */
 export function translateToolToOpenAI(
   tool: LLMTool,
@@ -86,9 +162,47 @@ export class OpenAIProvider implements LLMProvider {
       baseURL: options.baseURL ?? null,
       timeout,
     });
-    this.embeddingsClient = options.embeddingsBaseURL
-      ? new OpenAI({ apiKey: resolvedKey, baseURL: options.embeddingsBaseURL, timeout })
-      : this.client;
+    this.embeddingsClient = this.buildEmbeddingsClient(options, resolvedKey, timeout);
+  }
+
+  /**
+   * The client serving embeddings: the chat client itself, unless a separate
+   * endpoint OR a separate credential is configured.
+   *
+   * Keying this on the endpoint alone silently discarded `embeddingsApiKey`,
+   * which the provider guard accepts on its own. Embeddings then authenticated
+   * as the chat client — i.e. as PLACEHOLDER_API_KEY when no chat key was set —
+   * so validation passed and the failure resurfaced much later as a 401 from
+   * inside the embed call.
+   */
+  private buildEmbeddingsClient(options: OpenAIProviderOptions, chatKey: string, timeout: number): OpenAI {
+    if (!options.embeddingsBaseURL && !options.embeddingsApiKey) return this.client;
+    return new OpenAI({
+      apiKey: this.resolveEmbeddingsKey(options, chatKey),
+      // Falls back to the chat base URL: when only the credential differs, the
+      // endpoint is unchanged.
+      baseURL: options.embeddingsBaseURL ?? options.baseURL ?? null,
+      timeout,
+    });
+  }
+
+  /**
+   * Credential for the embeddings client: the dedicated key when set, otherwise
+   * the chat key — which is FORWARDED to a third-party host and warned about.
+   *
+   * Kept as forwarding rather than a hard split so existing setups that point
+   * OPENAI_EMBEDDINGS_BASE_URL at a hosted OpenAI-compatible service keep
+   * working. The warning is the point: sending a cloud key to another operator's
+   * endpoint should be a decision, not a silent default. Loopback is exempt —
+   * a key going to your own machine is not a disclosure.
+   */
+  private resolveEmbeddingsKey(options: OpenAIProviderOptions, chatKey: string): string {
+    if (options.embeddingsApiKey) return options.embeddingsApiKey;
+    // Only a separate ENDPOINT can forward the key to another operator. A
+    // dedicated key with no endpoint returns above, so there is nothing to warn
+    // about — and nothing to assert a base URL on.
+    if (options.embeddingsBaseURL && chatKey !== PLACEHOLDER_API_KEY) warnForwardedKey(options.embeddingsBaseURL);
+    return chatKey;
   }
 
   /** Send a single non-streaming completion request. */
