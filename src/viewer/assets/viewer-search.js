@@ -164,6 +164,28 @@ function renderSearchResults(rows, results) {
   for (const row of rows) results.appendChild(buildSearchResultRow(row));
 }
 
+/**
+ * The kind tag for one result.
+ *
+ * `entityType` is present only on a profile project's typed entity pages, and
+ * it is the type the profile declares — so a newsroom article reads "articles"
+ * rather than being flattened into the default profile's vocabulary. Without
+ * it this was a two-way test (`queries` → query, EVERYTHING ELSE → concept),
+ * which badged every typed page a concept even though the payload had carried
+ * the right answer since the typed pages landed.
+ *
+ * The literal type id is used rather than the nav's title-cased label,
+ * matching the design's rule that provenance surfaces keep the profile's own
+ * identifier while only the nav title-cases it.
+ *
+ * @param {{entityType?: string, pageDirectory?: string}} row - A search result.
+ * @returns {string}
+ */
+function resultKindLabel(row) {
+  if (typeof row.entityType === "string" && row.entityType.length > 0) return row.entityType;
+  return row.pageDirectory === "queries" ? "query" : "concept";
+}
+
 /** Build one search-result <li> with anchor + kind tag + snippet. */
 function buildSearchResultRow(row) {
   const li = document.createElement("li");
@@ -174,7 +196,7 @@ function buildSearchResultRow(row) {
   link.dataset.searchResult = "true";
   const kind = document.createElement("span");
   kind.className = "result-kind";
-  kind.textContent = row.pageDirectory === "queries" ? "query" : "concept";
+  kind.textContent = resultKindLabel(row);
   const title = document.createElement("span");
   title.className = "result-title";
   title.textContent = row.title || row.id;

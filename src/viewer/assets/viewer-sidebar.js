@@ -60,7 +60,7 @@ const NAV_SECTIONS = [
       // types (see `sectionItems`). Overview, Sources and Graph explorer are
       // the fixed spine and never vary.
       { route: "concepts", href: "#/concepts", label: "Concepts", count: "concepts", profileTypeSlot: true },
-      { route: "sources", href: "#/sources", label: "Sources", count: "sourceFiles" },
+      { route: "sources", href: "#/sources", label: "Sources", collisionLabel: "Source files", count: "sourceFiles" },
       { route: "queries", href: "#/queries", label: "Queries", count: "queries", profileTypeSlot: true },
       { route: "graph", href: "#/graph", label: "Graph explorer" },
     ],
@@ -70,7 +70,7 @@ const NAV_SECTIONS = [
     zeroCountDisplay: "digit",
     items: [
       { route: "health", href: "#/health", label: "Health & lint", badge: "lint" },
-      { route: "reviews", href: "#/reviews", label: "Reviews", count: "pendingReviews" },
+      { route: "reviews", href: "#/reviews", label: "Reviews", collisionLabel: "Review queue", count: "pendingReviews" },
       // No count: workflow runs are not in the bootstrap envelope (they live
       // outside the frozen snapshot and #/workflows fetches them per visit),
       // so the sidebar has no number to show without a second startup request.
@@ -233,15 +233,50 @@ function profileHeaderName(profileId, typeItems) {
 /** Build the section's `<ul>`, expanding the type-group marker where it appears. */
 function buildNavList(section, model, typeItems) {
   const list = el("ul", "nav-list");
+  const taken = typeLabelsInPlay(model);
   for (const item of sectionItems(section, typeItems)) {
     if (item === TYPE_GROUP) {
       appendTypeGroup(list, typeItems, section.zeroCountDisplay, model);
       continue;
     }
     if (!isNavItemApplicable(item, model)) continue;
-    list.appendChild(buildNavItem(item, section.zeroCountDisplay, model));
+    list.appendChild(buildNavItem(disambiguated(item, taken), section.zeroCountDisplay, model));
   }
   return list;
+}
+
+/**
+ * Every label the active profile's type rows occupy, across the whole sidebar.
+ *
+ * Gathered once per render and passed to both sections, because a collision can
+ * straddle them: a `reviews` entity type sits in BROWSE while the review queue
+ * sits in MAINTAIN, and two rows reading "Reviews" are no less ambiguous for
+ * being in different groups.
+ */
+function typeLabelsInPlay(model) {
+  return new Set(typeNavItems(model?.entityTypes).map((item) => item.label));
+}
+
+/**
+ * A fixed row, relabelled when a profile type has taken its name.
+ *
+ * The shipped `autosci` template declares entity types called `sources` and
+ * `reviews`, so its sidebar rendered two rows reading "Sources" and two reading
+ * "Reviews" — same accessible name, different destinations. Namespacing the
+ * typed routes fixed where those rows GO; this fixes what they SAY.
+ *
+ * The fixed row yields, never the type row: an entity type's name is the
+ * reader's own data and renaming it would misreport their profile, whereas
+ * these labels are ours and the longer forms are the more precise ones anyway
+ * — "Source files" is what that route lists, and "Review queue" is what that
+ * one holds. A project whose profile takes neither name (every default project,
+ * and `newsroom`) is untouched, which is what keeps the default sidebar
+ * byte-identical.
+ */
+function disambiguated(item, takenLabels) {
+  if (typeof item.collisionLabel !== "string") return item;
+  if (!takenLabels.has(item.label)) return item;
+  return { ...item, label: item.collisionLabel };
 }
 
 /** Marker standing in for the generated type rows inside a section's item list. */

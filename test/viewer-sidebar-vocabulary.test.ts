@@ -142,7 +142,19 @@ describe("a type named after a route the viewer already owns", () => {
     const sidebar = await mountVocabularySidebar(SHADOWING, "#/sources");
     const marked = sidebar.querySelector('a[aria-current="page"]');
     expect(marked?.hasAttribute("data-nav-type")).toBe(false);
-    expect(marked?.querySelector(".nav-label")?.textContent).toBe("Sources");
+    expect(marked?.getAttribute("href")).toBe("#/sources");
+  });
+
+  it("relabels the FIXED row so the two are told apart, keeping the type's own name", async () => {
+    // Identity here is the href, not the label: the fixed row yields its name
+    // when a type takes it (see `disambiguated`, viewer-sidebar.js), because the
+    // type name is the reader's data and "Source files" is the more precise
+    // description of what that route lists anyway.
+    const sidebar = await mountVocabularySidebar(SHADOWING);
+    const labels = [...sidebar.querySelectorAll(".nav-link .nav-label")].map((el) => el.textContent);
+    expect(labels).toContain("Sources");
+    expect(labels).toContain("Source files");
+    expect(labels.length).toBe(new Set(labels).size);
   });
 });
 
