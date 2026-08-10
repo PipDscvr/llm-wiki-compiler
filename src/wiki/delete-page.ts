@@ -26,6 +26,7 @@
  */
 
 import path from "path";
+import { lstat } from "fs/promises";
 import { CONCEPTS_DIR } from "../utils/constants.js";
 import { isSafeFilenameComponent } from "../profile/identity.js";
 import { openBatch, recordPreState, commitBatch, replayJournal, confinedUnlink } from "../trust/journal.js";
@@ -50,10 +51,23 @@ export interface DeleteOptions {
 /**
  * Delete concept pages as ONE journalled batch under the caller's held lock.
  *
+ * Every unlink is VERIFIED, not trusted. `confinedUnlink`'s catch is shared
+ * with the journal's own revert path, where swallowing any error is correct
+ * (an absent target IS the goal there). Reused here for a DELETE, that same
+ * catch also swallows EACCES/EROFS/EBUSY — real failures that leave the page
+ * on disk. So after `unlinkOne` returns, {@link assertUnlinked} re-checks the
+ * target and THROWS if it is still present, rather than letting the loop
+ * reach `commitBatch` and report success for a delete that never happened.
+ * The throw lands BEFORE commit, so the batch stays `pending` — its journal
+ * file, and every pre-state recorded so far (including siblings this same
+ * batch DID delete), survives for a later {@link replayJournal} to restore.
+ *
  * @param root - Absolute project root.
  * @param slugs - Bare concept slugs (no `.md`, no directory part).
  * @param opts - Optional injectable unlink primitive.
- * @returns The floor-skipped slugs; allowed pages are deleted as a side effect.
+ * @returns The floor-skipped slugs; allowed pages are deleted as a side
+ *   effect. Throws if an allowed page survives its unlink attempt, leaving
+ *   the batch pending for replay instead of reporting a false success.
  */
 export async function deleteWikiPagesLocked(
   root: string,
@@ -73,9 +87,30 @@ export async function deleteWikiPagesLocked(
     const target = path.join(root, CONCEPTS_DIR, `${slug}.md`);
     await recordPreState(batch, target);
     await unlinkOne(target);
+    await assertUnlinked(target, slug);
   }
   await commitBatch(batch);
   return { skipped };
+}
+
+/**
+ * Confirm `target` is actually gone after `unlinkOne` returns, so a swallowed
+ * unlink failure can never be misreported as a completed delete. `lstat`, not
+ * `stat`: a symlink LEAF must still count as present rather than being
+ * followed and misread as absent.
+ *
+ * @param target - Absolute path the batch attempted to unlink.
+ * @param slug - The slug being deleted, named in the thrown error so a caller
+ *   can tell which page failed.
+ */
+async function assertUnlinked(target: string, slug: string): Promise<void> {
+  try {
+    await lstat(target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return; // gone — the delete succeeded
+    throw error; // an unexpected lstat fault is a real problem, not "still there"
+  }
+  throw new Error(`failed to delete wiki page "${slug}": file still exists after unlink`);
 }
 
 /**

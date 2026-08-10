@@ -9,6 +9,9 @@
  *  - a crash mid-batch (unlink succeeds, then the process dies) is recoverable —
  *    `replayJournal` restores the pre-state because `recordPreState` captured the
  *    page's bytes BEFORE the unlink landed;
+ *  - a page that SURVIVES its unlink attempt (the failure `confinedUnlink`'s
+ *    shared catch would otherwise swallow) makes the batch THROW instead of
+ *    reporting success, leaving the page on disk and the batch pending;
  *  - a slug failing the filename floor is reported in `skipped`, never fatal to
  *    the rest of the batch (SKIP, NOT ABORT);
  *  - nothing to delete (absent page, or empty input) opens NO journal batch
@@ -61,6 +64,15 @@ describe("deleteWikiPagesLocked", () => {
 
     await replayJournal(root);
     expect(await readFile(page, "utf-8")).toContain("alpha body"); // journal put it back
+  });
+
+  it("throws instead of reporting success when the page survives the unlink", async () => {
+    const root = await projectWithPages(["alpha"]);
+    // A no-op unlink models confinedUnlink swallowing EACCES/EROFS/EBUSY.
+    const swallowed = async (): Promise<void> => {};
+
+    await expect(deleteWikiPagesLocked(root, ["alpha"], { unlinkOne: swallowed })).rejects.toThrow(/alpha/);
+    expect(existsSync(path.join(root, "wiki/concepts/alpha.md"))).toBe(true);
   });
 
   it("skips a slug that fails the filename floor without touching the batch", async () => {
