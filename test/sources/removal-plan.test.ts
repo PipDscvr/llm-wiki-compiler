@@ -1,3 +1,18 @@
+/**
+ * @file test/sources/removal-plan.test.ts
+ * @description Coverage for the pure removal planner (`src/sources/removal-plan.ts`)
+ * that decides what `llmwiki rm` is allowed to delete.
+ *
+ * The suite pins the one rule the maintainer cares about most: a concept owned by
+ * more than one source must survive even when one of its sources is removed. That
+ * guarantee comes from delegating to `findSharedConcepts` — the same function
+ * compile's `markOrphaned` uses — so this suite is exercising the delegation
+ * itself, not a parallel reimplementation of the rule that could quietly drift
+ * from it. It also covers the plan's two downstream consequences (wikilinks a
+ * deletion would break, pending review candidates that reference the removed
+ * source) and the total case of a source with no state entry at all.
+ */
+
 import { describe, it, expect } from "vitest";
 import { computeRemovalPlan } from "../../src/sources/removal-plan.js";
 import type { WikiState, ReviewCandidate } from "../../src/utils/types.js";
