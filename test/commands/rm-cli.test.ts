@@ -6,10 +6,12 @@
  * directly, so these tests pin the same contract a real user hits: exit
  * codes, printed output, and — for `--dry-run` — a zero-writes guarantee (the
  * source file and its derived concept page are both still on disk
- * afterwards). The no-match case pins the pointer to `llmwiki status`, the
- * only recovery hint `rm` gives for a ref that resolves to nothing. There is
- * deliberately no confirmation-flag test: the agreed CLI surface (issue #60)
- * has none, so a bare `rm` must apply outright.
+ * afterwards). The no-match case pins the pointer to `sources/`, the only
+ * recovery hint `rm` gives for a ref that resolves to nothing — deliberately
+ * not a pointer to `llmwiki status`, which reports only a source count and
+ * cannot name the file the user is looking for. There is deliberately no
+ * confirmation-flag test: the agreed CLI surface (issue #60) has none, so a
+ * bare `rm` must apply outright.
  */
 
 import { describe, it, expect } from "vitest";
@@ -57,12 +59,12 @@ describe("llmwiki rm CLI", () => {
     expect(existsSync(path.join(root, "wiki/concepts/junk.md"))).toBe(false);
   });
 
-  it("exits 1 with a pointer to status when the ref matches nothing", async () => {
+  it("exits 1 with a pointer to sources/ when the ref matches nothing", async () => {
     const root = await oneSourceProject();
 
     const err = await exec("node", [CLI, "rm", "nope.md"], { cwd: root }).catch((e) => e);
 
     expect(err.code).toBe(1);
-    expect(stripAnsi(err.stdout + err.stderr)).toContain("llmwiki status");
+    expect(stripAnsi(err.stdout + err.stderr)).toContain("Look in sources/");
   });
 });

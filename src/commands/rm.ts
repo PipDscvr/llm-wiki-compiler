@@ -38,7 +38,7 @@ export async function rmCommand(ref: string, options: RmOptions = {}): Promise<n
   const root = process.cwd();
   const plan = await planRemoval(root, ref);
   if (plan === null) {
-    output.status("x", output.error(`No source matches "${ref}". Run \`llmwiki status\` to list sources.`));
+    output.status("x", output.error(`No source matches "${ref}". Look in sources/ for the filename.`));
     return 1;
   }
 
