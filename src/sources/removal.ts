@@ -32,7 +32,7 @@ import { listCandidates } from "../compiler/candidate-read.js";
 import { generateIndex } from "../compiler/indexgen.js";
 import { generateMOC } from "../compiler/obsidian.js";
 import { updateEmbeddingsLockedCore } from "../utils/embeddings.js";
-import * as output from "../utils/output.js";
+import { handleSafeEmbeddingFailure } from "../utils/embeddings-batch.js";
 
 export type { RemovalPlan } from "./removal-plan.js";
 
@@ -103,11 +103,19 @@ export async function applyRemovalLocked(
 /**
  * Regenerate the artifacts derived from the page set.
  *
- * Embeddings are BEST-EFFORT and never fail the removal, matching compile's
- * `safelyUpdateEmbeddings` posture: semantic search is an enhancement, and a
- * missing key must not leave a half-removed project. The empty changed-page list
- * is correct — a removal adds no text to embed, and the deleted pages fall out
- * of the eligible set, so the migration prunes their records.
+ * The embeddings refresh routes through {@link handleSafeEmbeddingFailure}, the
+ * SAME shared catch every other lock-free `updateEmbeddingsLockedCore` caller
+ * uses (`src/commands/query-save.ts`, `src/utils/embeddings-refresh.ts`) — so
+ * `LLMWIKI_EMBED_STRICT` (the project-wide "any embedding failure exits
+ * non-zero" opt-in) is honoured here exactly as everywhere else, instead of
+ * this one path silently diverging from it. By default a failure only warns —
+ * semantic search is an enhancement, and a missing key must not leave a
+ * half-removed project — but by the time this runs, the source file, the
+ * pages, and state.json have ALL already landed durably, so a strict-mode
+ * rethrow here reports a stale embedding store, never a failed delete. The
+ * empty changed-page list is correct — a removal adds no text to embed, and
+ * the deleted pages fall out of the eligible set, so the migration prunes
+ * their records.
  */
 async function regenerateDerived(root: string): Promise<void> {
   await generateIndex(root);
@@ -115,7 +123,7 @@ async function regenerateDerived(root: string): Promise<void> {
   try {
     await updateEmbeddingsLockedCore(root, []);
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    output.status("!", output.warn(`Embeddings not refreshed: ${reason}`));
+    const message = err instanceof Error ? err.message : String(err);
+    handleSafeEmbeddingFailure(err, `Skipped embeddings update: ${message}`);
   }
 }
