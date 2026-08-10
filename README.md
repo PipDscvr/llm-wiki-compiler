@@ -104,6 +104,7 @@ If an agent is scanning this README, these are the high-signal entry points:
 | Import external records through a connector | `llmwiki connector list`, then `llmwiki connector run <id> --input key=value` |
 | Add more files or URLs | `llmwiki ingest <url-or-file>` |
 | Compile or recompile changed sources | `llmwiki compile` |
+| Remove a bad source and its derived pages | `llmwiki rm <source>` |
 | Hold generated pages for human approval | `llmwiki compile --review` or review policy config |
 | Ask grounded questions | `llmwiki query "question"` |
 | Save an answer back into the wiki | `llmwiki query "question" --save` |

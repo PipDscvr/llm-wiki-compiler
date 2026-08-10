@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   An index written before llmwiki recorded the endpoint carries only its model name. It is preserved while you run without `LLMWIKI_EMBEDDING_PROVIDER` or an endpoint override, so upgrading does not re-embed an existing project; under either override the model name cannot establish where the vectors came from, so the next compile rebuilds the index once and records the full configuration from then on.
 
+- **`llmwiki rm <source>`** — Deletes a source and the concept pages derived exclusively from it, leaving pages another source also contributed to untouched. There is no confirmation flag; preview first with `--dry-run`, which takes no lock and changes nothing. `rm` refuses cleanly if another llmwiki process holds the project lock, and journals page deletes so a crash mid-removal recovers on the next `rm` or `compile` (#60).
+
 ### Fixed
 
 - **Windows: profile path validation rejected every declared directory** — on win32, `llmwiki template init` failed for every template with `entity directory must be under 'wiki/'`, any profile declaring a workflow `projectionFile` failed to load, and an entity directory declared as `wiki/` was wrongly accepted despite containing every reserved subtree — on win32 it was the only entity directory that loaded at all. Declared directories canonicalize to `/`-joined repo-relative paths, but the containment check built its prefix with the platform separator (`\` on Windows), so no nested path ever matched. The lexical profile-path checks now compare POSIX paths directly; native path confinement is unchanged. Reported and diagnosed by @squ1ddy (#163).
