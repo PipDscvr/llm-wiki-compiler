@@ -58,7 +58,7 @@ export async function rmCommand(ref: string, options: RmOptions = {}): Promise<n
   } finally {
     await releaseLock(root);
   }
-  printPlan(plan, false);
+  printPlan(plan, false, skipped);
   return reportSkipped(skipped);
 }
 
@@ -84,27 +84,59 @@ function reportSkipped(skipped: SkippedDelete[]): number {
  *
  * @param plan - The computed plan.
  * @param prospective - `true` for `--dry-run` wording, `false` once applied.
+ * @param skipped - Floor-skipped slugs from the apply (`[]` for `--dry-run`,
+ *   which has no apply to report skips from). Passed through so the slug-list
+ *   print never claims a skipped page was deleted — see {@link printSourceAndSlugs}.
  */
-function printPlan(plan: RemovalPlan, prospective: boolean): void {
+function printPlan(plan: RemovalPlan, prospective: boolean, skipped: SkippedDelete[] = []): void {
   const verb = prospective ? "Would delete" : "Deleted";
-  printSourceAndSlugs(plan, verb);
+  printSourceAndSlugs(plan, verb, skipped);
   if (!prospective) printRegenerated(plan);
   printConsequences(plan);
 }
 
-/** Print the source line and the per-slug delete/keep lines, using `verb` for the deletions. */
-function printSourceAndSlugs(plan: RemovalPlan, verb: string): void {
+/**
+ * Print the source line and the per-slug delete/keep lines, using `verb` for
+ * the deletions.
+ *
+ * `skipped` slugs are EXCLUDED from that loop: they failed the filename-safety
+ * floor inside `deleteWikiPagesLocked` and are still on disk, so printing
+ * "Deleted: <slug>" for one and then `reportSkipped` printing
+ * "Not deleted: <slug> (...)" right after would contradict itself in the same
+ * transcript — the one record a user gets, since `rm` has no confirmation
+ * prompt.
+ */
+function printSourceAndSlugs(plan: RemovalPlan, verb: string, skipped: SkippedDelete[]): void {
   output.status("x", `${verb}: sources/${plan.sourceFile}`);
-  for (const slug of plan.deleteSlugs) output.status("x", `${verb}: wiki/concepts/${slug}.md`);
+  const skippedSlugs = new Set(skipped.map((s) => s.slug));
+  for (const slug of plan.deleteSlugs) {
+    if (skippedSlugs.has(slug)) continue; // reportSkipped covers it as "Not deleted:"
+    output.status("x", `${verb}: wiki/concepts/${slug}.md`);
+  }
   for (const slug of plan.keptSlugs) {
     output.status("i", output.dim(`Kept: wiki/concepts/${slug}.md (shared with other sources)`));
   }
 }
 
-/** Print the "regenerated derived artifacts" line, only when a page was actually deleted. */
+/**
+ * Print the "regenerated derived artifacts" line, only when a page was
+ * actually deleted.
+ *
+ * Deliberately says "index and MOC" only, never "and embeddings": the
+ * embeddings step (`regenerateDerived` in `src/sources/removal.ts`) already
+ * printed its own true outcome — success, a warning, or (under
+ * `LLMWIKI_EMBED_STRICT`) a throw — earlier in this same command, BEFORE this
+ * line runs. Claiming "and embeddings" here would restate that as a blanket
+ * success and could directly contradict a warning the user just saw. (Wrapping
+ * the embeddings step in `withQuiet` instead, as done for `acquireLock` in
+ * `src/import/run.ts:145`, was considered and rejected: it would silence that
+ * warning rather than fix the contradiction, and the warning is exactly what a
+ * command with no confirmation prompt must not hide.) Index and MOC regen has
+ * no failure mode to report, so asserting those two is still accurate.
+ */
 function printRegenerated(plan: RemovalPlan): void {
   if (plan.deleteSlugs.length > 0) {
-    output.status("~", output.info("Regenerated index, MOC and embeddings"));
+    output.status("~", output.info("Regenerated index and MOC"));
   }
 }
 

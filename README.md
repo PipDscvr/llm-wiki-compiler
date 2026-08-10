@@ -167,6 +167,7 @@ The [`examples/basic/`](examples/basic/) directory includes a small pre-generate
 | `llmwiki ingest-session <path>` | Import exported Claude, Codex, or Cursor sessions into `sources/`. |
 | `llmwiki quickstart <source>` | Ingest, compile, and optionally open the viewer in one step. |
 | `llmwiki compile` | Incrementally extract concepts and generate wiki pages. |
+| `llmwiki rm <source> [--dry-run]` | Delete a source and the concept pages derived exclusively from it. |
 | `llmwiki refresh --stale [--dry-run]` | Recompile changed owners of stale pages and clean selected orphaned ownership. |
 | `llmwiki template list\|inspect\|init` | Discover and install validated declarative profile templates. |
 | `llmwiki profile init\|show\|validate\|diff` | Create a minimal profile, inspect it, validate it, or assess profile changes. |

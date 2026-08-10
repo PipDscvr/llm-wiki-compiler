@@ -18,8 +18,12 @@
  * sees an unchanged source hash, does nothing, and the pages are gone for good.
  * A crash WITHIN the page batch is recovered by the journal itself.
  *
- * No LLM provider is required anywhere on this path: a removal has no new text
- * to embed, so the embeddings refresh only prunes.
+ * No LLM provider is REQUIRED anywhere on this path — a missing or broken
+ * embeddings backend only warns (or exits under LLMWIKI_EMBED_STRICT), never
+ * blocks the delete. But one CAN be called: the refresh in
+ * {@link regenerateDerived} also re-embeds any other eligible page that has no
+ * stored vector yet, so a removal can issue provider calls for pages it never
+ * touched. See that function's docstring for the detail.
  */
 
 import { getSource, deleteSource } from "./store.js";
@@ -33,6 +37,8 @@ import { generateIndex } from "../compiler/indexgen.js";
 import { generateMOC } from "../compiler/obsidian.js";
 import { updateEmbeddingsLockedCore } from "../utils/embeddings.js";
 import { handleSafeEmbeddingFailure } from "../utils/embeddings-batch.js";
+import { findSharedConcepts } from "../compiler/deps.js";
+import type { WikiState } from "../utils/types.js";
 
 export type { RemovalPlan } from "./removal-plan.js";
 
@@ -82,6 +88,19 @@ export async function planRemoval(root: string, ref: string): Promise<RemovalPla
  * Apply a plan. PRECONDITION: the caller already holds the project lock.
  * See the file header for why the source file is deleted before the pages.
  *
+ * RE-VERIFIES the exclusive/shared split against FRESHLY-READ state before
+ * deleting anything, rather than trusting `plan.deleteSlugs` outright.
+ * {@link planRemoval} reads state WITHOUT the lock — deliberately, so
+ * `--dry-run` never has to take it — which leaves a window between that read
+ * and this one where a concurrent `compile`/`watch` can land. If it makes one
+ * of the doomed slugs shared, deleting it here would destroy a page a live
+ * source now owns: exactly the failure this feature must not ship. This
+ * follows the codebase's existing convention that the UNDER-LOCK handler is
+ * the authority and a caller-supplied plan is intent only — stated at
+ * `src/trust/executor.ts:178-181` and practised by `adaptApply`
+ * (`src/workflows/adapt.ts:405`), which re-runs `computeAdaptationPlan` inside
+ * `withRunLock` rather than trusting a pre-lock plan.
+ *
  * @param root - Absolute project root.
  * @param plan - The plan produced by {@link planRemoval}.
  */
@@ -89,15 +108,40 @@ export async function applyRemovalLocked(
   root: string,
   plan: RemovalPlan,
 ): Promise<{ skipped: SkippedDelete[] }> {
+  // Read state FIRST, before any mutation, while the source's own state entry
+  // is still present — findSharedConcepts needs it to see which concepts this
+  // source currently owns. Reused below for removeSourceFrom so the whole
+  // apply works from one consistent under-lock snapshot.
+  const fresh = await readState(root);
+  const deletable = reverifyDeletable(plan, fresh);
+
   await deleteSource(root, plan.sourceFile);
   // Floor-skipped pages are RETURNED, never swallowed: compile surfaces its own
   // skips as errors (src/compiler/index.ts:225), and a page the user asked to
   // remove that silently stayed on disk is exactly the failure `rm` exists to
   // prevent.
-  const { skipped } = await deleteWikiPagesLocked(root, plan.deleteSlugs);
-  await writeState(root, removeSourceFrom(await readState(root), plan.sourceFile));
+  const { skipped } = await deleteWikiPagesLocked(root, deletable);
+  await writeState(root, removeSourceFrom(fresh, plan.sourceFile));
   await regenerateDerived(root);
   return { skipped };
+}
+
+/**
+ * Intersect the lock-free plan's doomed slugs against a FRESH read of shared
+ * concepts, so a slug that became shared after `plan` was computed is dropped
+ * from the delete set. A plain `.filter` over `plan.deleteSlugs` — never a new
+ * list built from `freshState` — so this can only ever SHRINK what the plan
+ * proposed, never grow it: a slug absent from the original plan can never end
+ * up deleted because of this re-check.
+ *
+ * @param plan - The lock-free plan from {@link planRemoval}.
+ * @param freshState - State read AFTER the lock was acquired, with the
+ *   source's own entry still present (required by {@link findSharedConcepts}).
+ * @returns The subset of `plan.deleteSlugs` still safe to delete.
+ */
+function reverifyDeletable(plan: RemovalPlan, freshState: WikiState): string[] {
+  const sharedNow = findSharedConcepts(plan.sourceFile, freshState);
+  return plan.deleteSlugs.filter((slug) => !sharedNow.has(slug));
 }
 
 /**
@@ -112,10 +156,19 @@ export async function applyRemovalLocked(
  * semantic search is an enhancement, and a missing key must not leave a
  * half-removed project — but by the time this runs, the source file, the
  * pages, and state.json have ALL already landed durably, so a strict-mode
- * rethrow here reports a stale embedding store, never a failed delete. The
- * empty changed-page list is correct — a removal adds no text to embed, and
- * the deleted pages fall out of the eligible set, so the migration prunes
- * their records.
+ * rethrow here reports a stale embedding store, never a failed delete.
+ *
+ * The empty changed-page list only means THIS removal contributes no new text
+ * of its own — it does NOT make this a prune-only step. `updateEmbeddingsLockedCore`
+ * independently re-embeds every eligible page that has no stored vector yet
+ * (`addNewEligiblePages`, `src/utils/embeddings-migrate.ts:243-248`) and, if the
+ * store's embedding identity changed, EVERY eligible page (`rebuild`, same file
+ * `:91-96`) — either can call the provider for pages this removal never
+ * touched. `reembedIntoStore` also constructs the provider UNCONDITIONALLY
+ * (`src/utils/embeddings-write.ts:62`), so this step is attempted even with no
+ * embeddings backend configured at all; it is the `handleSafeEmbeddingFailure`
+ * catch above, not a skip, that keeps a missing/broken backend from failing
+ * the removal by default.
  */
 async function regenerateDerived(root: string): Promise<void> {
   await generateIndex(root);

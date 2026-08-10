@@ -12,22 +12,26 @@
  * cannot name the file the user is looking for. There is deliberately no
  * confirmation-flag test: the agreed CLI surface (issue #60) has none, so a
  * bare `rm` must apply outright.
+ *
+ * The `--dry-run` test asserts the FULL labelled "Would delete: <path>" line,
+ * not just a bare substring like "junk" — a substring match would pass just
+ * as well if delete/keep labelling were inverted, which is exactly the bug a
+ * user relying on `--dry-run` (the only pre-flight check `rm` has) needs
+ * caught. It also exercises a second, shared source so a `Kept:` line is
+ * asserted too, not just the deletion.
  */
 
 import { describe, it, expect } from "vitest";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { exec, CLI, stripAnsi } from "../fixtures/cli-runner.js";
+import { makeEmptyRmProject, twoSourceRmProject } from "../fixtures/rm-project.js";
 import type { WikiState } from "../../src/utils/types.js";
 
 /** A project with one source owning one concept page. */
 async function oneSourceProject(): Promise<string> {
-  const root = await mkdtemp(path.join(tmpdir(), "rm-cli-"));
-  await mkdir(path.join(root, "sources"), { recursive: true });
-  await mkdir(path.join(root, "wiki/concepts"), { recursive: true });
-  await mkdir(path.join(root, ".llmwiki"), { recursive: true });
+  const root = await makeEmptyRmProject();
   await writeFile(path.join(root, "sources/bad.md"), "---\ntitle: Bad\nsource: b\n---\nbody", "utf-8");
   await writeFile(path.join(root, "wiki/concepts/junk.md"), "---\ntitle: Junk\n---\njunk", "utf-8");
   const state: WikiState = {
@@ -40,14 +44,21 @@ async function oneSourceProject(): Promise<string> {
 }
 
 describe("llmwiki rm CLI", () => {
-  it("--dry-run reports the plan and changes nothing", async () => {
-    const root = await oneSourceProject();
+  it("--dry-run reports the full delete/keep lines and changes nothing", async () => {
+    const root = await twoSourceRmProject();
 
     const { stdout } = await exec("node", [CLI, "rm", "bad.md", "--dry-run"], { cwd: root });
+    const lines = stripAnsi(stdout);
 
-    expect(stripAnsi(stdout)).toContain("junk");
+    // Full labelled lines, not a bare substring: a delete/keep inversion would
+    // still contain "junk" and "shared" either way, so only the label proves
+    // which bucket each page landed in.
+    expect(lines).toContain("Would delete: wiki/concepts/junk.md");
+    expect(lines).toContain("Kept: wiki/concepts/shared.md (shared with other sources)");
     expect(existsSync(path.join(root, "sources/bad.md"))).toBe(true);
+    expect(existsSync(path.join(root, "sources/good.md"))).toBe(true);
     expect(existsSync(path.join(root, "wiki/concepts/junk.md"))).toBe(true);
+    expect(existsSync(path.join(root, "wiki/concepts/shared.md"))).toBe(true);
   });
 
   it("applies without any confirmation flag", async () => {

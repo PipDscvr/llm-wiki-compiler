@@ -48,11 +48,7 @@ llmwiki rm research-notes.md
 llmwiki rm research-notes
 ```
 
-To find the exact filename, list the directory:
-
-```bash
-ls sources/
-```
+To find the exact filename, look in the `sources/` directory of your project.
 
 `rm` matches on filename only. You cannot pass the original URL or local path you ingested. If `<source>` doesn't match a file under `sources/`, `rm` changes nothing and exits `1`.
 
@@ -78,8 +74,10 @@ llmwiki rm research-notes.md
 x Deleted: sources/research-notes.md
 x Deleted: wiki/concepts/deprecated-api.md
 i Kept: wiki/concepts/authentication.md (shared with other sources)
-~ Regenerated index, MOC and embeddings
+~ Regenerated index and MOC
 ```
+
+The embeddings refresh reports its own outcome separately - see [Embeddings after a removal](#embeddings-after-a-removal) - rather than being folded into that summary line, so a failure there can never be masked by a blanket success message.
 
 ## What `rm` reports but doesn't fix
 
@@ -98,9 +96,15 @@ Page deletes apply as one journalled batch. If the process is killed partway thr
 
 ## Embeddings after a removal
 
-A removal has no new text to embed, so when you have an embeddings backend configured, the refresh after a removal only prunes the deleted pages' vectors - it never calls the provider to generate anything new. When no embeddings backend is configured, this step is skipped entirely.
+The removal itself has no new text to embed, but the refresh that runs after it is the same full refresh every other command uses, not a pruning-only variant. It always prunes the deleted pages' vectors, and it also embeds any other eligible page that doesn't already have a stored vector - so `rm` can call your embeddings provider even for pages it didn't touch.
 
-By default, a failed embeddings refresh only prints a warning and `rm` still exits `0`. If you've set [`LLMWIKI_EMBED_STRICT`](/configuration/environment-variables#embeddings), the same failure makes `rm` exit `1` too, matching every other llmwiki command.
+This step is attempted even when no embeddings backend is configured - it is not skipped. A missing or invalid backend surfaces as a warning instead:
+
+```
+! Skipped embeddings update: page embedding failed [auth] at "concepts/shared": VOYAGE_API_KEY is not set. Anthropic embeddings use Voyage - set VOYAGE_API_KEY to enable semantic search.
+```
+
+By default, a failed embeddings refresh only prints that warning and `rm` still exits `0`. If you've set [`LLMWIKI_EMBED_STRICT`](/configuration/environment-variables#embeddings), the same failure makes `rm` exit `1` too, matching every other llmwiki command.
 
 <Note>
 Either way, the delete has already happened by the time embeddings run: the source file, the deleted pages, and `.llmwiki/state.json` are all written before the embeddings step starts. A non-zero exit here means your embedding index is stale, not that the removal was rolled back or partially applied.
@@ -114,5 +118,6 @@ Either way, the delete has already happened by the time embeddings run: the sour
 | `--dry-run` on a match | `0` |
 | Applied; no pages were skipped | `0` |
 | Applied; one or more pages were skipped (filename-safety floor) | `1` |
+| A page fails mid-delete (survives its unlink, or a symlinked/oversized page is refused by the pre-state check) | `1`, uncaught `Error:` - see [safety boundaries](#safety-boundaries) |
 | Another llmwiki process holds the project lock | `1` |
 | Embeddings refresh failed with `LLMWIKI_EMBED_STRICT` set | `1` |
