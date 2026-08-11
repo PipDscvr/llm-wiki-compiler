@@ -19,6 +19,11 @@
  * `applyRemovalLocked` actually runs. The race test below applies a
  * deliberately STALE plan against state mutated after that plan was computed,
  * and asserts the newly-shared page survives — see `src/sources/removal.ts`.
+ * It also asserts on the RETURNED `preserved`/`deleted` split (transcript-
+ * truthfulness audit fix 2): the race-caught slug must be reported back to the
+ * caller distinctly from what was actually deleted, since `rm`'s CLI report
+ * (`src/commands/rm.ts`) is built from this return value, never from the
+ * pre-lock plan — a page the removal preserved is not a page it deleted.
  *
  * Two more things are pinned here from a post-implementation audit (H1/H2):
  * a removal must FREEZE the concepts it still shares with a live source (so a
@@ -40,7 +45,7 @@ import { describe, it, expect } from "vitest";
 import { writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { planRemoval, applyRemovalLocked } from "../src/sources/removal.js";
+import { planRemoval, applyRemovalLocked, regenerateDerivedLocked } from "../src/sources/removal.js";
 import { twoSourceRmProject, twoSourceRmProjectWithProfile, makeEmptyRmProject } from "./fixtures/rm-project.js";
 import type { WikiState } from "../src/utils/types.js";
 
@@ -87,7 +92,13 @@ describe("llmwiki rm end to end", () => {
   it("drops the source from state and regenerates the index", async () => {
     const root = await twoSourceRmProject();
 
+    // Transcript-truthfulness audit fix 1 split regeneration out of
+    // applyRemovalLocked (it now mutates ONLY), so this test — which calls
+    // the I/O layer directly rather than going through rmCommand — must
+    // sequence regenerateDerivedLocked itself, exactly as rmCommand does.
     const state = await removeBadMdAndReadState(root);
+    await regenerateDerivedLocked(root);
+
     expect(Object.keys(state.sources)).toEqual(["good.md"]);
     expect(existsSync(path.join(root, "wiki/index.md"))).toBe(true);
   });
@@ -121,10 +132,17 @@ describe("llmwiki rm end to end", () => {
     state.sources["good.md"].concepts.push("race");
     await writeFile(path.join(root, ".llmwiki/state.json"), JSON.stringify(state), "utf-8");
 
-    await applyRemovalLocked(root, plan!); // apply the stale plan as-is
+    const applied = await applyRemovalLocked(root, plan!); // apply the stale plan as-is
 
     expect(existsSync(path.join(root, "wiki/concepts/race.md"))).toBe(true); // now shared -- preserved
     expect(existsSync(path.join(root, "wiki/concepts/junk.md"))).toBe(false); // still exclusive -- deleted
+    // Transcript-truthfulness audit fix 2: the return value, not just the
+    // filesystem, must distinguish the race-preserved slug from what was
+    // actually deleted — `printPlan` (src/commands/rm.ts) reports off this,
+    // never off the pre-lock `plan.deleteSlugs`.
+    expect(applied.preserved).toEqual(["race"]);
+    expect(applied.deleted).not.toContain("race");
+    expect(applied.deleted.slice().sort()).toEqual(["junk"]);
   });
 
   it("freezes the source's still-shared concepts, so a later recompile can't silently drop its contribution", async () => {

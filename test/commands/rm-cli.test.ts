@@ -24,6 +24,13 @@
  * asserting: `output.status`'s headline goes to stdout, but the `output.note`
  * detail lines below it go to stderr (the codebase's existing convention for
  * every `printConsequences` warning, not new here) — see `src/utils/output.ts`.
+ *
+ * The ordering test (transcript-truthfulness audit fix 1) asserts the deletion
+ * report's position RELATIVE to `generateIndex`'s own "Generating index..."
+ * progress line, not the full output verbatim — pinning exact whole-output
+ * equality here would make the test brittle against unrelated output changes
+ * elsewhere in the regeneration step, when the one thing this test exists to
+ * pin is which one comes first.
  */
 
 import { describe, it, expect } from "vitest";
@@ -109,5 +116,33 @@ describe("llmwiki rm CLI", () => {
     const { stdout, stderr } = await exec("node", [CLI, "rm", "bad.md"], { cwd: root });
 
     expect(stripAnsi(stdout + stderr)).toContain("This project uses the `sample` profile.");
+  });
+
+  it("prints the deletion report before regeneration's own progress output", async () => {
+    const root = await oneSourceProject();
+
+    const { stdout } = await exec("node", [CLI, "rm", "bad.md"], { cwd: root });
+    const text = stripAnsi(stdout);
+
+    const deletedAt = text.indexOf("Deleted: sources/bad.md");
+    const regeneratingAt = text.indexOf("Generating index");
+    expect(deletedAt).toBeGreaterThanOrEqual(0);
+    expect(regeneratingAt).toBeGreaterThanOrEqual(0);
+    // The user asked for the delete; regeneration is housekeeping that follows
+    // it, not the other way round — see src/commands/rm.ts's header docstring.
+    expect(deletedAt).toBeLessThan(regeneratingAt);
+  });
+
+  it("reports every deleted page on an ordinary removal and exits 0", async () => {
+    const root = await twoSourceRmProject();
+
+    const { stdout } = await exec("node", [CLI, "rm", "bad.md"], { cwd: root });
+    const lines = stripAnsi(stdout);
+
+    // exec rejects on a non-zero exit, so reaching this point already pins
+    // exit 0; the lines below pin that a normal removal's report is complete.
+    expect(lines).toContain("Deleted: sources/bad.md");
+    expect(lines).toContain("Deleted: wiki/concepts/junk.md");
+    expect(lines).toContain("Kept: wiki/concepts/shared.md (shared with other sources)");
   });
 });

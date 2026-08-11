@@ -106,6 +106,14 @@ Page deletes apply as one journalled batch. If the process is killed partway thr
 
 `rm` runs under the project lock (`.llmwiki/lock`). If another llmwiki process already holds it, `rm` refuses cleanly and exits `1` rather than waiting or forcing. `--dry-run` never takes the lock at all.
 
+If a concurrent `compile` or `watch` makes a page `rm` was about to delete shared with a live source - in the brief window between computing the plan and acquiring the lock - `rm` re-verifies under the lock and preserves that page instead of deleting it. This is reported with wording distinct from an ordinary shared page, since becoming shared during the removal itself is rarer and worth naming separately:
+
+```
+i Kept: wiki/concepts/deprecated-api.md (became shared with another source during removal)
+```
+
+This is the protection working, not a failure - it does not affect the exit code.
+
 ## Embeddings after a removal
 
 The removal itself has no new text to embed, but the refresh that runs after it is the same full refresh every other command uses, not a pruning-only variant. It always prunes the deleted pages' vectors, and it also embeds any other eligible page that doesn't already have a stored vector - so `rm` can call your embeddings provider even for pages it didn't touch.

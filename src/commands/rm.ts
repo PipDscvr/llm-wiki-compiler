@@ -21,9 +21,22 @@
  * NOT refuse on a profile project (a profile project can legitimately have
  * concept pages too); `printConsequences` instead warns unconditionally that
  * any typed entity pages this source contributed to were left untouched.
+ *
+ * TRANSCRIPT ORDER IS LOAD-BEARING, for the same "no confirmation prompt"
+ * reason: the deletion report (`printPlan`) is printed BEFORE derived-artifact
+ * regeneration runs (`regenerateDerivedLocked`), not after, so the first thing
+ * a user sees is what they asked for, not `generateIndex`'s own "Generating
+ * index..." progress chatter. Both still run inside the ONE lock acquired
+ * below — this is a print-order choice, not a locking one.
  */
 
-import { planRemoval, applyRemovalLocked, type RemovalPlan } from "../sources/removal.js";
+import {
+  planRemoval,
+  applyRemovalLocked,
+  regenerateDerivedLocked,
+  type RemovalPlan,
+  type RemovalApplyResult,
+} from "../sources/removal.js";
 import type { SkippedDelete } from "../wiki/delete-page.js";
 import { acquireLock, releaseLock } from "../utils/lock.js";
 import * as output from "../utils/output.js";
@@ -59,14 +72,22 @@ export async function rmCommand(ref: string, options: RmOptions = {}): Promise<n
     output.status("x", output.error("Another llmwiki process holds the project lock. Try again when it finishes."));
     return 1;
   }
-  let skipped: SkippedDelete[];
+  let applied: RemovalApplyResult;
   try {
-    ({ skipped } = await applyRemovalLocked(root, plan));
+    // Report BEFORE housekeeping: printPlan documents what applyRemovalLocked
+    // actually did before regenerateDerivedLocked's own progress output (or a
+    // LLMWIKI_EMBED_STRICT throw) can appear in the transcript. Both calls stay
+    // inside this one held lock.
+    applied = await applyRemovalLocked(root, plan);
+    printPlan(plan, false, applied);
+    await regenerateDerivedLocked(root);
+    printRegenerated(applied.deleted.length);
   } finally {
     await releaseLock(root);
   }
-  printPlan(plan, false, skipped);
-  return reportSkipped(skipped);
+  // applied.preserved is deliberately excluded here: it is the race protection
+  // working, not a failure, so it must never force a non-zero exit.
+  return reportSkipped(applied.skipped);
 }
 
 /**
@@ -86,65 +107,99 @@ function reportSkipped(skipped: SkippedDelete[]): number {
   return skipped.length > 0 ? 1 : 0;
 }
 
+/** {@link printPlan}'s default for `--dry-run`, which has no apply to report from — printing falls back to prospective wording straight off `plan`. */
+const EMPTY_APPLY_RESULT: RemovalApplyResult = { deleted: [], preserved: [], skipped: [] };
+
 /**
  * Print what the removal did, or would do.
  *
  * @param plan - The computed plan.
  * @param prospective - `true` for `--dry-run` wording, `false` once applied.
- * @param skipped - Floor-skipped slugs from the apply (`[]` for `--dry-run`,
- *   which has no apply to report skips from). Passed through so the slug-list
- *   print never claims a skipped page was deleted — see {@link printSourceAndSlugs}.
+ * @param applied - What {@link applyRemovalLocked} actually did. Omitted for
+ *   `--dry-run` (defaults to {@link EMPTY_APPLY_RESULT}), which never applies
+ *   anything, so the plan itself is the only available source of truth.
  */
-function printPlan(plan: RemovalPlan, prospective: boolean, skipped: SkippedDelete[] = []): void {
-  const verb = prospective ? "Would delete" : "Deleted";
-  printSourceAndSlugs(plan, verb, skipped);
-  if (!prospective) printRegenerated(plan);
+function printPlan(plan: RemovalPlan, prospective: boolean, applied: RemovalApplyResult = EMPTY_APPLY_RESULT): void {
+  printDeleted(plan, prospective, applied);
+  printKept(plan, applied);
   printConsequences(plan);
 }
 
 /**
- * Print the source line and the per-slug delete/keep lines, using `verb` for
- * the deletions.
+ * Print the source line and every "Would delete:"/"Deleted:" slug line.
  *
- * `skipped` slugs are EXCLUDED from that loop: they failed the filename-safety
- * floor inside `deleteWikiPagesLocked` and are still on disk, so printing
- * "Deleted: <slug>" for one and then `reportSkipped` printing
- * "Not deleted: <slug> (...)" right after would contradict itself in the same
- * transcript — the one record a user gets, since `rm` has no confirmation
- * prompt.
+ * `--dry-run` (`prospective`) prints straight off the plan — every
+ * `plan.deleteSlugs` — since there is no apply yet and the plan IS the whole
+ * story.
+ *
+ * Once applied, the list comes from `applied.deleted` — what
+ * `applyRemovalLocked` actually unlinked — NEVER from `plan.deleteSlugs`,
+ * which can overstate reality in two ways `applied.deleted` already excludes:
+ * a slug the delete batch floor-skipped (reported separately by
+ * `reportSkipped` as "Not deleted:", not here) and a slug the lock-time
+ * re-verification found had become shared with a live source in the
+ * plan-to-lock window (reported by {@link printKept} instead).
+ *
+ * Split from {@link printKept} — one concern each — to keep this file's
+ * per-function complexity under `fallow`'s threshold.
  */
-function printSourceAndSlugs(plan: RemovalPlan, verb: string, skipped: SkippedDelete[]): void {
+function printDeleted(plan: RemovalPlan, prospective: boolean, applied: RemovalApplyResult): void {
+  const verb = prospective ? "Would delete" : "Deleted";
   output.status("x", `${verb}: sources/${plan.sourceFile}`);
-  const skippedSlugs = new Set(skipped.map((s) => s.slug));
-  for (const slug of plan.deleteSlugs) {
-    if (skippedSlugs.has(slug)) continue; // reportSkipped covers it as "Not deleted:"
+  for (const slug of prospective ? plan.deleteSlugs : applied.deleted) {
     output.status("x", `${verb}: wiki/concepts/${slug}.md`);
-  }
-  for (const slug of plan.keptSlugs) {
-    output.status("i", output.dim(`Kept: wiki/concepts/${slug}.md (shared with other sources)`));
   }
 }
 
 /**
- * Print the "regenerated derived artifacts" line, only when a page was
- * actually deleted.
+ * Print every "Kept:" line: ordinary plan-time shared pages
+ * (`plan.keptSlugs`), then race-preserved ones (`applied.preserved`, `[]` for
+ * `--dry-run`) with DISTINCT wording — becoming shared DURING the removal is a
+ * rarer, more surprising thing than having been shared all along, and the
+ * transcript — `rm`'s only record, since it has no confirmation prompt — must
+ * say which one actually happened.
+ */
+function printKept(plan: RemovalPlan, applied: RemovalApplyResult): void {
+  for (const slug of plan.keptSlugs) {
+    output.status("i", output.dim(`Kept: wiki/concepts/${slug}.md (shared with other sources)`));
+  }
+  for (const slug of applied.preserved) {
+    output.status("i", output.dim(`Kept: wiki/concepts/${slug}.md (became shared with another source during removal)`));
+  }
+}
+
+/**
+ * Print the "regenerated derived artifacts" line. Called from {@link
+ * rmCommand} ONLY after `regenerateDerivedLocked` has actually returned —
+ * never from {@link printPlan}, which now runs BEFORE regeneration so the
+ * deletion report leads the transcript. Printing this from inside `printPlan`
+ * would mean asserting the work is done before `regenerateDerivedLocked` even
+ * starts; calling it here means a strict-mode embeddings throw (see
+ * `regenerateDerivedLocked`'s docstring) propagates past this call site and
+ * the line is correctly never printed.
  *
  * Deliberately says "index and MOC" only, never "and embeddings": the
- * embeddings step (`regenerateDerived` in `src/sources/removal.ts`) already
- * printed its own true outcome — success, a warning, or (under
- * `LLMWIKI_EMBED_STRICT`) a throw — earlier in this same command, BEFORE this
- * line runs. Claiming "and embeddings" here would restate that as a blanket
- * success and could directly contradict a warning the user just saw. (Wrapping
- * the embeddings step in `withQuiet` instead, as done for `acquireLock` in
- * `src/import/run.ts:145`, was considered and rejected: it would silence that
- * warning rather than fix the contradiction, and the warning is exactly what a
- * command with no confirmation prompt must not hide.) Index and MOC regen has
- * no failure mode to report, so asserting those two is still accurate.
+ * embeddings step inside `regenerateDerivedLocked` already printed its own
+ * true outcome — success, a warning, or (under `LLMWIKI_EMBED_STRICT`) a
+ * throw — immediately before this line would run. Claiming "and embeddings"
+ * here would restate that as a blanket success and could directly contradict
+ * a warning the user just saw. (Wrapping the embeddings step in `withQuiet`
+ * instead, as done for `acquireLock` in `src/import/run.ts:145`, was
+ * considered and rejected: it would silence that warning rather than fix the
+ * contradiction, and the warning is exactly what a command with no
+ * confirmation prompt must not hide.) Index and MOC regen has no failure mode
+ * to report, so asserting those two is still accurate.
+ *
+ * Gated on `deletedCount`, not `plan.deleteSlugs.length`: the pre-lock plan
+ * can overstate what actually happened (a race-preserved slug — see
+ * `applyRemovalLocked`), so whether to print this line must come from what
+ * was actually deleted, the same rule Fix 2 applies to the `Deleted:` lines
+ * themselves.
+ *
+ * @param deletedCount - `applied.deleted.length` from `applyRemovalLocked`.
  */
-function printRegenerated(plan: RemovalPlan): void {
-  if (plan.deleteSlugs.length > 0) {
-    output.status("~", output.info("Regenerated index and MOC"));
-  }
+function printRegenerated(deletedCount: number): void {
+  if (deletedCount > 0) output.status("~", output.info("Regenerated index and MOC"));
 }
 
 /**
@@ -162,7 +217,7 @@ function printRegenerated(plan: RemovalPlan): void {
  * project, `--dry-run` included, since dry-run is the only pre-flight check
  * this command has. Split out of `printConsequences` to keep its cyclomatic
  * complexity down, matching this file's existing one-concern-per-print-helper
- * shape (`printSourceAndSlugs`, `printRegenerated`).
+ * shape (`printDeleted`, `printKept`, `printRegenerated`).
  */
 function printProfileWarning(plan: RemovalPlan): void {
   if (plan.profileId === null) return;

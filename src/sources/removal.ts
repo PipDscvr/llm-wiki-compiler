@@ -7,7 +7,17 @@
  * The plan / dry-run / apply split mirrors `src/workflows/adapt.ts`:
  * {@link planRemoval} is READ-ONLY and takes NO lock, so `--dry-run` can print
  * exactly what would happen without any possibility of mutating the project;
- * {@link applyRemovalLocked} performs every mutation inside the caller's lock.
+ * {@link applyRemovalLocked} performs every mutation (source, pages, state)
+ * inside the caller's lock and reports back what it ACTUALLY did.
+ *
+ * Derived-artifact regeneration is a SEPARATE step, {@link
+ * regenerateDerivedLocked}, deliberately NOT called from inside
+ * `applyRemovalLocked`. The caller (`rmCommand`, `src/commands/rm.ts`) runs it
+ * AFTER printing the deletion report, not before, so the transcript's first
+ * lines are always what the user asked for rather than this step's own
+ * progress output — `rm` has no confirmation prompt, so that transcript is the
+ * user's only record. Both calls still run inside the ONE held lock; the
+ * split is about print ORDER, not locking.
  *
  * ## Order is load-bearing
  *
@@ -21,9 +31,9 @@
  * No LLM provider is REQUIRED anywhere on this path — a missing or broken
  * embeddings backend only warns (or exits under LLMWIKI_EMBED_STRICT), never
  * blocks the delete. But one CAN be called: the refresh in
- * {@link regenerateDerived} also re-embeds any other eligible page that has no
- * stored vector yet, so a removal can issue provider calls for pages it never
- * touched. See that function's docstring for the detail.
+ * {@link regenerateDerivedLocked} also re-embeds any other eligible page that
+ * has no stored vector yet, so a removal can issue provider calls for pages it
+ * never touched. See that function's docstring for the detail.
  */
 
 import { getSource, deleteSource } from "./store.js";
@@ -158,8 +168,33 @@ export async function planRemoval(root: string, ref: string): Promise<RemovalPla
 }
 
 /**
- * Apply a plan. PRECONDITION: the caller already holds the project lock.
- * See the file header for why the source file is deleted before the pages.
+ * What {@link applyRemovalLocked} actually did — the source of truth the CLI's
+ * `printPlan` (`src/commands/rm.ts`) must report from, never the pre-lock
+ * `RemovalPlan` itself, which can overstate reality (see `preserved`).
+ */
+export interface RemovalApplyResult {
+  /** Slugs actually unlinked. */
+  deleted: string[];
+  /**
+   * Slugs `plan.deleteSlugs` proposed but {@link reverifyDeletable} dropped
+   * because a concurrent write made them shared with a live source in the
+   * plan-to-lock window. The page SURVIVES, same as an ordinary
+   * `plan.keptSlugs` page, but became shared DURING this removal rather than
+   * having been shared all along — the CLI reports the two with different
+   * wording (see `printKept` in `src/commands/rm.ts`) since the race case is
+   * rarer and more surprising, and this is not a failure: it is the
+   * protection working.
+   */
+  preserved: string[];
+  /** Slugs the delete batch itself refused at the filename-safety floor. */
+  skipped: SkippedDelete[];
+}
+
+/**
+ * Apply a plan: MUTATE ONLY. PRECONDITION: the caller already holds the
+ * project lock. See the file header for why the source file is deleted
+ * before the pages, and for why derived-artifact regeneration is a separate,
+ * caller-sequenced step rather than something this function does itself.
  *
  * RE-VERIFIES the exclusive/shared split against FRESHLY-READ state before
  * deleting anything, rather than trusting `plan.deleteSlugs` outright.
@@ -172,7 +207,9 @@ export async function planRemoval(root: string, ref: string): Promise<RemovalPla
  * the authority and a caller-supplied plan is intent only — stated at
  * `src/trust/executor.ts:178-181` and practised by `adaptApply`
  * (`src/workflows/adapt.ts:405`), which re-runs `computeAdaptationPlan` inside
- * `withRunLock` rather than trusting a pre-lock plan.
+ * `withRunLock` rather than trusting a pre-lock plan. A slug this re-check
+ * drops is reported back as {@link RemovalApplyResult.preserved}, not merged
+ * into `skipped` — it was never attempted, let alone refused.
  *
  * FREEZES the source's still-shared concepts before writing state, mirroring
  * what `compile`'s deletion path does for the exact same situation
@@ -192,11 +229,9 @@ export async function planRemoval(root: string, ref: string): Promise<RemovalPla
  *
  * @param root - Absolute project root.
  * @param plan - The plan produced by {@link planRemoval}.
+ * @returns See {@link RemovalApplyResult}.
  */
-export async function applyRemovalLocked(
-  root: string,
-  plan: RemovalPlan,
-): Promise<{ skipped: SkippedDelete[] }> {
+export async function applyRemovalLocked(root: string, plan: RemovalPlan): Promise<RemovalApplyResult> {
   // Read state FIRST, before any mutation, while the source's own state entry
   // is still present — findSharedConcepts needs it to see which concepts this
   // source currently owns. Reused below for reverifyDeletable, for freezing,
@@ -204,7 +239,7 @@ export async function applyRemovalLocked(
   // under-lock snapshot and findSharedConcepts runs exactly once.
   const fresh = await readStateFailClosed(root);
   const sharedNow = findSharedConcepts(plan.sourceFile, fresh);
-  const deletable = reverifyDeletable(plan, sharedNow);
+  const { deletable, preserved } = reverifyDeletable(plan, sharedNow);
 
   await deleteSource(root, plan.sourceFile);
   // Floor-skipped pages are RETURNED, never swallowed: compile surfaces its own
@@ -212,36 +247,71 @@ export async function applyRemovalLocked(
   // remove that silently stayed on disk is exactly the failure `rm` exists to
   // prevent.
   const { skipped } = await deleteWikiPagesLocked(root, deletable);
+  const deleted = withoutSkipped(deletable, skipped);
 
   const frozen = new Set(fresh.frozenSlugs ?? []);
   for (const slug of sharedNow) frozen.add(slug);
   const next = applyFrozenSlugs(removeSourceFrom(fresh, plan.sourceFile), frozen);
   await writeState(root, next);
 
-  await regenerateDerived(root);
-  return { skipped };
+  return { deleted, preserved, skipped };
 }
 
 /**
- * Intersect the lock-free plan's doomed slugs against a FRESH shared-concept
+ * `deletable` minus whatever the delete batch itself refused at the filename-
+ * safety floor — the accurate "what actually got unlinked" list. Split out so
+ * {@link applyRemovalLocked} reads as one straight-line sequence and this
+ * one-purpose set-difference is independently nameable and testable.
+ *
+ * @param deletable - The re-verified delete candidates passed to {@link
+ *   deleteWikiPagesLocked}.
+ * @param skipped - That call's floor-skipped subset of `deletable`.
+ * @returns `deletable` with every skipped slug removed.
+ */
+function withoutSkipped(deletable: string[], skipped: SkippedDelete[]): string[] {
+  const skippedSlugs = new Set(skipped.map((s) => s.slug));
+  return deletable.filter((slug) => !skippedSlugs.has(slug));
+}
+
+/**
+ * Partition the lock-free plan's doomed slugs against a FRESH shared-concept
  * set, so a slug that became shared after `plan` was computed is dropped from
- * the delete set. A plain `.filter` over `plan.deleteSlugs` — never a new list
- * built from `sharedNow` — so this can only ever SHRINK what the plan
- * proposed, never grow it: a slug absent from the original plan can never end
- * up deleted because of this re-check.
+ * the delete set rather than destroyed. A single pass over `plan.deleteSlugs`
+ * — never a new list built from `sharedNow` — so `deletable` can only ever be
+ * a SUBSET of what the plan proposed: a slug absent from the original plan
+ * can never end up deleted because of this re-check.
  *
  * @param plan - The lock-free plan from {@link planRemoval}.
  * @param sharedNow - `findSharedConcepts(plan.sourceFile, freshState)`,
  *   computed ONCE by {@link applyRemovalLocked} and reused here AND for
  *   freezing, so the shared-concept scan never runs twice per removal.
- * @returns The subset of `plan.deleteSlugs` still safe to delete.
+ * @returns `deletable` — still safe to delete; `preserved` — dropped by this
+ *   re-check because a concurrent write made the slug shared in the
+ *   plan-to-lock window (see {@link RemovalApplyResult.preserved}).
  */
-function reverifyDeletable(plan: RemovalPlan, sharedNow: Set<string>): string[] {
-  return plan.deleteSlugs.filter((slug) => !sharedNow.has(slug));
+function reverifyDeletable(plan: RemovalPlan, sharedNow: Set<string>): { deletable: string[]; preserved: string[] } {
+  const deletable: string[] = [];
+  const preserved: string[] = [];
+  for (const slug of plan.deleteSlugs) {
+    (sharedNow.has(slug) ? preserved : deletable).push(slug);
+  }
+  return { deletable, preserved };
 }
 
 /**
- * Regenerate the artifacts derived from the page set.
+ * Regenerate the artifacts derived from the page set: the index, the MOC, and
+ * the embedding store. PRECONDITION: the caller MUST already hold the project
+ * lock — this acquires nothing itself; the `Locked` suffix follows this
+ * codebase's convention for that (e.g. {@link deleteWikiPagesLocked}), not a
+ * claim that this function does any locking of its own.
+ *
+ * EXPORTED and called SEPARATELY from {@link applyRemovalLocked} — deliberately
+ * not folded into it. `rmCommand` (`src/commands/rm.ts`) calls this AFTER
+ * printing the deletion report, not before, so the transcript's first lines
+ * are always the delete the user asked for, never this step's own progress
+ * output (`generateIndex` prints "Generating index..." / "Index updated with
+ * N pages.") and never a "Regenerated" summary asserted ahead of the work it
+ * describes. Both calls run inside the SAME held lock either way.
  *
  * The embeddings refresh routes through {@link handleSafeEmbeddingFailure}, the
  * SAME shared catch every other lock-free `updateEmbeddingsLockedCore` caller
@@ -251,8 +321,10 @@ function reverifyDeletable(plan: RemovalPlan, sharedNow: Set<string>): string[] 
  * this one path silently diverging from it. By default a failure only warns —
  * semantic search is an enhancement, and a missing key must not leave a
  * half-removed project — but by the time this runs, the source file, the
- * pages, and state.json have ALL already landed durably, so a strict-mode
- * rethrow here reports a stale embedding store, never a failed delete.
+ * pages, and state.json have ALL already landed durably AND been reported to
+ * the user, so a strict-mode rethrow here reports a stale embedding store on
+ * top of a deletion the transcript already shows succeeded, never a failed
+ * delete with nothing to show for it.
  *
  * The empty changed-page list only means THIS removal contributes no new text
  * of its own — it does NOT make this a prune-only step. `updateEmbeddingsLockedCore`
@@ -265,8 +337,10 @@ function reverifyDeletable(plan: RemovalPlan, sharedNow: Set<string>): string[] 
  * embeddings backend configured at all; it is the `handleSafeEmbeddingFailure`
  * catch above, not a skip, that keeps a missing/broken backend from failing
  * the removal by default.
+ *
+ * @param root - Absolute project root.
  */
-async function regenerateDerived(root: string): Promise<void> {
+export async function regenerateDerivedLocked(root: string): Promise<void> {
   await generateIndex(root);
   await generateMOC(root);
   try {
