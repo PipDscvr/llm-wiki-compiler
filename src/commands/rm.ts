@@ -14,6 +14,13 @@
  * assertable without spawning a process (mirrors `statusCommand`).
  *
  * NO LLM PROVIDER is required: the CLI action must not call `requireProvider()`.
+ *
+ * On a project using a Configurable Lifecycle Profile, `rm` still only ever
+ * deletes from `state.sources[file].concepts` — typed entity pages record no
+ * source ownership, so there's nothing for it to find or delete there. It does
+ * NOT refuse on a profile project (a profile project can legitimately have
+ * concept pages too); `printConsequences` instead warns unconditionally that
+ * any typed entity pages this source contributed to were left untouched.
  */
 
 import { planRemoval, applyRemovalLocked, type RemovalPlan } from "../sources/removal.js";
@@ -140,8 +147,36 @@ function printRegenerated(plan: RemovalPlan): void {
   }
 }
 
-/** Warn about the two things `rm` reports but deliberately does not repair. */
+/**
+ * Warn that this is a profile project, so any typed entity pages the removed
+ * source contributed to are untracked and were left untouched.
+ *
+ * UNCONDITIONAL on `plan.profileId !== null` — unlike the other two warnings
+ * in {@link printConsequences}, which only fire when the plan found something
+ * concrete to name. `rm` derives everything it deletes from
+ * `state.sources[file].concepts`, a structure typed entity candidates never
+ * populate (see `review-approve.ts`'s typed/default split), so there is no
+ * ownership record to count against. Printing a count here would overclaim
+ * knowledge `rm` doesn't have; printing nothing would let a profile project's
+ * typed pages go silently unmentioned. Fires on every `rm` on a profile
+ * project, `--dry-run` included, since dry-run is the only pre-flight check
+ * this command has. Split out of `printConsequences` to keep its cyclomatic
+ * complexity down, matching this file's existing one-concern-per-print-helper
+ * shape (`printSourceAndSlugs`, `printRegenerated`).
+ */
+function printProfileWarning(plan: RemovalPlan): void {
+  if (plan.profileId === null) return;
+  output.status("!", output.warn(`This project uses the \`${plan.profileId}\` profile.`));
+  output.note(
+    "Typed entity pages are not tracked to the source they came from, so `rm` cannot remove " +
+      "them — only pages under wiki/concepts/.",
+  );
+  output.note("Any entity pages from this source remain and must be removed manually.");
+}
+
+/** Warn about what `rm` reports but deliberately does not repair, or cannot see at all. */
 function printConsequences(plan: RemovalPlan): void {
+  printProfileWarning(plan);
   if (plan.brokenLinks.length > 0) {
     output.status("!", output.warn(`${plan.brokenLinks.length} surviving page(s) link to a deleted page:`));
     for (const link of plan.brokenLinks) output.note(`${link.file} -> [[${link.target}]]`);

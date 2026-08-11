@@ -14,6 +14,11 @@
  * the one rule protecting multi-source pages from deletion. Reimplementing that
  * rule here would be the single most damaging duplication in this feature.
  *
+ * Also carries the active profile id straight from input to output (see
+ * {@link RemovalPlanInput.profileId}) untouched — this module stays pure and
+ * never loads the profile itself, but the plan is where the CLI's
+ * profile-limitation warning gets its signal.
+ *
  * Purity is the point: the partition and the link scan are unit-testable with
  * plain objects, with no project on disk and no temp directories.
  */
@@ -52,6 +57,20 @@ export interface RemovalPlanInput {
   pages: Array<{ filePath: string; content: string }>;
   /** Pending review candidates, for the reference check. */
   candidates: ReviewCandidate[];
+  /**
+   * The active profile's id (`loadNonDefaultProfile(root)?.profile.profileId`),
+   * or `null` for the built-in default project. PASSED THROUGH untouched — this
+   * planner stays pure and never loads the profile itself; the caller
+   * (`planRemoval` in `removal.ts`) resolves it.
+   *
+   * Its sole purpose is the CLI's profile-limitation warning: typed entity
+   * pages approved from a Configurable Lifecycle Profile candidate record NO
+   * source ownership anywhere (`review-approve.ts`'s typed/default split), so
+   * `concepts`-derived `deleteSlugs`/`keptSlugs` can never be the full picture
+   * of what this source contributed on a profile project. A non-null value
+   * here is the only signal of that gap.
+   */
+  profileId: string | null;
 }
 
 /** What a removal would delete, keep, and break. */
@@ -65,6 +84,13 @@ export interface RemovalPlan {
   brokenLinks: BrokenLinkRef[];
   /** Ids of pending candidates referencing `sourceFile`. */
   candidateRefs: string[];
+  /**
+   * Carried straight from {@link RemovalPlanInput.profileId}. Non-null tells
+   * the CLI this is a profile project, so it must warn that any typed entity
+   * pages this source contributed to are untracked and were NOT considered
+   * for deletion — see `printConsequences` in `src/commands/rm.ts`.
+   */
+  profileId: string | null;
 }
 
 /**
@@ -76,7 +102,7 @@ export interface RemovalPlan {
  * @returns The plan; safe to print without applying (`--dry-run`).
  */
 export function computeRemovalPlan(input: RemovalPlanInput): RemovalPlan {
-  const { sourceFile, state, pages, candidates } = input;
+  const { sourceFile, state, pages, candidates, profileId } = input;
   const concepts = state.sources[sourceFile]?.concepts ?? [];
   const shared = findSharedConcepts(sourceFile, state);
 
@@ -88,6 +114,7 @@ export function computeRemovalPlan(input: RemovalPlanInput): RemovalPlan {
     keptSlugs: concepts.filter((slug) => shared.has(slug)),
     brokenLinks: findBrokenLinks(pages, deleteSlugs),
     candidateRefs: candidates.filter((c) => c.sources.includes(sourceFile)).map((c) => c.id),
+    profileId,
   };
 }
 

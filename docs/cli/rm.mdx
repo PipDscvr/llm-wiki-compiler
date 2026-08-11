@@ -35,9 +35,21 @@ No LLM provider credentials are required. `rm` never calls the chat model, and i
 | `wiki/index.md` and `wiki/MOC.md` | Regenerated |
 | Vectors for the deleted pages in `.llmwiki/embeddings.json` | Pruned |
 
-<Note>
-`rm` only ever acts on the concepts namespace. If your project uses a Configurable Lifecycle Profile with typed entity pages elsewhere in `wiki/`, deleting a source here does not remove or report on those pages.
-</Note>
+## Limitations
+
+<Warning>
+`rm` only ever acts on the concepts namespace. On a project using a [Configurable Lifecycle Profile](/concepts/configurable-lifecycle-profiles) (for example `newsroom` or `autosci`), `rm` removes the source file and any `wiki/concepts/` pages derived exclusively from it - exactly as described above - but it does not remove, count, or list typed entity pages elsewhere in `wiki/` (for example `wiki/articles/*.md`).
+
+Typed entity pages are never recorded against the source they came from, so `rm` has no way to find or clean them up - and it does not refuse to run on a profile project, since a profile project can still legitimately have its own concept pages to delete. Every `rm` on a profile project prints this warning instead, regardless of whether the removed source actually produced any typed entity pages:
+
+```
+! This project uses the `newsroom` profile.
+Typed entity pages are not tracked to the source they came from, so `rm` cannot remove them — only pages under wiki/concepts/.
+Any entity pages from this source remain and must be removed manually.
+```
+
+If the removed source produced any typed entity pages, find and delete them yourself.
+</Warning>
 
 ## Naming the source
 

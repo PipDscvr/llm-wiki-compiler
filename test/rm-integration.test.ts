@@ -27,6 +27,13 @@
  * already frozen by a prior batch; and a corrupt or too-new `state.json` must
  * make the whole removal REFUSE rather than fabricate an empty state and
  * destroy every other source's compile record.
+ *
+ * One more thing is pinned here from a second audit pass (P1): a profile
+ * project's typed entity pages record no source ownership anywhere, so `rm`
+ * can only ever act on `state.sources[file].concepts` — it must NOT refuse on
+ * a profile project (one can legitimately still have concept pages), and the
+ * plan it computes must carry the active profile's id so the CLI can warn
+ * about what it cannot see or remove.
  */
 
 import { describe, it, expect } from "vitest";
@@ -34,7 +41,7 @@ import { writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { planRemoval, applyRemovalLocked } from "../src/sources/removal.js";
-import { twoSourceRmProject, makeEmptyRmProject } from "./fixtures/rm-project.js";
+import { twoSourceRmProject, twoSourceRmProjectWithProfile, makeEmptyRmProject } from "./fixtures/rm-project.js";
 import type { WikiState } from "../src/utils/types.js";
 
 /**
@@ -166,5 +173,29 @@ describe("llmwiki rm end to end", () => {
     await applyRemovalLocked(root, plan!);
 
     expect(existsSync(path.join(root, "sources/solo.md"))).toBe(false);
+  });
+
+  it("carries profileId: null in the plan for a default project", async () => {
+    const root = await twoSourceRmProject();
+
+    const plan = await planRemoval(root, "bad.md");
+
+    expect(plan!.profileId).toBeNull();
+  });
+
+  it("still deletes exclusive concepts and keeps shared ones on a profile project, and carries its profileId", async () => {
+    const root = await twoSourceRmProjectWithProfile();
+
+    const plan = await planRemoval(root, "bad.md");
+    expect(plan!.profileId).toBe("sample");
+
+    // P1: rm must NOT refuse on a profile project — a profile project can
+    // legitimately still have concept pages, and rm must go on deleting them
+    // exactly as it does for a default project. It is the caller (the CLI)
+    // that must warn about what this plan cannot see, not this apply step.
+    await applyRemovalLocked(root, plan!);
+
+    expect(existsSync(path.join(root, "wiki/concepts/junk.md"))).toBe(false);
+    expect(existsSync(path.join(root, "wiki/concepts/shared.md"))).toBe(true); // still owned by good.md
   });
 });

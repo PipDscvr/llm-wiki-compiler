@@ -36,6 +36,7 @@ describe("computeRemovalPlan", () => {
       state: twoSourceState(),
       pages: [],
       candidates: [],
+      profileId: null,
     });
 
     expect(plan.deleteSlugs).toEqual(["junk"]);
@@ -51,6 +52,7 @@ describe("computeRemovalPlan", () => {
         { filePath: "wiki/concepts/junk.md", content: "the doomed page's own [[Junk]] link" },
       ],
       candidates: [],
+      profileId: null,
     });
 
     // Only the SURVIVOR is reported; the doomed page's own link is irrelevant.
@@ -66,6 +68,7 @@ describe("computeRemovalPlan", () => {
       state: twoSourceState(),
       pages: [],
       candidates: [candidate, other],
+      profileId: null,
     });
 
     expect(plan.candidateRefs).toEqual(["c1"]);
@@ -77,6 +80,7 @@ describe("computeRemovalPlan", () => {
       state: twoSourceState(),
       pages: [{ filePath: "wiki/concepts/shared.md", content: "[[Shared]]" }],
       candidates: [],
+      profileId: null,
     });
 
     expect(plan).toEqual({
@@ -85,6 +89,35 @@ describe("computeRemovalPlan", () => {
       keptSlugs: [],
       brokenLinks: [],
       candidateRefs: [],
+      profileId: null,
     });
+  });
+
+  // P1 audit fix: typed entity pages record no source ownership anywhere, so
+  // the plan's `profileId` is the CLI's only signal that `deleteSlugs`/
+  // `keptSlugs` aren't the full story for this source. The planner must not
+  // originate that value itself — it only ever echoes what the caller supplied.
+  it("returns profileId: null for a default project", () => {
+    const plan = computeRemovalPlan({
+      sourceFile: "bad.md",
+      state: twoSourceState(),
+      pages: [],
+      candidates: [],
+      profileId: null,
+    });
+
+    expect(plan.profileId).toBeNull();
+  });
+
+  it("passes a non-null profileId straight through, unmodified", () => {
+    const plan = computeRemovalPlan({
+      sourceFile: "bad.md",
+      state: twoSourceState(),
+      pages: [],
+      candidates: [],
+      profileId: "sample",
+    });
+
+    expect(plan.profileId).toBe("sample");
   });
 });

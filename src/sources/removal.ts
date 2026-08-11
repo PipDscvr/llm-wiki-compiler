@@ -44,6 +44,7 @@ import { generateMOC } from "../compiler/obsidian.js";
 import { updateEmbeddingsLockedCore } from "../utils/embeddings.js";
 import { handleSafeEmbeddingFailure } from "../utils/embeddings-batch.js";
 import { findSharedConcepts } from "../compiler/deps.js";
+import { loadNonDefaultProfile } from "../profile/block.js";
 import type { WikiState } from "../utils/types.js";
 
 export type { RemovalPlan } from "./removal-plan.js";
@@ -129,6 +130,14 @@ async function readStateFailClosed(root: string): Promise<WikiState> {
  * recovering-and-backing-up the way plain `readState` would — so `--dry-run`
  * is unconditionally incapable of mutating the project.
  *
+ * Also resolves the active profile (a fourth lock-free, read-only lookup
+ * alongside state/pages/candidates) purely to label the plan with its id —
+ * see {@link RemovalPlan.profileId}. Nothing about the delete/keep split
+ * depends on it. Uses the same helper `compile`'s index generation uses
+ * (`loadNonDefaultProfile`, `src/compiler/indexgen.ts:61`), so a malformed
+ * `profile.json` fails this command exactly as it already fails `compile` —
+ * never silently ignored.
+ *
  * @param root - Absolute project root.
  * @param ref - The raw `<source>` argument.
  * @returns The plan, or `null` when the ref matches no source.
@@ -138,12 +147,14 @@ async function readStateFailClosed(root: string): Promise<WikiState> {
 export async function planRemoval(root: string, ref: string): Promise<RemovalPlan | null> {
   const sourceFile = await resolveSourceRef(root, ref);
   if (sourceFile === null) return null;
-  const [state, pages, candidates] = await Promise.all([
+  const [state, pages, candidates, profile] = await Promise.all([
     readStateFailClosed(root),
     collectAllPages(root),
     listCandidates(root),
+    loadNonDefaultProfile(root),
   ]);
-  return computeRemovalPlan({ sourceFile, state, pages, candidates });
+  const profileId = profile?.profile.profileId ?? null;
+  return computeRemovalPlan({ sourceFile, state, pages, candidates, profileId });
 }
 
 /**

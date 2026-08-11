@@ -9,12 +9,18 @@
  * another with a live source. Hand-rolling that per file is exactly the
  * duplication fallow's clone detector flags (both suites had drifted into
  * near-identical copies), so it is defined once here instead.
+ *
+ * {@link twoSourceRmProjectWithProfile} adds the P1-audit-fix shape: the same
+ * two-source project, PLUS a non-default profile, so both suites can pin that
+ * `rm` still works there (deletes/keeps concepts exactly as the default case)
+ * while `planRemoval`'s plan carries the profile's id for the CLI to warn with.
  */
 
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { WikiState } from "../../src/utils/types.js";
+import { writeProfileFile, SAMPLE_PROFILE } from "./profile-fixtures.js";
 
 /**
  * Create an empty temp project root with the directories `rm` touches:
@@ -55,5 +61,20 @@ export async function twoSourceRmProject(): Promise<string> {
     },
   };
   await writeFile(path.join(root, ".llmwiki/state.json"), JSON.stringify(state), "utf-8");
+  return root;
+}
+
+/**
+ * {@link twoSourceRmProject}, plus a NON-DEFAULT profile ({@link SAMPLE_PROFILE},
+ * `profileId: "sample"`) installed at `.llmwiki/profile.json`. `SAMPLE_PROFILE`
+ * declares only a `notes` entity type at `wiki/notes`, so `wiki/concepts/`
+ * stays free — matching the audit's premise that a profile project can still
+ * legitimately hold concept pages `rm` must go on deleting normally.
+ *
+ * @returns Absolute path to the created temporary root.
+ */
+export async function twoSourceRmProjectWithProfile(): Promise<string> {
+  const root = await twoSourceRmProject();
+  await writeProfileFile(root, SAMPLE_PROFILE);
   return root;
 }
