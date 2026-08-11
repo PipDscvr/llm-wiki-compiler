@@ -30,7 +30,13 @@ import { getSource, deleteSource } from "./store.js";
 import { assertSafeSourceId } from "./source-record.js";
 import { computeRemovalPlan, type RemovalPlan } from "./removal-plan.js";
 import { deleteWikiPagesLocked, type SkippedDelete } from "../wiki/delete-page.js";
-import { readState, writeState, removeSourceFrom } from "../utils/state.js";
+import {
+  readStateClassified,
+  writeState,
+  removeSourceFrom,
+  applyFrozenSlugs,
+  StateTooNewError,
+} from "../utils/state.js";
 import { collectAllPages } from "../linter/rules.js";
 import { listCandidates } from "../compiler/candidate-read.js";
 import { generateIndex } from "../compiler/indexgen.js";
@@ -66,18 +72,74 @@ export async function resolveSourceRef(root: string, ref: string): Promise<strin
 }
 
 /**
+ * Read `.llmwiki/state.json` for `rm`, FAILING CLOSED on a state file this
+ * build cannot trust, instead of `readState`'s (`src/utils/state.ts:222`)
+ * fabricate-and-recover behaviour.
+ *
+ * `readState` treats a corrupt or too-new file as `emptyState()` (backing the
+ * original up first) so the caller can carry on — correct for `compile`,
+ * which REBUILDS whatever it reads, so starting from empty just means a full
+ * recompile. It is WRONG for `rm`, which cannot rebuild what it destroys: a
+ * plan computed against a fabricated empty state has an empty
+ * `state.sources[sourceFile].concepts`, so `deleteSlugs` comes out empty too
+ * — the entire point of the command, silently defeated. Worse,
+ * `applyRemovalLocked` would then delete the source file, delete NO pages,
+ * and persist the fabricated empty state back to disk via `writeState` —
+ * wiping the compile record for every OTHER live source in the same write.
+ * The command would report success while the next `compile` reprocesses the
+ * whole corpus at full LLM cost and the pages `rm` should have deleted linger
+ * as untracked orphans forever.
+ *
+ * Used by BOTH `rm` entry points ({@link planRemoval} and
+ * {@link applyRemovalLocked}) so `--dry-run` and the real apply agree, and so
+ * a corrupt/too-new state produces exactly ONE refusal instead of two calls
+ * to `readState` each fabricating their own state and printing their own
+ * "Corrupt state.json" warning.
+ *
+ * @param root - Absolute project root.
+ * @returns The parsed state. A `missing` file returns an empty state — that
+ *   IS legitimate: the source simply has no derived pages yet, and `rm`
+ *   should still be able to delete the source file itself.
+ * @throws {StateTooNewError} if state.json was written by a newer llmwiki.
+ * @throws {Error} if state.json is present but unparseable/malformed — `rm`
+ *   cannot tell which pages came from which source, so it must refuse rather
+ *   than guess.
+ */
+async function readStateFailClosed(root: string): Promise<WikiState> {
+  const classified = await readStateClassified(root);
+  if (classified.status === "too-new") {
+    throw new StateTooNewError(classified.state.version as number);
+  }
+  if (classified.status === "corrupt") {
+    throw new Error(
+      "`.llmwiki/state.json` is corrupt, so llmwiki cannot tell which wiki pages this " +
+        "source (or any other) came from. Nothing has been removed. Run " +
+        "`llmwiki state reset --yes` to back up and clear the corrupt state file (its " +
+        "`--yes` path operates on raw bytes, so it works even on a corrupt file), then " +
+        "`llmwiki compile` to rebuild state, and retry.",
+    );
+  }
+  return classified.state;
+}
+
+/**
  * READ-ONLY: resolve the ref and compute the plan. Takes NO lock and writes
- * nothing, so `--dry-run` is incapable of mutating the project.
+ * nothing — including on a corrupt or too-new `state.json`, which
+ * {@link readStateFailClosed} makes this REFUSE (throw) rather than silently
+ * recovering-and-backing-up the way plain `readState` would — so `--dry-run`
+ * is unconditionally incapable of mutating the project.
  *
  * @param root - Absolute project root.
  * @param ref - The raw `<source>` argument.
  * @returns The plan, or `null` when the ref matches no source.
+ * @throws {StateTooNewError} if state.json was written by a newer llmwiki.
+ * @throws {Error} if state.json is corrupt — see {@link readStateFailClosed}.
  */
 export async function planRemoval(root: string, ref: string): Promise<RemovalPlan | null> {
   const sourceFile = await resolveSourceRef(root, ref);
   if (sourceFile === null) return null;
   const [state, pages, candidates] = await Promise.all([
-    readState(root),
+    readStateFailClosed(root),
     collectAllPages(root),
     listCandidates(root),
   ]);
@@ -101,6 +163,22 @@ export async function planRemoval(root: string, ref: string): Promise<RemovalPla
  * (`src/workflows/adapt.ts:405`), which re-runs `computeAdaptationPlan` inside
  * `withRunLock` rather than trusting a pre-lock plan.
  *
+ * FREEZES the source's still-shared concepts before writing state, mirroring
+ * what `compile`'s deletion path does for the exact same situation
+ * (`findFrozenSlugs`, `src/compiler/deps.ts:132-159`). A kept page's FILE
+ * survives on disk, but its on-disk CONTENT is a merge that includes the
+ * now-removed source's contribution — the file alone carries no memory of
+ * that. `mergeExtractions` (`src/compiler/extraction-merge.ts:91`) is the one
+ * thing that skips regenerating a frozen slug from live sources only; without
+ * adding these slugs to `state.frozenSlugs` here, the NEXT time a remaining
+ * contributor to that page is recompiled, the page would be rebuilt from live
+ * sources alone and the removed source's contribution would silently vanish
+ * — exactly the guarantee this feature exists to provide. The set is UNIONED
+ * with whatever is already persisted (never replaced via {@link
+ * applyFrozenSlugs}), mirroring `findFrozenSlugs`' own "start with persisted
+ * frozen slugs from prior batches" behaviour (`deps.ts:137`), so an earlier
+ * removal's or compile's frozen slugs are never dropped by a later one.
+ *
  * @param root - Absolute project root.
  * @param plan - The plan produced by {@link planRemoval}.
  */
@@ -110,10 +188,12 @@ export async function applyRemovalLocked(
 ): Promise<{ skipped: SkippedDelete[] }> {
   // Read state FIRST, before any mutation, while the source's own state entry
   // is still present — findSharedConcepts needs it to see which concepts this
-  // source currently owns. Reused below for removeSourceFrom so the whole
-  // apply works from one consistent under-lock snapshot.
-  const fresh = await readState(root);
-  const deletable = reverifyDeletable(plan, fresh);
+  // source currently owns. Reused below for reverifyDeletable, for freezing,
+  // and for removeSourceFrom, so the whole apply works from one consistent
+  // under-lock snapshot and findSharedConcepts runs exactly once.
+  const fresh = await readStateFailClosed(root);
+  const sharedNow = findSharedConcepts(plan.sourceFile, fresh);
+  const deletable = reverifyDeletable(plan, sharedNow);
 
   await deleteSource(root, plan.sourceFile);
   // Floor-skipped pages are RETURNED, never swallowed: compile surfaces its own
@@ -121,26 +201,31 @@ export async function applyRemovalLocked(
   // remove that silently stayed on disk is exactly the failure `rm` exists to
   // prevent.
   const { skipped } = await deleteWikiPagesLocked(root, deletable);
-  await writeState(root, removeSourceFrom(fresh, plan.sourceFile));
+
+  const frozen = new Set(fresh.frozenSlugs ?? []);
+  for (const slug of sharedNow) frozen.add(slug);
+  const next = applyFrozenSlugs(removeSourceFrom(fresh, plan.sourceFile), frozen);
+  await writeState(root, next);
+
   await regenerateDerived(root);
   return { skipped };
 }
 
 /**
- * Intersect the lock-free plan's doomed slugs against a FRESH read of shared
- * concepts, so a slug that became shared after `plan` was computed is dropped
- * from the delete set. A plain `.filter` over `plan.deleteSlugs` — never a new
- * list built from `freshState` — so this can only ever SHRINK what the plan
+ * Intersect the lock-free plan's doomed slugs against a FRESH shared-concept
+ * set, so a slug that became shared after `plan` was computed is dropped from
+ * the delete set. A plain `.filter` over `plan.deleteSlugs` — never a new list
+ * built from `sharedNow` — so this can only ever SHRINK what the plan
  * proposed, never grow it: a slug absent from the original plan can never end
  * up deleted because of this re-check.
  *
  * @param plan - The lock-free plan from {@link planRemoval}.
- * @param freshState - State read AFTER the lock was acquired, with the
- *   source's own entry still present (required by {@link findSharedConcepts}).
+ * @param sharedNow - `findSharedConcepts(plan.sourceFile, freshState)`,
+ *   computed ONCE by {@link applyRemovalLocked} and reused here AND for
+ *   freezing, so the shared-concept scan never runs twice per removal.
  * @returns The subset of `plan.deleteSlugs` still safe to delete.
  */
-function reverifyDeletable(plan: RemovalPlan, freshState: WikiState): string[] {
-  const sharedNow = findSharedConcepts(plan.sourceFile, freshState);
+function reverifyDeletable(plan: RemovalPlan, sharedNow: Set<string>): string[] {
   return plan.deleteSlugs.filter((slug) => !sharedNow.has(slug));
 }
 

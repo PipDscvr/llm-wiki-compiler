@@ -19,6 +19,14 @@
  * `applyRemovalLocked` actually runs. The race test below applies a
  * deliberately STALE plan against state mutated after that plan was computed,
  * and asserts the newly-shared page survives — see `src/sources/removal.ts`.
+ *
+ * Two more things are pinned here from a post-implementation audit (H1/H2):
+ * a removal must FREEZE the concepts it still shares with a live source (so a
+ * later recompile of that live source can't silently drop the removed
+ * source's contribution from the merged page), unioned with whatever was
+ * already frozen by a prior batch; and a corrupt or too-new `state.json` must
+ * make the whole removal REFUSE rather than fabricate an empty state and
+ * destroy every other source's compile record.
  */
 
 import { describe, it, expect } from "vitest";
@@ -26,7 +34,7 @@ import { writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { planRemoval, applyRemovalLocked } from "../src/sources/removal.js";
-import { twoSourceRmProject } from "./fixtures/rm-project.js";
+import { twoSourceRmProject, makeEmptyRmProject } from "./fixtures/rm-project.js";
 import type { WikiState } from "../src/utils/types.js";
 
 /**
@@ -42,6 +50,18 @@ async function raceProject(): Promise<string> {
   state.sources["bad.md"].concepts.push("race");
   await writeFile(path.join(root, ".llmwiki/state.json"), JSON.stringify(state), "utf-8");
   return root;
+}
+
+/**
+ * Apply the standard `bad.md` removal against `root` and return the
+ * resulting persisted state. Several assertions below need exactly this
+ * "apply, then re-read state.json" sequence; factored out once rather than
+ * repeated per test (fallow's clone detector flags the copy, same reasoning
+ * as {@link twoSourceRmProject} in `fixtures/rm-project.ts`).
+ */
+async function removeBadMdAndReadState(root: string): Promise<WikiState> {
+  await applyRemovalLocked(root, (await planRemoval(root, "bad.md"))!);
+  return JSON.parse(await readFile(path.join(root, ".llmwiki/state.json"), "utf-8")) as WikiState;
 }
 
 describe("llmwiki rm end to end", () => {
@@ -60,9 +80,7 @@ describe("llmwiki rm end to end", () => {
   it("drops the source from state and regenerates the index", async () => {
     const root = await twoSourceRmProject();
 
-    await applyRemovalLocked(root, (await planRemoval(root, "bad.md"))!);
-
-    const state = JSON.parse(await readFile(path.join(root, ".llmwiki/state.json"), "utf-8")) as WikiState;
+    const state = await removeBadMdAndReadState(root);
     expect(Object.keys(state.sources)).toEqual(["good.md"]);
     expect(existsSync(path.join(root, "wiki/index.md"))).toBe(true);
   });
@@ -100,5 +118,53 @@ describe("llmwiki rm end to end", () => {
 
     expect(existsSync(path.join(root, "wiki/concepts/race.md"))).toBe(true); // now shared -- preserved
     expect(existsSync(path.join(root, "wiki/concepts/junk.md"))).toBe(false); // still exclusive -- deleted
+  });
+
+  it("freezes the source's still-shared concepts, so a later recompile can't silently drop its contribution", async () => {
+    const root = await twoSourceRmProject();
+
+    const state = await removeBadMdAndReadState(root);
+    expect(state.frozenSlugs).toContain("shared"); // still owned by good.md -- must stay frozen
+    expect(existsSync(path.join(root, "wiki/concepts/shared.md"))).toBe(true);
+  });
+
+  it("unions newly frozen concepts into slugs already frozen by a prior batch, rather than replacing them", async () => {
+    const root = await twoSourceRmProject();
+    const statePath = path.join(root, ".llmwiki/state.json");
+    const seeded = JSON.parse(await readFile(statePath, "utf-8")) as WikiState;
+    seeded.frozenSlugs = ["previously-frozen"];
+    await writeFile(statePath, JSON.stringify(seeded), "utf-8");
+
+    const state = await removeBadMdAndReadState(root);
+    expect(state.frozenSlugs?.slice().sort()).toEqual(["previously-frozen", "shared"]);
+  });
+
+  it("refuses on a corrupt state.json instead of silently starting fresh and losing every other source's record", async () => {
+    const root = await twoSourceRmProject();
+    const statePath = path.join(root, ".llmwiki/state.json");
+    const corrupt = "{ this is not valid json";
+    await writeFile(statePath, corrupt, "utf-8");
+
+    const attemptRemoval = async () => {
+      const plan = await planRemoval(root, "bad.md");
+      await applyRemovalLocked(root, plan!);
+    };
+
+    await expect(attemptRemoval()).rejects.toThrow();
+    expect(existsSync(path.join(root, "sources/bad.md"))).toBe(true); // never reached deleteSource
+    // Load-bearing: the pre-fix bug was SILENT DATA LOSS (the fabricated empty
+    // state got written back, wiping every other source's record). Nothing
+    // must touch this file on a refusal.
+    expect(await readFile(statePath, "utf-8")).toBe(corrupt);
+  });
+
+  it("still deletes the source when state.json is missing entirely (never compiled)", async () => {
+    const root = await makeEmptyRmProject();
+    await writeFile(path.join(root, "sources/solo.md"), "---\ntitle: Solo\nsource: solo\n---\nbody", "utf-8");
+
+    const plan = await planRemoval(root, "solo.md");
+    await applyRemovalLocked(root, plan!);
+
+    expect(existsSync(path.join(root, "sources/solo.md"))).toBe(false);
   });
 });
