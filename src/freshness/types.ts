@@ -14,7 +14,14 @@ export type FreshnessStatus = "fresh" | "stale" | "orphaned" | "unverified";
 /** The minimal page shape `computeFreshness` needs; each surface adapts to it. */
 export interface PageFreshnessInput {
   slug: string;
-  pageDirectory: "concepts" | "queries";
+  /**
+   * `"concepts"`/`"queries"` for a default page. Widened past that pair because
+   * a TYPED entity page (a non-default profile's `articles/`, `papers/`, …) also
+   * asks for freshness, and `classify` is already written for it: a typed page
+   * owns no source entry, so it degrades to `unverified` through the documented
+   * empty-owners path rather than needing a status invented for it.
+   */
+  pageDirectory: string;
   frontmatter: Record<string, unknown>;
 }
 

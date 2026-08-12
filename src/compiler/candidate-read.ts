@@ -314,23 +314,85 @@ function isValidCandidate(value: unknown): value is ReviewCandidate {
 }
 
 /**
- * List every candidate currently pending review, sorted by generation time.
- * Skips files that aren't candidate JSON (e.g. the archive subdirectory).
+ * File ids of every pending candidate file, from one `readdir`. Nothing is
+ * opened here — this is the cheap half of listing, and the only half
+ * {@link listCandidatePage} is willing to pay in full.
  * @param root - Project root directory.
- * @returns All pending review candidates.
+ * @returns Candidate file ids, or an empty list when the directory is absent.
  */
-export async function listCandidates(root: string): Promise<ReviewCandidate[]> {
+async function pendingCandidateFileIds(root: string): Promise<string[]> {
   const dir = await resolveConfinedCandidatesDir(root, CANDIDATES_DIR);
   if (dir === null) return []; // absent candidates dir → nothing pending
-  const ids = await listCandidateFileIds(dir);
+  return listCandidateFileIds(dir);
+}
+
+/** Read and sanitize the named candidates, dropping the ones that fail to parse. */
+async function readCandidatesByIds(root: string, ids: string[]): Promise<ReviewCandidate[]> {
   const candidates: ReviewCandidate[] = [];
   for (const id of ids) {
     const candidate = await readCandidate(root, id);
     if (candidate) candidates.push(candidate);
   }
+  return candidates;
+}
 
+/**
+ * List every candidate currently pending review, sorted by generation time.
+ * Skips files that aren't candidate JSON (e.g. the archive subdirectory).
+ *
+ * Reads and parses EVERY candidate file, which is what sorting on
+ * `generatedAt` — a field inside each file — costs. Callers serving a request
+ * per visit should use {@link listCandidatePage} instead.
+ * @param root - Project root directory.
+ * @returns All pending review candidates.
+ */
+export async function listCandidates(root: string): Promise<ReviewCandidate[]> {
+  const candidates = await readCandidatesByIds(root, await pendingCandidateFileIds(root));
   candidates.sort((a, b) => a.generatedAt.localeCompare(b.generatedAt));
   return candidates;
+}
+
+/** A bounded slice of the pending queue, plus how many candidates exist behind it. */
+export interface CandidatePage {
+  /** The candidates actually read, at most `limit` of them. */
+  candidates: ReviewCandidate[];
+  /** How many pending candidates exist on disk — NOT the length of `candidates`. */
+  total: number;
+}
+
+/**
+ * Read a BOUNDED slice of the pending queue, plus the total behind it.
+ *
+ * ORDERING GUARANTEE: candidates are selected AND returned in ascending
+ * candidate file id order — for compiler-written candidates that is
+ * `<slug>-<random suffix>`, so effectively alphabetical by proposed slug. It is
+ * deliberately NOT {@link listCandidates}' `generatedAt` order: `generatedAt`
+ * lives inside each file, so honouring it would mean reading and parsing every
+ * candidate to decide which handful to serve — exactly the unbounded cost this
+ * function exists to remove. Id order is acceptable in exchange because it is
+ * stable (the same call returns the same slice, so a revisit is not a reshuffle)
+ * and because a review queue is a set of things to work through rather than a
+ * timeline. `listCandidates` keeps its `generatedAt` ordering for `review list`
+ * and every other caller.
+ *
+ * `total` counts candidate FILES, since counting them exactly is what reading
+ * them all would cost. Files inside the served slice that fail to parse are
+ * discounted, so when the whole queue fits under `limit` the total is exactly
+ * `listCandidates(root).length`; above it, a malformed file beyond the slice
+ * inflates the total by one rather than being silently dropped.
+ *
+ * @param root - Project root directory.
+ * @param limit - Maximum candidates to read and return.
+ * @returns The bounded slice and the true pending total.
+ */
+export async function listCandidatePage(root: string, limit: number): Promise<CandidatePage> {
+  // Plain sort: lexicographic by UTF-16 code unit, so the slice is identical on
+  // every machine. `localeCompare` would make it depend on the host locale.
+  const ids = (await pendingCandidateFileIds(root)).sort();
+  const served = ids.slice(0, limit);
+  const candidates = await readCandidatesByIds(root, served);
+  const unreadableInSlice = served.length - candidates.length;
+  return { candidates, total: ids.length - unreadableInSlice };
 }
 
 /**

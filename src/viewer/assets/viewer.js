@@ -2,33 +2,53 @@
  * llmwiki viewer — vanilla-JS client.
  *
  * Three responsibilities, kept deliberately small:
- *   1. First paint from the server-embedded `<script type="application/json"
- *      id="page-index">` blob so the sidebar shows pages before any fetch.
- *   2. Full data from `/api/pages` once the page loads — replaces the
- *      first-paint sidebar with grouped concepts/queries, and renders
- *      the dashboard home.
- *   3. Hash router (`#/`, `#/concepts/<slug>`, `#/queries/<slug>`,
- *      `#/index`, `#/health`) that fetches `/api/page/...`,
- *      `/api/index`, or `/api/health` and drops the result into the
- *      main pane. The server returns already-sanitized HTML in `html`
- *      (see `src/viewer/render.ts`), so the client only has to set
- *      `innerHTML` and link up the support rail.
+ *   1. First paint renders the sidebar nav from an empty model
+ *      (`renderSidebar({})`) so the chrome appears before any fetch settles.
+ *      The server embeds no page data in the shell, so this is the only first
+ *      paint there is — see `src/viewer/shell.ts`.
+ *   2. `/api/pages` and `/api/health`, fetched once in parallel via
+ *      `loadBootstrapData()` and cached in `bootstrapData` — fill in the
+ *      sidebar's counts and lint badge, the header's whole-wiki verdict
+ *      pill (which reads both), and render the dashboard home.
+ *   3. Hash router. Home is `#/`; a page is `#/<directory>/<slug>`, where
+ *      directory is `concepts`, `queries`, or any entity type the active
+ *      profile declares; a profile type's list is `#/_type/<entity-type>`; and
+ *      the static routes are `#/index`, `#/health`, `#/graph`, `#/concepts`,
+ *      `#/queries`, `#/sources`, `#/reviews`, `#/workflows` and `#/pipeline`
+ *      (the full set is {@link STATIC_ROUTES} — this list and that map are the
+ *      same nine). Routes fetch `/api/page/...`, `/api/index`, `/api/health`,
+ *      `/api/reviews` or `/api/workflow-runs`; the four list routes and the
+ *      graph read the already-fetched bootstrap envelope and issue nothing of
+ *      their own. The server returns already-sanitized HTML in `html` (see
+ *      `src/viewer/render.ts`), so the client only has to set `innerHTML`
+ *      and link up the support rail.
  *
  * No external dependencies, no client-side markdown rendering, no
  * inline event handlers — the spec's CSP only allows scripts from
  * `'self'`. The search-input wiring lives in `viewer-search.js`.
  */
 
+import { el, heading, placeholder } from "./viewer-dom.js";
+import { wireThemeToggle } from "./viewer-theme.js";
 import { wireSearch } from "./viewer-search.js";
 import { renderSidebar, markActive } from "./viewer-sidebar.js";
-import { renderProjectRail, renderSupportRail, clearSupportRail } from "./viewer-rail.js";
-import { loadGraph } from "./viewer-graph.js";
+import { renderSupportRail, clearSupportRail } from "./viewer-rail.js";
+import { loadGraph, staleIdsFromEnvelope } from "./viewer-graph.js";
+import { renderHeader } from "./viewer-header.js";
+import {
+  renderConceptsList,
+  renderEntityTypeList,
+  renderQueriesList,
+  renderSourcesList,
+} from "./viewer-lists.js";
+import { renderReviewsList } from "./viewer-reviews.js";
+import { renderWorkflowRunsList } from "./viewer-workflows.js";
+import { renderPipeline } from "./viewer-pipeline.js";
+import { renderDashboard } from "./viewer-dashboard.js";
+import { buildHealthView } from "./viewer-health.js";
+import { typeListHashType } from "./viewer-routes.js";
 
-const PAGE_INDEX_SELECTOR = "#page-index";
 const MAIN_SELECTOR = "[data-main-pane]";
-const TITLE_SELECTOR = "[data-app-title]";
-const DEFAULT_TITLE = "llmwiki";
-const EMPTY_INDEX = { pages: [] };
 
 /** Hashes that all map to the home route — `#`, `#/`, and empty/missing. */
 const HOME_HASHES = new Set(["", "#", "#/"]);
@@ -38,54 +58,55 @@ const STATIC_ROUTES = new Map([
   ["#/index", { kind: "index" }],
   ["#/health", { kind: "health" }],
   ["#/graph", { kind: "graph" }],
+  ["#/concepts", { kind: "concepts" }],
+  ["#/queries", { kind: "queries" }],
+  ["#/sources", { kind: "sources" }],
+  ["#/reviews", { kind: "reviews" }],
+  ["#/workflows", { kind: "workflows" }],
+  ["#/pipeline", { kind: "pipeline" }],
 ]);
 
-/** Pattern matching `#/(concepts|queries)/<slug>` hash routes. */
-const PAGE_HASH_PATTERN = /^#\/(concepts|queries)\/(.+)$/;
+/**
+ * Pattern matching a `#/<directory>/<slug>` page hash.
+ *
+ * The directory is deliberately NOT an enumeration here. A profile project's
+ * entity types are addressable page directories too (`#/articles/<slug>`), and
+ * that set is per-project — so hardcoding one would make every typed page a
+ * dead link, which is precisely what it did before `/api/page` learned to serve
+ * them. The authoritative allowlist lives on the server, derived from the active
+ * profile (see `isAllowedDirectory`, src/viewer/api-pages.ts); an unknown
+ * directory is rejected there and surfaces through {@link handlePageError}.
+ *
+ * Resolving here rather than against the bootstrap envelope keeps a cold deep
+ * link working: opening `#/articles/x` in a fresh tab must route before
+ * `/api/pages` has settled.
+ *
+ * Single-segment hashes never reach this pattern — STATIC_ROUTES is consulted
+ * first, and an unmatched one still falls back to home. A NAMESPACED list hash
+ * (`#/_type/articles`) does match it, which is why the order in
+ * {@link parseRoute} is load-bearing; see {@link namedRoute}.
+ */
+const PAGE_HASH_PATTERN = /^#\/([^/]+)\/(.+)$/;
 
-/** Rows for the home dashboard counts grid: `[label, envelope.counts key]`. */
-const COUNT_ROWS = [
-  ["Concepts", "concepts"],
-  ["Saved queries", "queries"],
-  ["Source files", "sourceFiles"],
-  ["Pending reviews", "pendingReviews"],
-];
+/**
+ * Bootstrap payloads shared by the sidebar, dashboard, and health route.
+ * Fetched once in parallel at startup; each entry stays null if its fetch
+ * failed, so one failing endpoint degrades only the surfaces that need it.
+ */
+const bootstrapData = { pages: null, health: null, settled: false };
 
-/** Rows for the /api/health metrics block: `[label, health key]`. */
-const HEALTH_METRIC_ROWS = [
-  ["Concepts", "concepts"],
-  ["Saved queries", "queries"],
-  ["Compiled sources", "sources"],
-  ["Source files", "sourceFiles"],
-  ["Stale pages", "stale"],
-  ["Orphaned pages", "orphaned"],
-  ["Pending reviews", "pendingReviews"],
-];
-
-/** Rows for the lint block: `[label, key, fallback]`. */
-const LINT_METRIC_ROWS = [
-  ["Warnings", "warnings", 0],
-  ["Errors", "errors", 0],
-  ["Last run", "at", ""],
-];
-
-/** Parse the server-embedded page-index JSON. Empty list if absent or malformed. */
-function readEmbeddedIndex() {
-  const node = document.querySelector(PAGE_INDEX_SELECTOR);
-  const text = node?.textContent;
-  if (!text) return EMPTY_INDEX;
-  return parsePageIndex(text);
-}
-
-/** Best-effort JSON.parse of the embedded blob. Always returns a `{pages}` shape. */
-function parsePageIndex(text) {
-  try {
-    const data = JSON.parse(text);
-    if (Array.isArray(data?.pages)) return { pages: data.pages };
-  } catch {
-    // Malformed JSON in the embedded blob is not a user-facing error.
-  }
-  return EMPTY_INDEX;
+/** Fetch both bootstrap endpoints in parallel, tolerating either failing. */
+async function loadBootstrapData() {
+  const [pages, health] = await Promise.all([
+    fetchJson("/api/pages").catch(() => null),
+    fetchJson("/api/health").catch(() => null),
+  ]);
+  bootstrapData.pages = pages;
+  bootstrapData.health = health;
+  // Distinct from `pages !== null`: a FAILED fetch has also settled, and the
+  // router must stop waiting on an answer that is never coming.
+  bootstrapData.settled = true;
+  return bootstrapData;
 }
 
 /**
@@ -98,12 +119,71 @@ function parsePageIndex(text) {
 function parseRoute(hash) {
   const key = hash ?? "";
   if (HOME_HASHES.has(key)) return { kind: "home" };
-  const staticRoute = STATIC_ROUTES.get(key);
-  if (staticRoute) return staticRoute;
+  return namedRoute(key) ?? unsettledOrPageRoute(key);
+}
+
+/**
+ * A route the hash names outright: the fixed table first, then the typed list
+ * routes the active profile contributes. Returns undefined when the hash names
+ * neither, leaving the page-route path to answer.
+ *
+ * THE ORDER HERE IS LOAD-BEARING. A namespaced list hash is two segments, so
+ * `#/_type/articles` matches PAGE_HASH_PATTERN as readily as it matches the
+ * namespace. Resolving the page pattern first would fetch
+ * `/api/page/_type/articles`, take the 400 the server owes an undeclared
+ * directory, and paint "Page not found" over a route that exists — so the
+ * namespace is consulted before {@link parsePageRoute} ever sees the hash.
+ */
+function namedRoute(key) {
+  return STATIC_ROUTES.get(key) ?? entityListRoute(key);
+}
+
+/**
+ * A namespaced list hash whose type the envelope has not yet classified.
+ *
+ * `renderRoute` runs once before /api/pages settles and again after, so a cold
+ * deep link to `#/_type/articles` reaches the first pass with no entity types
+ * known. Falling back to home THERE is not merely a wrong first frame: the home
+ * render is async and lands after the corrected second pass, overwriting the
+ * list it just drew. Holding the route instead means the first pass paints
+ * nothing and the second pass paints once, whichever way it resolves.
+ *
+ * Only the namespace waits, and nothing in it is ever a page route: `_type` is
+ * not a name a profile can declare (see viewer-routes.js), so an undeclared type
+ * goes home rather than to a page fetch that could only 400. A page route
+ * (`#/articles/alpha`) resolves without the envelope and never waits.
+ */
+function unsettledOrPageRoute(key) {
+  const namespaced = typeListHashType(key) !== null;
+  if (namespaced && !bootstrapData.settled) return { kind: "pending" };
+  if (namespaced) return { kind: "home" };
   return parsePageRoute(key);
 }
 
-/** Resolve a `#/(concepts|queries)/<slug>` hash; non-matches return home. */
+/**
+ * Resolve `#/_type/<entity-type>` — a profile's typed list route.
+ *
+ * Entity types are per-project, so this cannot join STATIC_ROUTES: the match is
+ * against what the ENVELOPE declares. Only a declared type resolves, which is
+ * what keeps `#/_type/nonsense` falling back to home — the same fallback that
+ * catches `#/nonsense`, and the one the nav-integrity guard
+ * (test/viewer-sidebar-nav.test.ts) relies on to tell a real route from a dead
+ * href.
+ */
+function entityListRoute(key) {
+  const type = typeListHashType(key);
+  if (type === null || !declaredEntityTypes().includes(type)) return null;
+  return { kind: "entityList", type };
+}
+
+/** The entity type ids the cached envelope declares; empty until it settles. */
+function declaredEntityTypes() {
+  const entityTypes = bootstrapData.pages?.profilePipeline?.entityTypes;
+  if (!Array.isArray(entityTypes)) return [];
+  return entityTypes.map((entry) => entry?.type);
+}
+
+/** Resolve a `#/<directory>/<slug>` hash; non-matches return home. */
 function parsePageRoute(hash) {
   const match = hash.match(PAGE_HASH_PATTERN);
   if (!match) return { kind: "home" };
@@ -121,125 +201,49 @@ function decodeSlug(raw) {
   }
 }
 
-/** Render the home dashboard from the `/api/pages` envelope. */
-function renderHome(envelope) {
-  const main = document.querySelector(MAIN_SELECTOR);
-  if (!main) return;
-  main.innerHTML = "";
-  main.className = "main-pane home-dashboard";
-  appendHomeContent(main, envelope);
-  renderProjectRail(envelope);
-}
-
-/** Append every section of the home dashboard to the main pane. */
-function appendHomeContent(main, envelope) {
-  main.appendChild(buildHeading("h1", projectTitle(envelope)));
-  main.appendChild(buildCountsBlock(envelope?.counts));
-  appendIndexLinkIfAvailable(main, envelope);
-  appendRecentBlockIfAny(main, envelope);
-}
-
-/** Append the compiled-index link, if the envelope flagged it available. */
-function appendIndexLinkIfAvailable(main, envelope) {
-  if (envelope?.index?.available) {
-    main.appendChild(buildIndexLink(envelope.index.href));
-  }
-}
-
-/** Append the recent-updates block, if the envelope carried any rows. */
-function appendRecentBlockIfAny(main, envelope) {
-  if (hasRecentPages(envelope)) {
-    main.appendChild(buildRecentBlock(envelope.recentPages));
-  }
-}
-
-/** Display title for the envelope, with a stable fallback. */
-function projectTitle(envelope) {
-  return envelope?.project?.title || DEFAULT_TITLE;
-}
-
-/** True when the envelope carries at least one recent page. */
-function hasRecentPages(envelope) {
-  return Array.isArray(envelope?.recentPages) && envelope.recentPages.length > 0;
-}
-
-/** Render a `<dl>` of project counts on the home dashboard. */
-function buildCountsBlock(counts) {
-  const rows = COUNT_ROWS.map(([label, key]) => [label, counts?.[key] ?? 0]);
-  const dl = buildDefinitionList(rows);
-  dl.className = "metric-grid";
-  return dl;
-}
-
-/** Build a `<dl>` from a list of `[label, value]` rows. */
-function buildDefinitionList(rows) {
-  const dl = document.createElement("dl");
-  for (const [label, value] of rows) {
-    const row = document.createElement("div");
-    row.className = "metric";
-    const dt = document.createElement("dt");
-    dt.textContent = label;
-    const dd = document.createElement("dd");
-    dd.textContent = String(value);
-    row.appendChild(dt);
-    row.appendChild(dd);
-    dl.appendChild(row);
-  }
-  return dl;
-}
-
-/** Build the link that takes the user to the compiled wiki/index.md page. */
-function buildIndexLink(href) {
-  const p = document.createElement("p");
-  p.className = "home-action";
-  const a = document.createElement("a");
-  a.href = href;
-  a.textContent = "Browse the compiled index →";
-  p.appendChild(a);
-  return p;
-}
-
-/** Render the recent-pages list on the home dashboard. */
-function buildRecentBlock(recent) {
-  const ul = document.createElement("ul");
-  ul.className = "recent-list";
-  for (const page of recent) {
-    const li = document.createElement("li");
-    const a = document.createElement("a");
-    a.href = `#/${encodeURIComponent(page.pageDirectory)}/${encodeURIComponent(page.slug)}`;
-    a.textContent = page.title || page.slug;
-    li.appendChild(a);
-    ul.appendChild(li);
-  }
-  const wrap = document.createElement("section");
-  wrap.className = "recent-section";
-  wrap.appendChild(buildHeading("h2", "Recently updated"));
-  wrap.appendChild(ul);
-  return wrap;
-}
-
-/** Build a heading element with the given tag and text content. */
-function buildHeading(tag, text) {
-  const el = document.createElement(tag);
-  el.textContent = text;
-  return el;
-}
-
-/** Build a `<p class="placeholder">` with the given message. */
-function buildPlaceholder(text) {
-  const p = document.createElement("p");
-  p.className = "placeholder";
-  p.textContent = text;
-  return p;
-}
-
 /** Dispatch table: route.kind → handler for routes that fit the (main) signature. */
 const ROUTE_RENDERERS = {
   home: () => loadAndRenderHome(),
+  // Deliberately paints nothing — see `unsettledOrPageRoute`.
+  pending: () => undefined,
   index: (main) => renderIndexPane(main),
   health: (main) => renderHealthPane(main),
   graph: (main) => renderGraphPane(main),
+  concepts: (main) => renderListRoute(main, renderConceptsList),
+  queries: (main) => renderListRoute(main, renderQueriesList),
+  sources: (main) => renderListRoute(main, renderSourcesList),
+  reviews: (main) => renderFetchedRoute(main, "/api/reviews", renderReviewsList),
+  workflows: (main) => renderFetchedRoute(main, "/api/workflow-runs", renderWorkflowRunsList),
+  pipeline: (main) => renderListRoute(main, renderPipeline),
 };
+
+/**
+ * Fetch one endpoint and hand its payload to `render`. Unlike the list routes
+ * above, these routes fetch per VISIT rather than reading the cached bootstrap
+ * envelope: review candidates live under `.llmwiki/candidates/` and workflow
+ * runs under `.llmwiki/workflows/runs/`, both outside the frozen snapshot, and
+ * both endpoints are kept off the bootstrap path so every other route stays as
+ * cheap as it was.
+ */
+async function renderFetchedRoute(main, endpoint, render) {
+  clearSupportRail();
+  try {
+    render(main, await fetchJson(endpoint));
+  } catch (err) {
+    renderError(`Could not load ${endpoint}: ${err.message}`);
+  }
+}
+
+/** Render a list route from the cached envelope, fetching only if absent. */
+async function renderListRoute(main, render) {
+  clearSupportRail();
+  const envelope = bootstrapData.pages ?? (await loadBootstrapData()).pages;
+  if (!envelope) {
+    renderError("Could not load /api/pages");
+    return;
+  }
+  render(main, envelope);
+}
 
 /** Fetch and render the page at the current hash route. */
 async function renderRoute() {
@@ -248,38 +252,40 @@ async function renderRoute() {
   const main = document.querySelector(MAIN_SELECTOR);
   if (!main) return;
   main.className = "main-pane";
+  // Not in ROUTE_RENDERERS: every entry there is keyed by kind alone, and this
+  // route needs the type the hash named as well.
+  if (route.kind === "entityList") return renderEntityListRoute(main, route.type);
   const handler = ROUTE_RENDERERS[route.kind];
   if (handler) return handler(main);
   return renderPagePane(main, route.directory, route.slug);
 }
 
-/** Fetch /api/health and render the dashboard. */
-async function renderHealthPane(main) {
-  try {
-    const health = await fetchJson("/api/health");
-    main.innerHTML = "";
-    main.appendChild(buildHeading("h1", "Health"));
-    main.appendChild(buildHealthDashboard(health));
-    clearSupportRail();
-  } catch (err) {
-    renderError(`Could not load /api/health: ${err.message}`);
-  }
+/** Render one entity type's list from the cached envelope. */
+function renderEntityListRoute(main, type) {
+  return renderListRoute(main, (pane, envelope) => renderEntityTypeList(pane, envelope, type));
 }
 
-/** Build the health dashboard DOM from the `/api/health` payload. */
-function buildHealthDashboard(health) {
-  const wrap = document.createElement("section");
-  wrap.className = "health-dashboard";
+/**
+ * Render the health pane from the cached payloads, fetching only if absent.
+ * Both are needed: `/api/health` carries the counts and the lint cache,
+ * `/api/pages` the per-page freshness and citation totals the right-hand
+ * column projects. `health-pane` opts the pane out of `.main-pane`'s
+ * prose-width cap so the two-column grid gets the full content width.
+ */
+async function renderHealthPane(main) {
+  const data = bootstrapData.health ? bootstrapData : await loadBootstrapData();
+  if (!data.health) {
+    renderError("Could not load /api/health");
+    return;
+  }
+  main.className = "main-pane health-pane";
+  main.innerHTML = "";
   // The global banner (injected at bootstrap) covers every route including health;
   // only add it here if bootstrap didn't already inject one (e.g. if /api/pages
   // was not yet fetched when navigating directly to #/health).
-  prependBannerIfNeeded(wrap, health?.stateStatus);
-  const rows = HEALTH_METRIC_ROWS.map(([label, key]) => [label, health?.[key] ?? 0]);
-  const metrics = buildDefinitionList(rows);
-  metrics.className = "metric-list";
-  wrap.appendChild(metrics);
-  wrap.appendChild(buildLintBlock(health?.lint));
-  return wrap;
+  prependBannerIfNeeded(main, data.health.stateStatus);
+  main.appendChild(buildHealthView(data.health, data.pages));
+  clearSupportRail();
 }
 
 /** state.json classifications that surface a user-visible warning banner. */
@@ -314,36 +320,24 @@ function buildStateStatusBanner(stateStatus) {
   return banner;
 }
 
-/** Render the lint summary, or a "lint has not been run yet" placeholder. */
-function buildLintBlock(lint) {
-  const wrap = document.createElement("section");
-  wrap.appendChild(buildHeading("h2", "Lint"));
-  if (!lint) {
-    wrap.appendChild(buildPlaceholder("No cached lint summary yet — run `llmwiki lint`."));
-    return wrap;
-  }
-  const rows = LINT_METRIC_ROWS.map(([label, key, fallback]) => [label, lint[key] ?? fallback]);
-  wrap.appendChild(buildDefinitionList(rows));
-  return wrap;
-}
-
-/** Fetch /api/pages and render the dashboard. */
+/** Render the home dashboard from the cached bootstrap payloads. */
 async function loadAndRenderHome() {
-  try {
-    const envelope = await fetchJson("/api/pages");
-    applyHomeEnvelope(envelope);
-  } catch (err) {
-    renderError(`Could not load /api/pages: ${err.message}`);
+  const data = bootstrapData.pages ? bootstrapData : await loadBootstrapData();
+  if (!data.pages) {
+    renderError("Could not load /api/pages");
+    return;
   }
+  applyHomeEnvelope(data.pages);
 }
 
-/** Apply a successfully fetched /api/pages envelope to the chrome + main pane. */
+/** Apply a successfully fetched bootstrap payload to the chrome + main pane. */
 function applyHomeEnvelope(envelope) {
-  const titleEl = document.querySelector(TITLE_SELECTOR);
-  titleEl.textContent = projectTitle(envelope);
-  renderSidebar(envelope?.pages || []);
-  renderHome(envelope);
-  // Inject into .app-layout (outside <main>) so the banner persists across route changes.
+  const main = document.querySelector(MAIN_SELECTOR);
+  if (!main) return;
+  // renderDashboard fills the shared support rail itself (compile receipt /
+  // next actions / snapshot note, via renderDashboardRail) — no separate
+  // rail call belongs here.
+  renderDashboard(main, envelope, bootstrapData.health);
   injectGlobalCorruptBanner(envelope?.stateStatus);
 }
 
@@ -366,7 +360,7 @@ async function renderIndexPane(main) {
   try {
     const payload = await fetchJson("/api/index");
     main.innerHTML = "";
-    main.appendChild(buildHeading("h1", "Index"));
+    main.appendChild(heading("h1", "Index"));
     appendRenderedBody(main, payload.html);
   } catch (err) {
     handleIndexError(main, err);
@@ -380,7 +374,7 @@ function handleIndexError(main, err) {
     return;
   }
   main.innerHTML = "";
-  main.appendChild(buildPlaceholder("wiki/index.md is not available. Run `llmwiki compile`."));
+  main.appendChild(placeholder("wiki/index.md is not available. Run `llmwiki compile`."));
 }
 
 /** Fetch /api/page/:dir/:slug and render. */
@@ -402,7 +396,7 @@ function pageApiPath(directory, slug) {
 function renderPagePayload(main, payload, slug) {
   const title = payload.title || slug;
   main.innerHTML = "";
-  main.appendChild(buildHeading("h1", title));
+  main.appendChild(heading("h1", title));
   if (payload.pageDirectory === "queries") {
     main.appendChild(buildQueryQuestion(title));
   }
@@ -414,20 +408,26 @@ function renderPagePayload(main, payload, slug) {
 
 /** Question banner shown above the body for saved-query pages. */
 function buildQueryQuestion(title) {
-  const p = document.createElement("p");
-  p.className = "query-question";
-  p.textContent = `Question: ${title}`;
-  return p;
+  return el("p", "query-question", `Question: ${title}`);
 }
 
-/** Render the 404 placeholder or a generic error for /api/page failures. */
+/**
+ * Render the not-found placeholder or a generic error for /api/page failures.
+ *
+ * 400 is treated as not-found alongside 404 because both mean "this hash does
+ * not name a page": the server answers 400 when the directory is not one the
+ * active profile declares, and 404 when the directory is valid but the page is
+ * not there. To a reader those are the same fact, and since the hash router no
+ * longer enumerates directories itself (see PAGE_HASH_PATTERN), 400 is the
+ * ordinary response to a mistyped or stale link rather than a client defect.
+ */
 function handlePageError(main, err, directory, slug) {
-  if (err.status !== 404) {
+  if (err.status !== 404 && err.status !== 400) {
     renderError(`Could not load page: ${err.message}`);
     return;
   }
   main.innerHTML = "";
-  main.appendChild(buildPlaceholder(`Page not found: ${directory}/${slug}`));
+  main.appendChild(placeholder(`Page not found: ${directory}/${slug}`));
   clearSupportRail();
 }
 
@@ -447,7 +447,7 @@ function appendRenderedBody(main, html) {
     main.appendChild(body);
     return body;
   }
-  const note = buildPlaceholder("No rendered content.");
+  const note = placeholder("No rendered content.");
   main.appendChild(note);
   return note;
 }
@@ -477,10 +477,7 @@ function hasMatchingHeadingText(heading, title) {
 /** Render every payload warning as a banner above the page body. */
 function appendWarnings(main, warnings) {
   for (const w of warnings) {
-    const banner = document.createElement("div");
-    banner.className = "warning-banner";
-    banner.textContent = w.message || w.code;
-    main.appendChild(banner);
+    main.appendChild(el("div", "warning-banner", w.message || w.code));
   }
 }
 
@@ -489,10 +486,7 @@ function renderError(message) {
   const main = document.querySelector(MAIN_SELECTOR);
   if (!main) return;
   main.innerHTML = "";
-  const banner = document.createElement("div");
-  banner.className = "warning-banner";
-  banner.textContent = message;
-  main.appendChild(banner);
+  main.appendChild(el("div", "warning-banner", message));
   clearSupportRail();
 }
 
@@ -501,7 +495,7 @@ async function renderGraphPane(main) {
   clearSupportRail();
   main.innerHTML = "";
   main.className = "main-pane graph-pane";
-  await loadGraph(main);
+  await loadGraph(main, { staleIds: staleIdsFromEnvelope(bootstrapData.pages) });
 }
 
 /** Promise-returning fetch helper that surfaces non-2xx statuses as errors. */
@@ -515,21 +509,53 @@ async function fetchJson(pathname) {
   return res.json();
 }
 
-/** Bootstrap: first-paint from embedded blob, then full fetch + router. */
+/** Bootstrap: first-paint nav, then parallel data fetch, then the router. */
 function main() {
-  const embedded = readEmbeddedIndex();
-  renderSidebar(embedded.pages);
+  wireThemeToggle();
+  renderSidebar({});
   wireSearch({ fetchJson });
-  // Ensure the corrupt-state banner appears on every entry route, not just home.
-  // injectGlobalCorruptBanner is idempotent, so the home route's own /api/pages
-  // fetch won't double-render if both settle.
-  void fetchJson("/api/pages")
-    .then((env) => injectGlobalCorruptBanner(env?.stateStatus))
-    .catch(() => {});
+  void loadBootstrapData().then((data) => {
+    renderSidebar(sidebarModel(data));
+    renderHeader(data.pages, data.health);
+    injectGlobalCorruptBanner(data.pages?.stateStatus);
+    void renderRoute();
+  });
   window.addEventListener("hashchange", () => {
     void renderRoute();
   });
   void renderRoute();
+}
+
+/** Project the bootstrap payloads into the sidebar's render model. */
+// Optional chaining on three independent fields inflates cyclomatic count for
+// what is a straight-line projection (cognitive complexity: 1).
+// fallow-ignore-next-line complexity
+function sidebarModel(data) {
+  return {
+    project: data.pages?.project,
+    counts: navCounts(data.pages),
+    lint: data.health?.lint ?? null,
+    profileId: data.pages?.profileId,
+    // BROWSE projects these into its type rows; absent on a default project,
+    // which is what leaves that section exactly as it was.
+    entityTypes: data.pages?.profilePipeline?.entityTypes,
+  };
+}
+
+/**
+ * The nav's count map: the envelope's own `counts`, plus `pipelineTypes` — how
+ * many entity types the active profile declares.
+ *
+ * Derived here rather than carried inside `counts` because `counts` is a fixed
+ * shape a DEFAULT project emits too, and a key that appears only for a profile
+ * project would break the byte-identity that shape is pinned for. A default
+ * envelope has no `profilePipeline`, so it gets its `counts` back untouched.
+ */
+function navCounts(envelope) {
+  if (!envelope) return undefined;
+  const entityTypes = envelope.profilePipeline?.entityTypes;
+  if (!Array.isArray(entityTypes)) return envelope.counts;
+  return { ...envelope.counts, pipelineTypes: entityTypes.length };
 }
 
 if (document.readyState === "loading") {

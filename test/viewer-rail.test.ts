@@ -1,11 +1,11 @@
 /**
- * Support-rail + sidebar-grouping + stale-rail-clearing + freshness-badge tests.
+ * Support-rail + stale-rail-clearing + freshness-badge tests.
  *
  * Mounts the real viewer assets through `mountViewerDom` and drives
  * hash-route navigation to assert the right metadata renders on the
  * right route. Covers every Slice-5 review finding that touches the
- * client's right-hand rail or the sidebar group structure, plus the
- * Slice-9 freshness badges and the "Freshness as of…" caption.
+ * client's right-hand rail, plus the Slice-9 freshness badges and the
+ * "Freshness as of…" caption.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +13,7 @@ import {
   flushMicrotasks,
   jsonResponse,
   mountViewerDom,
-  type EmbeddedPage,
+  type PageRow,
   type FetchResponder,
 } from "./fixtures/viewer-jsdom.js";
 
@@ -25,7 +25,7 @@ const PAGES_BASE = {
   updatedAt: "2026-05-14T00:00:00.000Z",
 };
 
-function pagesResponse(pages: EmbeddedPage[]): Response {
+function pagesResponse(pages: PageRow[]): Response {
   return jsonResponse({ ...PAGES_BASE, pages });
 }
 
@@ -57,12 +57,12 @@ function pagePayload(fixture: PageFixture): Record<string, unknown> {
 }
 
 function responderFor(
-  embeddedPages: EmbeddedPage[],
+  pageRows: PageRow[],
   pageFixtures: PageFixture[],
   extras: { health?: Record<string, unknown>; index?: Record<string, unknown> } = {},
 ): FetchResponder {
   return (url) => {
-    if (url.endsWith("/api/pages")) return pagesResponse(embeddedPages);
+    if (url.endsWith("/api/pages")) return pagesResponse(pageRows);
     const pageMatch = url.match(/\/api\/page\/([^/]+)\/([^/?]+)/);
     if (pageMatch) {
       const slug = decodeURIComponent(pageMatch[2]);
@@ -87,7 +87,7 @@ afterEach(() => {
 
 describe("support rail — every spec field renders", () => {
   it("renders kind, sources, confidence, provenanceState, contradictedBy, tags, aliases, timestamps, warnings", async () => {
-    const embedded: EmbeddedPage[] = [
+    const pageRows: PageRow[] = [
       { id: "concepts/alpha", pageDirectory: "concepts", slug: "alpha", title: "Alpha", kind: "concept" },
     ];
     const fixture: PageFixture = {
@@ -114,7 +114,7 @@ describe("support rail — every spec field renders", () => {
         { code: "malformed_citation", message: "Malformed citation entry: x.md:0-5" },
       ],
     };
-    const { dom } = await mountViewerDom(embedded, responderFor(embedded, [fixture]));
+    const { dom } = await mountViewerDom(responderFor(pageRows, [fixture]));
     dom.window.location.hash = "#/concepts/alpha";
     await flushMicrotasks();
 
@@ -157,7 +157,7 @@ describe("support rail — every spec field renders", () => {
   });
 
   it("omits rail rows when the frontmatter field is missing/empty (legacy pages still render)", async () => {
-    const embedded: EmbeddedPage[] = [
+    const pageRows: PageRow[] = [
       { id: "concepts/legacy", pageDirectory: "concepts", slug: "legacy", title: "Legacy", kind: "concept" },
     ];
     const fixture: PageFixture = {
@@ -167,7 +167,7 @@ describe("support rail — every spec field renders", () => {
       title: "Legacy",
       frontmatter: {},
     };
-    const { dom } = await mountViewerDom(embedded, responderFor(embedded, [fixture]));
+    const { dom } = await mountViewerDom(responderFor(pageRows, [fixture]));
     dom.window.location.hash = "#/concepts/legacy";
     await flushMicrotasks();
     const rail = dom.window.document.querySelector("[data-support-rail]") as HTMLElement;
@@ -176,47 +176,7 @@ describe("support rail — every spec field renders", () => {
   });
 });
 
-describe("sidebar — concept grouping by kind", () => {
-  it("groups concepts by frontmatter `kind`, missing kind falls back to concept", async () => {
-    const embedded: EmbeddedPage[] = [
-      { id: "concepts/a", pageDirectory: "concepts", slug: "a", title: "Alpha", kind: "concept" },
-      { id: "concepts/b", pageDirectory: "concepts", slug: "b", title: "Beta", kind: "entity" },
-      { id: "concepts/c", pageDirectory: "concepts", slug: "c", title: "Gamma", kind: "" },
-      { id: "queries/q1", pageDirectory: "queries", slug: "q1", title: "Q1", kind: "" },
-    ];
-    const { dom } = await mountViewerDom(embedded, responderFor(embedded, []));
-    const groups = dom.window.document.querySelectorAll(
-      "[data-sidebar] details[data-kind]",
-    ) as NodeListOf<HTMLDetailsElement>;
-    const kinds = Array.from(groups).map((d) => d.dataset.kind);
-    expect(kinds).toContain("concept");
-    expect(kinds).toContain("entity");
-    expect(kinds).toContain("query");
-    expect(dom.window.document.querySelector("[data-sidebar] section h2")?.textContent).toBe("Project");
-    // The fallback "concept" kind appears first among page groups.
-    expect(kinds[0]).toBe("concept");
-    // Two pages classified as concept (a + c with missing kind).
-    const conceptGroup = Array.from(groups).find((d) => d.dataset.kind === "concept");
-    expect(conceptGroup!.querySelectorAll("li").length).toBe(2);
-  });
-
-  it("renders groups as collapsible <details> elements (keyboard-toggleable by default)", async () => {
-    const embedded: EmbeddedPage[] = [
-      { id: "concepts/a", pageDirectory: "concepts", slug: "a", title: "Alpha", kind: "concept" },
-    ];
-    const { dom } = await mountViewerDom(embedded, responderFor(embedded, []));
-    const group = dom.window.document.querySelector(
-      "[data-sidebar] details[data-kind='concept']",
-    ) as HTMLDetailsElement;
-    expect(group).not.toBeNull();
-    expect(group.tagName).toBe("DETAILS");
-    expect(group.open).toBe(true);
-    group.open = false;
-    expect(group.open).toBe(false);
-  });
-});
-
-const STICKY_EMBEDDED: EmbeddedPage[] = [
+const STICKY_PAGE_ROWS: PageRow[] = [
   { id: "concepts/alpha", pageDirectory: "concepts", slug: "alpha", title: "Alpha", kind: "concept" },
 ];
 
@@ -232,10 +192,7 @@ async function loadStickyPageAndNavigate(
   toHash: string,
   extras: { health?: Record<string, unknown>; index?: Record<string, unknown> } = {},
 ): Promise<HTMLElement> {
-  const { dom } = await mountViewerDom(
-    STICKY_EMBEDDED,
-    responderFor(STICKY_EMBEDDED, [STICKY_FIXTURE], extras),
-  );
+  const { dom } = await mountViewerDom(responderFor(STICKY_PAGE_ROWS, [STICKY_FIXTURE], extras));
   dom.window.location.hash = "#/concepts/alpha";
   await flushMicrotasks();
   const rail = dom.window.document.querySelector("[data-support-rail]") as HTMLElement;
@@ -294,17 +251,17 @@ function freshnessPagePayload(slug: string, freshness: Record<string, unknown>):
 
 /** Navigate to a concepts page with the given freshness and return the rail. */
 async function railForFreshness(slug: string, freshness: Record<string, unknown>): Promise<HTMLElement> {
-  const embedded: EmbeddedPage[] = [
+  const pageRows: PageRow[] = [
     { id: `concepts/${slug}`, pageDirectory: "concepts", slug, title: slug, kind: "concept" },
   ];
   const responder: FetchResponder = (url) => {
-    if (url.endsWith("/api/pages")) return pagesResponse(embedded);
+    if (url.endsWith("/api/pages")) return pagesResponse(pageRows);
     if (url.includes(`/api/page/concepts/${slug}`)) {
       return jsonResponse(freshnessPagePayload(slug, freshness));
     }
     return null;
   };
-  const { dom } = await mountViewerDom(embedded, responder);
+  const { dom } = await mountViewerDom(responder);
   dom.window.location.hash = `#/concepts/${slug}`;
   await flushMicrotasks();
   return dom.window.document.querySelector("[data-support-rail]") as HTMLElement;

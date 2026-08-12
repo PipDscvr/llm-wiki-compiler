@@ -16,6 +16,7 @@ import type { ClaimCitation } from "../utils/types.js";
 import type { PageDirectory } from "../export/types.js";
 import type { PageFreshness } from "../freshness/types.js";
 import type { ProfileSummaryBlock } from "../profile/block.js";
+import type { PipelineDefinitions } from "./pipeline.js";
 import type { EntityId } from "../profile/types.js";
 import type { StateStatus } from "../utils/state.js";
 
@@ -27,15 +28,41 @@ import type { StateStatus } from "../utils/state.js";
 export type PageId = `${PageDirectory}/${string}`;
 
 /**
- * The identifier space of a graph node. A wikilink/ghost node is keyed by a
- * {@link PageId}; a typed entity node (CLP 4b) is keyed by its branded
- * {@link EntityId} (`<entityType>/<slug>`). Both are string subtypes, so a
- * `PageId`-keyed set/map (e.g. the context expander's `primaryIds`) still
- * accepts and compares them. The union is widened ONLY for the new typed
- * surfaces — wikilink nodes/edges keep their concrete `PageId` everywhere a
- * default project serializes them, so the default graph is byte-identical.
+ * The directory namespace a viewer page is ADDRESSED under — the `<dir>` of
+ * `/api/page/<dir>/<slug>` and of the page's own id.
+ *
+ * For a default page it is the literal {@link PageDirectory}. For a typed
+ * entity page it is the profile's declared ENTITY TYPE id (`articles`), NOT the
+ * type's on-disk `directory` (`wiki/articles`): the on-disk value is a
+ * multi-segment project-relative path and can never be one route segment, while
+ * an entity type id is slug-safe by `src/profile/identity.ts` and is guaranteed
+ * disjoint from `concepts`/`queries` by `rejectReservedEntityTypeNames` in
+ * `src/profile/validate.ts`. So `id === \`${pageDirectory}/${slug}\`` holds for
+ * both kinds of page, and a typed page's id IS its {@link EntityId}.
+ *
+ * This is deliberately a VIEWER-owned type rather than a widening of the shared
+ * `PageDirectory`: that union is part of the OKF export/import interchange
+ * contract and its frozen parity goldens, and typed entity pages have no
+ * business changing export/import semantics.
  */
-export type GraphNodeId = PageId | EntityId;
+export type ViewerPageDirectory = string;
+
+/**
+ * The identifier of any page the viewer can address: a default page's
+ * {@link PageId} (`concepts/<slug>`), or a typed entity page's branded
+ * {@link EntityId} (`<entityType>/<slug>`). Both are string subtypes, so a
+ * `PageId`-keyed set/map still accepts and compares them.
+ */
+export type ViewerPageId = PageId | EntityId;
+
+/**
+ * The identifier space of a graph node — the same union as
+ * {@link ViewerPageId}, because every node is either a page or a ghost keyed in
+ * the page id space. Aliased rather than re-spelled so the two cannot drift.
+ * Wikilink nodes/edges keep their concrete `PageId` everywhere a default project
+ * serializes them, so the default graph is byte-identical.
+ */
+export type GraphNodeId = ViewerPageId;
 
 /**
  * A single diagnostic surfaced on a page. Codes are stable so the client
@@ -51,17 +78,34 @@ export interface ViewerWarning {
 }
 
 /**
+ * `ViewerWarning.code` for a citation whose source file is not on disk.
+ * Exported so the producer (`snapshot.ts`, which appends the warning) and
+ * the consumer (`server.ts`, which counts warnings by this code for
+ * `unresolvedCitationCount`) share one literal instead of two that could
+ * silently drift.
+ */
+export const UNRESOLVED_CITATION_CODE = "unresolved_citation";
+
+/**
  * In-memory representation of one wiki page as the viewer sees it.
  * Includes everything the server needs to render `/api/page/...` without
  * touching the disk again per request.
  */
 export interface ViewerPage {
-  /** Namespaced canonical ID (`concepts/<slug>` or `queries/<slug>`). */
-  id: PageId;
+  /** Namespaced canonical ID — `concepts/<slug>`, `queries/<slug>`, or `<entityType>/<slug>`. */
+  id: ViewerPageId;
   /** Filename stem; the canonical filesystem-truth identifier. */
   slug: string;
-  /** Source directory the page lives in. */
-  pageDirectory: PageDirectory;
+  /** The namespace this page is addressed under. See {@link ViewerPageDirectory}. */
+  pageDirectory: ViewerPageDirectory;
+  /**
+   * The profile entity type this page belongs to. ABSENT on default
+   * `concepts`/`queries` pages, so a default project's envelope, page payload,
+   * and search rows are byte-identical; present ONLY on a typed entity page,
+   * where it always equals {@link pageDirectory} and is the discriminator every
+   * surface branches on to tell the two kinds of page apart.
+   */
+  entityType?: string;
   /** Display title. Falls back to slug when frontmatter has no title. */
   title: string;
   /** Absolute path on disk, used for editor links in the support rail. */
@@ -84,6 +128,23 @@ export interface ViewerPage {
   warnings: ViewerWarning[];
   /** Computed source-freshness as of snapshot build (server start). Never live-updated. */
   freshness: PageFreshness;
+}
+
+/**
+ * A viewer page collected from the DEFAULT `wiki/concepts` + `wiki/queries`
+ * directories, narrowing {@link ViewerPage}'s widened id/directory back to the
+ * concrete `PageId`/`PageDirectory` and pinning `entityType` absent.
+ *
+ * The wikilink graph, the concept/query counts, and bare-slug link resolution
+ * are all defined over exactly these pages — a typed entity page is never a
+ * wikilink target and never enters the wikilink graph (it reaches the graph as
+ * a typed node via `GraphBuildOptions` instead). Keeping the narrow type is what
+ * lets those surfaces stay `PageId`-keyed without a cast.
+ */
+export interface DefaultViewerPage extends ViewerPage {
+  id: PageId;
+  pageDirectory: PageDirectory;
+  entityType?: undefined;
 }
 
 /**
@@ -128,11 +189,13 @@ export interface ViewerIndex {
  * Lightweight summary row for the dashboard's "recent pages" panel.
  */
 export interface ViewerRecentPage {
-  id: PageId;
-  pageDirectory: PageDirectory;
+  id: ViewerPageId;
+  pageDirectory: ViewerPageDirectory;
   slug: string;
   title: string;
   updatedAt: string;
+  /** Mirrors {@link ViewerPage.entityType}: absent unless the row is a typed page. */
+  entityType?: string;
 }
 
 /**
@@ -217,8 +280,22 @@ export interface ViewerSnapshot {
   index: ViewerIndex;
   /** Top-N most recently updated pages for the dashboard. */
   recentPages: ViewerRecentPage[];
-  /** All readable pages, in collector order (concepts then queries). */
+  /**
+   * All readable pages: the default `concepts`-then-`queries` collector order
+   * first, then the active profile's typed entity pages in collector order
+   * (declared entity type, then directory order). Typed pages are absent for a
+   * default project, so the default list is unchanged.
+   */
   pages: ViewerPage[];
+  /**
+   * The active profile's DECLARED entity type ids — the allowlist that decides
+   * which directory segments `/api/page/<dir>/<slug>` will address, alongside
+   * the two default literals. Declared-but-empty types are included, so
+   * addressing one yields an honest `page_not_found` rather than a shape error.
+   * ABSENT for the built-in default profile, so no typed directory is
+   * addressable there and the default snapshot is byte-identical.
+   */
+  entityTypes?: readonly string[];
   /**
    * Filenames present under `sources/` at startup, captured as a flat
    * list. The Slice 4 citation renderer uses these to set the `data-
@@ -246,4 +323,13 @@ export interface ViewerSnapshot {
    * literal wiki/concepts + wiki/queries dirs in both cases.
    */
   profile?: ProfileSummaryBlock;
+  /**
+   * What the active profile DECLARES about its lifecycles and relation types —
+   * the half of the `#/pipeline` panel no count collector carries. ABSENT for
+   * the built-in default profile, which declares neither, so the default
+   * snapshot is byte-identical. Joined with {@link profile}'s counts on the way
+   * out (see `buildPipelineEnvelope`) rather than here, so the snapshot holds
+   * one copy of each fact instead of two views of the same numbers.
+   */
+  pipeline?: PipelineDefinitions;
 }

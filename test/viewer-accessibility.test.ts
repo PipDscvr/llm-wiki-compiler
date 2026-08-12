@@ -4,7 +4,10 @@
  * Mounts the real shell template + `viewer.js` + `viewer-search.js`
  * into JSDOM via the shared `mountViewerDom` fixture. Asserts the
  * landmark structure, the focus-visible outline rule in the stylesheet,
- * the wired search input, and the `/#/health` dashboard rendering.
+ * the wired search input (including its header ⌘K / Ctrl+K shortcut),
+ * the `/#/health` dashboard rendering, and that colour is never the only
+ * signal — the theme toggle's `aria-pressed` state and every freshness
+ * dot's `aria-label`.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +21,10 @@ import {
   type FetchResponder,
 } from "./fixtures/viewer-jsdom.js";
 
-const STYLESHEET_PATH = path.resolve("src/viewer/assets/viewer.css");
+// The universal `:focus-visible` rule lives in viewer-tokens.css (the
+// global reset/token sheet), not a per-surface stylesheet — viewer.css,
+// which used to own it, has since been deleted.
+const STYLESHEET_PATH = path.resolve("src/viewer/assets/viewer-tokens.css");
 
 interface SearchResultRow {
   id: string;
@@ -58,13 +64,54 @@ function makeResponder(
   };
 }
 
+/**
+ * One page that is both a "recently compiled" entry and stale, so
+ * mounting the default (home) route paints at least one real
+ * `.list-dot` — the dashboard's recent-pages panel shares that dot
+ * with the list routes (see viewer-dashboard.css). Without a page
+ * here, the freshness-dot accessibility test below would iterate an
+ * empty NodeList and pass vacuously.
+ */
+function defaultViewerResponder(): FetchResponder {
+  const page = {
+    id: "concepts/alpha",
+    pageDirectory: "concepts" as const,
+    slug: "alpha",
+    title: "Alpha",
+    updatedAt: "2026-05-01T00:00:00.000Z",
+    citationCount: 1,
+    unresolvedCitationCount: 0,
+    freshness: { freshnessStatus: "stale", contradicted: false, archived: false },
+  };
+  return (url) => {
+    if (url.endsWith("/api/pages")) {
+      return jsonResponse({
+        project: { title: "demo", rootName: "demo" },
+        counts: { concepts: 1, queries: 0, sourceFiles: 0, pendingReviews: 0 },
+        index: { available: false, href: "/#/index" },
+        recentPages: [page],
+        pages: [page],
+        updatedAt: "2026-05-12T00:00:00.000Z",
+      });
+    }
+    if (url.endsWith("/api/health")) return jsonResponse({ lint: null });
+    return null;
+  };
+}
+
+/** Mount the shell at its default (home) route and return the document. */
+async function mountDefaultViewer(): Promise<Document> {
+  const { dom } = await mountViewerDom(defaultViewerResponder());
+  return dom.window.document;
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("shell template — accessibility landmarks + skip link", () => {
   it("ships the four named landmarks plus a skip link to the main pane", async () => {
-    const { dom } = await mountViewerDom([], makeResponder([]));
+    const { dom } = await mountViewerDom(makeResponder([]));
     const doc = dom.window.document;
     expect(doc.querySelector("header.app-header")).not.toBeNull();
     const logo = doc.querySelector(".app-logo") as HTMLImageElement | null;
@@ -129,7 +176,6 @@ function makeDeferredResponder(searchByQuery: Record<string, Response | "defer">
 describe("search UI — input wires up and renders results", () => {
   it("debounces input and renders search results from /api/search", async () => {
     const { dom } = await mountViewerDom(
-      [{ id: "concepts/alpha", pageDirectory: "concepts", slug: "alpha", title: "Alpha" }],
       makeResponder([
         {
           id: "concepts/alpha",
@@ -153,7 +199,6 @@ describe("search UI — input wires up and renders results", () => {
 
   it("cancels a pending debounced fetch when the input is cleared", async () => {
     const { dom, fetchMock } = await mountViewerDom(
-      [],
       makeResponder([
         { id: "concepts/x", pageDirectory: "concepts", title: "X", snippet: "x", matchedIn: "title" },
       ]),
@@ -172,7 +217,7 @@ describe("search UI — input wires up and renders results", () => {
 
   it("discards a stale older response when a newer query supersedes it", async () => {
     const { responder, resolve } = makeDeferredResponder({ alpha: "defer", beta: "defer" });
-    const { dom } = await mountViewerDom([], responder);
+    const { dom } = await mountViewerDom(responder);
     // Both fetches need to be in flight before we resolve them out of
     // order — wait past the debounce window after each typed query.
     await typeIntoSearch(dom, "alpha", 250);
@@ -222,10 +267,7 @@ describe("search UI — input wires up and renders results", () => {
       }
       return null;
     };
-    const { dom } = await mountViewerDom(
-      [{ id: "concepts/alpha", pageDirectory: "concepts", slug: "alpha", title: "Alpha" }],
-      responder,
-    );
+    const { dom } = await mountViewerDom(responder);
     await typeIntoSearch(dom, "alpha", 250);
     const link = dom.window.document.querySelector(
       "a[data-search-result]",
@@ -240,12 +282,39 @@ describe("search UI — input wires up and renders results", () => {
     const results = dom.window.document.querySelector("[data-search-results]") as HTMLElement;
     expect(results.hidden).toBe(true);
   });
+
+  it("focuses and selects the search input on Ctrl+K, without leaking the shortcut to other fields", async () => {
+    const { dom } = await mountViewerDom(makeResponder([]));
+    const doc = dom.window.document;
+    const input = doc.querySelector("[data-search-input]") as HTMLInputElement;
+    input.value = "stale query";
+    // A keydown on an unrelated element must not trigger the shortcut —
+    // the chip's binding is global, but typing "k" into other fields is not.
+    const elsewhere = doc.createElement("input");
+    doc.body.appendChild(elsewhere);
+    elsewhere.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
+    );
+    expect(doc.activeElement).not.toBe(input);
+    const event = new dom.window.KeyboardEvent("keydown", {
+      key: "k",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    doc.dispatchEvent(event);
+    expect(doc.activeElement).toBe(input);
+    expect(event.defaultPrevented).toBe(true);
+    // select(), not just focus() — the whole point is that typing
+    // immediately replaces the previous query rather than appending to it.
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(input.value.length);
+  });
 });
 
 describe("/#/health route — dashboard renders from /api/health", () => {
   it("renders concepts/queries/sources/pendingReviews from the payload", async () => {
     const { dom } = await mountViewerDom(
-      [],
       makeResponder([], {
         concepts: 3,
         queries: 2,
@@ -262,16 +331,18 @@ describe("/#/health route — dashboard renders from /api/health", () => {
     expect(main.textContent).toContain("Concepts");
     expect(main.textContent).toContain("3");
     expect(main.textContent).toContain("Saved queries");
-    expect(main.textContent).toContain("Compiled sources");
-    expect(main.textContent).toContain("Source files");
-    expect(main.textContent).toContain("Pending reviews");
+    // The five stat cards are now one CONTENTS strip whose Sources column
+    // carries sourceFiles with the compiled count as its suffix (see
+    // test/viewer-health-dashboard.test.ts for the strip's own assertions).
+    expect(main.textContent).toContain("Sources");
+    expect(main.textContent).toContain("1 compiled");
+    expect(main.textContent).toContain("Awaiting review");
     expect(main.textContent).toContain("4");
     expect(main.textContent).toContain("No cached lint summary");
   });
 
   it("renders cached lint summary when present", async () => {
     const { dom } = await mountViewerDom(
-      [],
       makeResponder([], {
         concepts: 0, queries: 0, sources: 0, sourceFiles: 0, pendingReviews: 0,
         lint: { warnings: 2, errors: 1, at: "2026-05-12T00:00:00.000Z" },
@@ -280,21 +351,41 @@ describe("/#/health route — dashboard renders from /api/health", () => {
     dom.window.location.hash = "#/health";
     await flushMicrotasks();
     const main = dom.window.document.querySelector("[data-main-pane]") as HTMLElement;
-    expect(main.textContent).toContain("Warnings");
-    expect(main.textContent).toContain("2");
-    expect(main.textContent).toContain("Errors");
-    expect(main.textContent).toContain("1");
-    expect(main.textContent).toContain("2026-05-12T00:00:00.000Z");
+    // The lint cache now drives the Lint panel's chip and figures rather
+    // than a definition list, and the run time moved to the page head's
+    // caption in the viewer's own UTC format.
+    expect(main.textContent).toContain("3 PROBLEMS");
+    expect(main.textContent).toContain("warnings");
+    expect(main.textContent).toContain("error");
+    expect(main.textContent).toContain("lint last run 2026-05-12 00:00Z");
   });
 });
 
 describe("sidebar — Health entry routes to #/health", () => {
   it("renders a Health link with href=#/health in the sidebar", async () => {
-    const { dom } = await mountViewerDom([], makeResponder([]));
+    const { dom } = await mountViewerDom(makeResponder([]));
     const link = dom.window.document.querySelector(
       "[data-route='health']",
     ) as HTMLAnchorElement | null;
     expect(link).not.toBeNull();
     expect(link!.getAttribute("href")).toBe("#/health");
+  });
+});
+
+describe("header + freshness dots — colour is never the only signal", () => {
+  it("gives the theme toggle an accessible name and pressed state", async () => {
+    const doc = await mountDefaultViewer();
+    const button = doc.querySelector("[data-theme-toggle]");
+    expect(button?.getAttribute("aria-label")).toBeTruthy();
+    expect(button?.getAttribute("aria-pressed")).toMatch(/true|false/);
+  });
+
+  it("labels freshness dots so colour is never the only signal", async () => {
+    const doc = await mountDefaultViewer();
+    const dots = doc.querySelectorAll(".list-dot");
+    expect(dots.length).toBeGreaterThan(0);
+    for (const dot of dots) {
+      expect(dot.getAttribute("aria-label")).toBeTruthy();
+    }
   });
 });

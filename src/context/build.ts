@@ -21,7 +21,7 @@
  */
 
 import { buildViewerSnapshot } from "../viewer/snapshot.js";
-import { augmentSnapshotWithTypedPages } from "./typed-pages.js";
+import { narrowSnapshotToContextPool } from "./typed-pages.js";
 import { applyContentTiers } from "./content-tiers.js";
 import { loadNonDefaultProfile, resolveNonDefaultProfile, type PreloadedProfile } from "../profile/block.js";
 import {
@@ -99,10 +99,11 @@ export async function buildContextPack(options: BuildContextPackOptions): Promis
   // the built-in default so both steps stay a no-op and the default pack is
   // byte-identical.
   const preloadedProfile: PreloadedProfile = (await loadNonDefaultProfile(options.root)) ?? null;
-  // FIX F3: for a NON-DEFAULT profile, splice typed entity pages into the context
-  // page POOL so they are lexically rankable + graph-reachable. A DEFAULT project
-  // gets the snapshot back unchanged, so the default context pack is byte-identical.
-  const snapshot = await augmentSnapshotWithTypedPages(options.root, baseSnapshot, preloadedProfile);
+  // The snapshot already carries the profile's typed entity pages, so they are
+  // lexically rankable + graph-reachable here without further work; this step
+  // applies the pool's own `retrieval.includeInContext` policy on top. A DEFAULT
+  // project gets the snapshot back unchanged (byte-identical context pack).
+  const snapshot = await narrowSnapshotToContextPool(options.root, baseSnapshot, preloadedProfile);
   const state = await collectProjectState(options.root);
   const recommendation = recommendNextAction(state);
   // Semantic retrieval is opportunistic — failures surface as stable
@@ -362,9 +363,14 @@ function annotateGraphNeighbors(
   });
 }
 
-/** Collapse the ranked primary list into a Set keyed by PageId for fast lookups. */
-function collectPrimaryIds(primary: ContextPack["primary"]): Set<PageId> {
-  const ids = new Set<PageId>();
+/**
+ * Collapse the ranked primary list into a Set keyed by node id for fast lookups.
+ * Keyed by {@link GraphNodeId} rather than `PageId` because a typed entity page
+ * ranks as a primary under its `EntityId`, which is exactly the key the graph
+ * expander matches its relation-edge endpoints against.
+ */
+function collectPrimaryIds(primary: ContextPack["primary"]): Set<GraphNodeId> {
+  const ids = new Set<GraphNodeId>();
   for (const entry of primary) ids.add(entry.id);
   return ids;
 }

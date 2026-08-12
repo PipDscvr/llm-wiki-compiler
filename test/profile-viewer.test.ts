@@ -6,8 +6,13 @@
  * Covers: (a) a DEFAULT project's snapshot has NO `profile` key and its legacy
  * `counts.concepts`/`counts.queries` stay scoped to wiki/concepts + wiki/queries;
  * (b) a NON-default project surfaces `profile` with profileId, digest, per-type
- * entity counts, and collector problems — while `counts` stays unchanged and no
- * entity pages leak into the rendered `pages` list.
+ * entity counts, and collector problems.
+ *
+ * `counts.concepts`/`counts.queries` stay scoped to the two legacy directories
+ * even once typed entity pages reach `snapshot.pages` — the count block is about
+ * the compiled wiki corpus, and a typed page is neither a concept nor a query.
+ * The page LIST is a different question and does carry them; see
+ * `test/viewer-typed-pages.test.ts`.
  */
 
 import { describe, it, beforeEach, afterEach, expect } from "vitest";
@@ -50,11 +55,17 @@ describe("viewer snapshot — non-default profile", () => {
     expect(snapshot.profile?.entityCounts).toEqual({ notes: 1 });
   });
 
-  it("leaves legacy counts unchanged and renders no entity pages", async () => {
+  it("leaves legacy counts scoped to concepts/queries while listing the entity page", async () => {
     const snapshot = await buildViewerSnapshot(root);
     expect(snapshot.counts.concepts).toBe(0);
     expect(snapshot.counts.queries).toBe(0);
-    expect(snapshot.pages).toHaveLength(0);
+    expect(snapshot.pages.map((p) => p.id)).toEqual(["notes/first-note"]);
+    expect(snapshot.pages[0].entityType).toBe("notes");
+  });
+
+  it("exposes the declared entity types as the page route's allowlist", async () => {
+    const snapshot = await buildViewerSnapshot(root);
+    expect(snapshot.entityTypes).toEqual(["notes"]);
   });
 
   it("surfaces collector problems for a contract violation", async () => {

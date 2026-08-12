@@ -7,8 +7,10 @@
  *   - multi-token AND: every token must appear in either title or body
  *   - title matches rank before body matches
  *   - 200-char query cap, 50-result cap
- *   - concept and query pages only — `wiki/index.md` is excluded by
- *     construction (it never lives in `snapshot.pages`)
+ *   - every page in the snapshot: default concept/query pages AND a
+ *     non-default profile's typed entity pages, which reach the list
+ *     already filtered to the profile-VALID ones. `wiki/index.md` is
+ *     excluded by construction (it never lives in `snapshot.pages`)
  *   - no fuzzy matching, stemming, regex, or client-side search
  *
  * The search reads from the snapshot exclusively — no per-request disk
@@ -16,8 +18,7 @@
  * lifecycle as the rest of the viewer's API.
  */
 
-import type { PageId, ViewerPage, ViewerSnapshot } from "./types.js";
-import type { PageDirectory } from "../export/types.js";
+import type { ViewerPage, ViewerPageDirectory, ViewerPageId, ViewerSnapshot } from "./types.js";
 
 const MAX_QUERY_LENGTH = 200;
 const MAX_RESULTS = 50;
@@ -29,11 +30,13 @@ type SearchMatch = "title" | "body";
 
 /** One row in the `/api/search` response. */
 interface SearchResult {
-  id: PageId;
-  pageDirectory: PageDirectory;
+  id: ViewerPageId;
+  pageDirectory: ViewerPageDirectory;
   title: string;
   snippet: string;
   matchedIn: SearchMatch;
+  /** Entity type for a typed page; absent on default pages, so default rows are unchanged. */
+  entityType?: string;
 }
 
 /**
@@ -103,6 +106,7 @@ function rowFromPage(page: ViewerPage, snippet: string, matchedIn: SearchMatch):
     title: page.title,
     snippet,
     matchedIn,
+    ...(page.entityType !== undefined ? { entityType: page.entityType } : {}),
   };
 }
 

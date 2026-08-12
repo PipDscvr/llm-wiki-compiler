@@ -1,14 +1,17 @@
 /**
- * llmwiki viewer — sidebar search UI.
+ * llmwiki viewer — header search UI.
  *
- * Wires the search input in the shell template to `/api/search?q=...`.
- * Input is debounced before each fetch (spec §Slice 5 acceptance:
- * "client input is debounced before calling `/api/search`"). The
- * sidebar's results <ul> doubles as a focus-cyclable result list:
- * ArrowDown from the input jumps to the first result; ArrowUp/Down
- * within results cycles; Escape returns focus to the input; Enter
- * activates the focused anchor (the browser handles `<a href="#/...">`
- * activation natively, so we don't intercept it).
+ * Wires the search input in the shell template (now in the header's
+ * `.app-actions`, beside the theme toggle — moved out of the sidebar so it
+ * reads as a global action rather than page-tree navigation) to
+ * `/api/search?q=...`. Input is debounced before each fetch (spec §Slice 5
+ * acceptance: "client input is debounced before calling `/api/search`").
+ * The results <ul> doubles as a focus-cyclable result list: ArrowDown from
+ * the input jumps to the first result; ArrowUp/Down within results cycles;
+ * Escape returns focus to the input; Enter activates the focused anchor
+ * (the browser handles `<a href="#/...">` activation natively, so we
+ * don't intercept it). A global ⌘K / Ctrl+K shortcut focuses the input
+ * from anywhere — see `wireSearchShortcut`.
  *
  * Imported by `viewer.js` and invoked from `main()` after the sidebar
  * first paint. Keeps the entry file small (CLAUDE.md 400-LOC rule) and
@@ -36,7 +39,6 @@ export function wireSearch({ fetchJson }) {
   const input = document.querySelector(SEARCH_INPUT_SELECTOR);
   const results = document.querySelector(SEARCH_RESULTS_SELECTOR);
   if (!input || !results) return;
-  const sidebar = input.closest(".sidebar");
   let currentGeneration = 0;
   let pendingTimer = 0;
   const cancelPending = () => {
@@ -50,7 +52,7 @@ export function wireSearch({ fetchJson }) {
     cancelPending();
     const value = input.value.trim();
     if (value.length === 0) {
-      hideSearchResults(results, sidebar);
+      hideSearchResults(results);
       return;
     }
     const generation = currentGeneration;
@@ -65,10 +67,51 @@ export function wireSearch({ fetchJson }) {
     if (event.target instanceof HTMLElement && event.target.closest("a")) {
       currentGeneration += 1;
       cancelPending();
-      hideSearchResults(results, sidebar);
+      hideSearchResults(results);
       input.value = "";
     }
   });
+  wireSearchShortcut(input);
+}
+
+/**
+ * Global ⌘K / Ctrl+K shortcut: focuses the search input and selects its
+ * contents so typing immediately replaces whatever query was there. The
+ * header chip beside the input advertises this shortcut, so it must be
+ * real (see file header). Suppressed while focus already sits in a
+ * DIFFERENT text-entry surface — another input, a textarea, or a
+ * contenteditable — so the shortcut can't steal a keystroke from
+ * unrelated typing; re-triggering it while the search input itself is
+ * already focused is harmless (it just re-selects) and stays allowed.
+ */
+function wireSearchShortcut(input) {
+  document.addEventListener("keydown", (event) => {
+    if (!isSearchShortcutCombo(event)) return;
+    if (isOtherTypingSurface(event.target, input)) return;
+    event.preventDefault();
+    input.focus();
+    input.select();
+  });
+}
+
+/** True when the event's key + modifiers form the ⌘K / Ctrl+K combo. */
+function isSearchShortcutCombo(event) {
+  if (event.key.toLowerCase() !== "k") return false;
+  return event.metaKey || event.ctrlKey;
+}
+
+/** Tag names that make an element a text-entry surface on their own. */
+const TYPING_TAGS = new Set(["INPUT", "TEXTAREA"]);
+
+/** True when `target` is a real element the user can type into (tag or contenteditable). */
+function isTypingSurface(target) {
+  if (!(target instanceof HTMLElement)) return false;
+  return TYPING_TAGS.has(target.tagName) || target.isContentEditable;
+}
+
+/** True when `target` is a different typing surface than `input` — the shortcut must not hijack it. */
+function isOtherTypingSurface(target, input) {
+  return target !== input && isTypingSurface(target);
 }
 
 /**
@@ -111,7 +154,6 @@ function handleSearchFailure(err, results, stillCurrent) {
 function renderSearchResults(rows, results) {
   results.innerHTML = "";
   results.hidden = false;
-  results.closest(".sidebar")?.classList.add("search-active");
   if (rows.length === 0) {
     const li = document.createElement("li");
     li.className = "empty";
@@ -120,6 +162,28 @@ function renderSearchResults(rows, results) {
     return;
   }
   for (const row of rows) results.appendChild(buildSearchResultRow(row));
+}
+
+/**
+ * The kind tag for one result.
+ *
+ * `entityType` is present only on a profile project's typed entity pages, and
+ * it is the type the profile declares — so a newsroom article reads "articles"
+ * rather than being flattened into the default profile's vocabulary. Without
+ * it this was a two-way test (`queries` → query, EVERYTHING ELSE → concept),
+ * which badged every typed page a concept even though the payload had carried
+ * the right answer since the typed pages landed.
+ *
+ * The literal type id is used rather than the nav's title-cased label,
+ * matching the design's rule that provenance surfaces keep the profile's own
+ * identifier while only the nav title-cases it.
+ *
+ * @param {{entityType?: string, pageDirectory?: string}} row - A search result.
+ * @returns {string}
+ */
+function resultKindLabel(row) {
+  if (typeof row.entityType === "string" && row.entityType.length > 0) return row.entityType;
+  return row.pageDirectory === "queries" ? "query" : "concept";
 }
 
 /** Build one search-result <li> with anchor + kind tag + snippet. */
@@ -132,7 +196,7 @@ function buildSearchResultRow(row) {
   link.dataset.searchResult = "true";
   const kind = document.createElement("span");
   kind.className = "result-kind";
-  kind.textContent = row.pageDirectory === "queries" ? "query" : "concept";
+  kind.textContent = resultKindLabel(row);
   const title = document.createElement("span");
   title.className = "result-title";
   title.textContent = row.title || row.id;
@@ -159,11 +223,10 @@ function deriveSlug(id) {
   return slash >= 0 ? id.slice(slash + 1) : id;
 }
 
-/** Hide the results panel and restore the standing sidebar contents. */
-function hideSearchResults(results, sidebar) {
+/** Hide the results panel. */
+function hideSearchResults(results) {
   results.innerHTML = "";
   results.hidden = true;
-  sidebar?.classList.remove("search-active");
 }
 
 /** ArrowDown from the search input moves focus to the first result anchor. */

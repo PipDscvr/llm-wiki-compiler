@@ -12,22 +12,26 @@
  * The single exception is `/api/health`, which calls `readLintCache`
  * per request — that's a documented cheap atomic-JSON contract, not a
  * filesystem rescan of the wiki.
+ *
+ * The two page endpoints live in `api-pages.ts` and the shared response
+ * writers in `respond.ts`, so this file stays about transport: bind,
+ * headers, origin policy, and route dispatch.
  */
 
 import http from "http";
 import type { IncomingMessage, ServerResponse } from "http";
 import { AddressInfo } from "net";
 import { buildHealthResponse } from "./health.js";
-import { resolvePageKind } from "./graph.js";
-import { loadShellTemplate, substitutePageIndex } from "./shell.js";
+import { handleApiPage, handleApiPages } from "./api-pages.js";
+import { loadShellTemplate } from "./shell.js";
 import { ASSETS_DIR, handleAsset } from "./static-assets.js";
-import { renderPageHtml } from "./render.js";
 import { searchPages } from "./search.js";
 import { workflowStatus } from "../workflows/status.js";
 import { buildWorkflowRunsEnvelope } from "./workflow-runs.js";
-import type { PageDirectory } from "../export/types.js";
-import type { ViewerSnapshot, ViewerPage } from "./types.js";
-import { assertSafeSlug, PathSafetyError } from "./path-safety.js";
+import { listCandidatePage } from "../compiler/candidates.js";
+import { buildReviewsEnvelope, REVIEW_LIST_LIMIT } from "./reviews.js";
+import { tryRenderBody, writeJson, writeJsonError, writeRenderFailed } from "./respond.js";
+import type { ViewerSnapshot } from "./types.js";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1"]);
 
@@ -146,7 +150,7 @@ async function routeRegistered(
   snapshot: ViewerSnapshot,
   isLoopback: boolean,
 ): Promise<void> {
-  if (parsedUrl.pathname === "/") return handleShell(res, snapshot);
+  if (parsedUrl.pathname === "/") return handleShell(res);
   if (parsedUrl.pathname.startsWith("/assets/")) return handleAsset(res, parsedUrl.pathname);
   const snapshotOnly = SNAPSHOT_ONLY_HANDLERS.get(parsedUrl.pathname);
   if (snapshotOnly) return snapshotOnly(res, snapshot);
@@ -165,8 +169,8 @@ async function routeRegistered(
  * Exact-path API routes whose handler needs only `(res, snapshot)` — collapsed
  * into one lookup table so adding such a route is a single map entry rather than
  * another `if` in `routeRegistered` (which keeps that dispatcher's branching, and
- * thus its complexity, flat). `/api/workflow-runs` reads its runs from
- * `snapshot.root` at request time. Routes with extra params (`/api/index`,
+ * thus its complexity, flat). `/api/workflow-runs` and `/api/reviews` both read
+ * from `snapshot.root` at request time. Routes with extra params (`/api/index`,
  * `/api/search`) and the prefix routes stay as explicit branches.
  */
 const SNAPSHOT_ONLY_HANDLERS: ReadonlyMap<
@@ -177,6 +181,7 @@ const SNAPSHOT_ONLY_HANDLERS: ReadonlyMap<
   ["/api/health", handleApiHealth],
   ["/api/graph", handleApiGraph],
   ["/api/workflow-runs", (res, snapshot) => handleApiWorkflowRuns(res, snapshot.root)],
+  ["/api/reviews", (res, snapshot) => handleApiReviews(res, snapshot.root)],
 ]);
 
 /**
@@ -191,6 +196,7 @@ const REGISTERED_EXACT_PATHS: ReadonlySet<string> = new Set([
   "/api/search",
   "/api/graph",
   "/api/workflow-runs",
+  "/api/reviews",
 ]);
 
 /** Prefix-based registered routes (assets and per-page API). */
@@ -303,56 +309,22 @@ function normalizeHostnameForOrigin(host: string): string {
 }
 
 /**
- * Serve the templated viewer shell. Reads `index.html` lazily through
- * `loadShellTemplate` (process-cached), substitutes the page-index JSON
- * blob, and returns the result with `Content-Type: text/html`. A missing
- * template surfaces as a 500 `shell_missing` so the rest of the routes
- * stay usable when the asset bundle is incomplete.
+ * Serve the viewer shell. Reads `index.html` lazily through `loadShellTemplate`
+ * (process-cached) and returns it verbatim with `Content-Type: text/html` — the
+ * shell carries no per-request data, so the client's own `/api/pages` fetch is
+ * the single source of the page list (see `shell.ts`). A missing template
+ * surfaces as a 500 `shell_missing` so the rest of the routes stay usable when
+ * the asset bundle is incomplete.
  */
-async function handleShell(res: ServerResponse, snapshot: ViewerSnapshot): Promise<void> {
+async function handleShell(res: ServerResponse): Promise<void> {
   const template = await loadShellTemplate(ASSETS_DIR);
   if (template === null) {
     writeJsonError(res, 500, "shell_missing", "Viewer shell template not found on disk.");
     return;
   }
-  const body = substitutePageIndex(template, snapshot.pages);
   res.statusCode = 200;
   res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.end(body);
-}
-
-/** `/api/pages` — full envelope with counts, recent pages, page list, and stateStatus. */
-function handleApiPages(res: ServerResponse, snapshot: ViewerSnapshot): void {
-  writeJson(res, 200, {
-    project: snapshot.project,
-    stateStatus: snapshot.stateStatus,
-    counts: {
-      concepts: snapshot.counts.concepts,
-      queries: snapshot.counts.queries,
-      sourceFiles: snapshot.counts.sourceFiles,
-      pendingReviews: snapshot.counts.pendingReviews,
-    },
-    index: { available: snapshot.index.available, href: snapshot.index.href },
-    recentPages: snapshot.recentPages,
-    pages: snapshot.pages.map(pageListRow),
-    updatedAt: snapshot.generatedAt,
-  });
-}
-
-/** Per-page row shape returned in `/api/pages.pages`. */
-function pageListRow(page: ViewerPage): Record<string, unknown> {
-  return {
-    id: page.id,
-    pageDirectory: page.pageDirectory,
-    slug: page.slug,
-    title: page.title,
-    kind: resolvePageKind(page.frontmatter),
-    summary: typeof page.frontmatter.summary === "string" ? page.frontmatter.summary : "",
-    updatedAt:
-      typeof page.frontmatter.updatedAt === "string" ? (page.frontmatter.updatedAt as string) : "",
-    warnings: page.warnings,
-    freshness: page.freshness,
-  };
+  res.end(template);
 }
 
 /** `/api/index` — rendered `wiki/index.md` with resolved outgoing links. */
@@ -395,6 +367,22 @@ async function handleApiWorkflowRuns(res: ServerResponse, root: string): Promise
   writeJson(res, 200, buildWorkflowRunsEnvelope(await workflowStatus(root)));
 }
 
+/**
+ * `/api/reviews` — read-only projection of the pending review queue.
+ * Candidates live under `.llmwiki/candidates/` (NOT in the frozen snapshot),
+ * so this reads them at REQUEST time. It reads a BOUNDED page rather than the
+ * whole queue: `listCandidatePage` opens only the candidates it serves, so a
+ * corpus held wholesale by `heldReasons: "all"` costs the same per request as a
+ * handful. `total` still reports the real queue depth, which the client renders
+ * as "showing N of M". Deliberately NOT folded into `/api/health`: that payload
+ * is fetched by every route at bootstrap and must stay cheap. Strictly
+ * read-only — no approve/reject, and the projection drops the candidate `body`
+ * and every absolute path (see `buildReviewsEnvelope`).
+ */
+async function handleApiReviews(res: ServerResponse, root: string): Promise<void> {
+  writeJson(res, 200, buildReviewsEnvelope(await listCandidatePage(root, REVIEW_LIST_LIMIT)));
+}
+
 /** `/api/health` — cheap status summary. */
 async function handleApiHealth(res: ServerResponse, snapshot: ViewerSnapshot): Promise<void> {
   const health = await buildHealthResponse(snapshot);
@@ -415,131 +403,4 @@ function handleApiSearch(
 ): void {
   const query = parsedUrl.searchParams.get("q") ?? "";
   writeJson(res, 200, searchPages(snapshot, query));
-}
-
-/**
- * `/api/page/:directory/:slug` — single page payload with server-rendered
- * sanitized HTML. The `render_pending` Slice-2 placeholder is gone; any
- * remaining warnings come from the collector (missing/malformed
- * frontmatter, missing title).
- */
-function handleApiPage(
-  res: ServerResponse,
-  pathname: string,
-  snapshot: ViewerSnapshot,
-  isLoopback: boolean,
-): void {
-  const segments = pathname.replace(/^\/api\/page\//, "").split("/");
-  if (segments.length !== 2) {
-    writeJsonError(res, 400, "bad_request", "Expected /api/page/:directory/:slug");
-    return;
-  }
-  const [directorySegment, encodedSlug] = segments;
-  const decodedSlug = safeDecodeSlug(directorySegment, encodedSlug);
-  if (!decodedSlug) {
-    writeJsonError(res, 400, "bad_request", "Invalid directory or slug.");
-    return;
-  }
-  const page = snapshot.pages.find(
-    (p) => p.pageDirectory === decodedSlug.directory && p.slug === decodedSlug.slug,
-  );
-  if (!page) {
-    writeJsonError(res, 404, "page_not_found", `${decodedSlug.directory}/${decodedSlug.slug}`);
-    return;
-  }
-  const rendered = tryRenderBody(page.body, snapshot, isLoopback);
-  if (rendered === null) {
-    writeRenderFailed(res);
-    return;
-  }
-  writeJson(res, 200, pagePayload(page, snapshot, rendered.html));
-}
-
-/**
- * Decode the directory and slug segments together so a bad input on
- * either fails with a uniform 400. Resolves with `null` for any
- * structural rejection.
- */
-function safeDecodeSlug(
-  directorySegment: string,
-  encodedSlug: string,
-): { directory: PageDirectory; slug: string } | null {
-  if (directorySegment !== "concepts" && directorySegment !== "queries") return null;
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(encodedSlug);
-  } catch {
-    return null;
-  }
-  try {
-    assertSafeSlug(decoded);
-  } catch (err) {
-    if (err instanceof PathSafetyError) return null;
-    throw err;
-  }
-  return { directory: directorySegment, slug: decoded };
-}
-
-/** Build the JSON payload for `/api/page/:dir/:slug`. */
-function pagePayload(
-  page: ViewerPage,
-  snapshot: ViewerSnapshot,
-  renderedHtml: string,
-): Record<string, unknown> {
-  return {
-    id: page.id,
-    title: page.title,
-    pageDirectory: page.pageDirectory,
-    slug: page.slug,
-    html: renderedHtml,
-    citations: page.citations,
-    outgoingLinks: page.outgoingLinks,
-    frontmatter: page.frontmatter,
-    warnings: page.warnings,
-    freshness: page.freshness,
-    updatedAt:
-      typeof page.frontmatter.updatedAt === "string" ? (page.frontmatter.updatedAt as string) : "",
-    createdAt:
-      typeof page.frontmatter.createdAt === "string" ? (page.frontmatter.createdAt as string) : "",
-    generatedAt: snapshot.generatedAt,
-  };
-}
-
-/**
- * Wrap the renderer in a catch and return null on any thrown error.
- * Render or sanitize failures must emit the spec's `render_failed`
- * envelope rather than leak the raw thrown text — see `writeRenderFailed`.
- */
-function tryRenderBody(
-  body: string,
-  snapshot: ViewerSnapshot,
-  isLoopback: boolean,
-): { html: string } | null {
-  try {
-    return renderPageHtml(body, snapshot, { isLoopback });
-  } catch {
-    return null;
-  }
-}
-
-/** Write the spec's exact `render_failed` 500 envelope. */
-function writeRenderFailed(res: ServerResponse): void {
-  writeJsonError(res, 500, "render_failed", "Could not render page.");
-}
-
-/** Write a JSON response body with the given status. */
-function writeJson(res: ServerResponse, status: number, body: unknown): void {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.end(JSON.stringify(body));
-}
-
-/** Standard `{ error: { code, message } }` envelope. */
-function writeJsonError(
-  res: ServerResponse,
-  status: number,
-  code: string,
-  message: string,
-): void {
-  writeJson(res, status, { error: { code, message } });
 }

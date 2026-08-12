@@ -74,8 +74,14 @@ function baseFields(meta: Record<string, unknown>, ctx: OkfMapContext, slug: str
     // Lossy across an OKF round-trip: `createdAt` is reset to now (OKF carries only
     // `timestamp`, mapped to `updatedAt`); `modelId`/`promptVersion` are llmwiki-internal
     // lineage with no OKF representation, so they are not preserved on re-import.
+    // `createdAt: now` is a real local fact — the page IS created in this project,
+    // now — but `updatedAt` is OMITTED rather than defaulted to now when the doc
+    // carries no `timestamp`. Inventing one would write an unearned "last updated"
+    // into frontmatter where nothing distinguishes it from a recorded one, which is
+    // exactly the fabrication the exporter was fixed to stop producing. Mirrors the
+    // typed leg's `if (typeof meta.timestamp === "string")` in `profile-import.ts`.
     createdAt: now,
-    updatedAt: typeof meta.timestamp === "string" ? meta.timestamp : now,
+    ...(typeof meta.timestamp === "string" && meta.timestamp ? { updatedAt: meta.timestamp } : {}),
     provenanceState: "imported",
   };
 }

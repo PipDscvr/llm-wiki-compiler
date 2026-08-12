@@ -5,9 +5,16 @@
  * `decodeURIComponent` → `assertSafeSlug` → `resolveUnderRoot`
  * → `assertViewerSubtree`. Each layer has a dedicated test block so the
  * failure mode reported on regression matches the contract that broke.
+ *
+ * The final block covers the DIRECTORY segment of `/api/page/:directory/:slug`,
+ * which stopped being a two-literal comparison once a profile's declared entity
+ * types became addressable. That segment is confined by an allowlist derived
+ * from the ACTIVE PROFILE — never by a pattern match on the request — so the
+ * cases here prove both halves: an undeclared directory is refused, and no
+ * traversal spelling reaches a page.
  */
 
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import { mkdir, symlink, writeFile, realpath } from "fs/promises";
 import path from "path";
 import os from "os";
@@ -17,8 +24,11 @@ import {
   PathSafetyError,
   resolveUnderRoot,
 } from "../src/viewer/path-safety.js";
+import { buildViewerSnapshot } from "../src/viewer/snapshot.js";
+import { startViewerServer } from "../src/viewer/server.js";
 import { makeTempRoot } from "./fixtures/temp-root.js";
 import { makeOutsideDir } from "./fixtures/outside-dir.js";
+import { buildNewsroomProject } from "./fixtures/newsroom-profile.js";
 
 describe("assertSafeSlug", () => {
   it("accepts plain ASCII slugs", () => {
@@ -138,5 +148,60 @@ describe("assertViewerSubtree", () => {
     // false-rejected just because the caller passed the symlink path.
     const resolvedFile = path.join(realRoot, "wiki", "concepts", "x.md");
     await expect(assertViewerSubtree(linkParent, resolvedFile)).resolves.toBeUndefined();
+  });
+});
+
+const handles: { close(): Promise<void> }[] = [];
+afterEach(async () => {
+  while (handles.length > 0) await handles.pop()?.close();
+});
+
+/** Boot an in-process viewer over a newsroom project (declares `articles`/`desks`/`bylines`). */
+async function startNewsroomViewer(): Promise<string> {
+  const root = await makeTempRoot("path-safety-route");
+  await buildNewsroomProject(root);
+  const handle = await startViewerServer(await buildViewerSnapshot(root), {
+    host: "127.0.0.1",
+    port: 0,
+  });
+  handles.push(handle);
+  return `http://${handle.host}:${handle.port}`;
+}
+
+/** GET `/api/page/<rawDirectory>/metro` without letting fetch re-encode the segment. */
+async function pageStatus(url: string, rawDirectory: string): Promise<number> {
+  return (await fetch(`${url}/api/page/${rawDirectory}/metro`)).status;
+}
+
+describe("/api/page directory segment — profile-derived allowlist", () => {
+  it("serves a DECLARED entity type", async () => {
+    expect(await pageStatus(await startNewsroomViewer(), "desks")).toBe(200);
+  });
+
+  it("rejects a directory that is not a declared entity type", async () => {
+    const url = await startNewsroomViewer();
+    for (const directory of ["wiki", "sources", "papers", "Desks", "desks.md"]) {
+      expect(await pageStatus(url, directory)).toBe(400);
+    }
+  });
+
+  it("rejects the on-disk entity directory, which is not the addressable name", async () => {
+    // The profile declares `directory: "wiki/desks"`; only the entity TYPE id is
+    // addressable, so the multi-segment on-disk path can never be a route key.
+    expect(await pageStatus(await startNewsroomViewer(), "wiki%2Fdesks")).toBe(400);
+  });
+
+  it("rejects traversal spellings in the directory segment", async () => {
+    const url = await startNewsroomViewer();
+    const hostile = ["%2e%2e", "%2E%2E", "..%2Fdesks", "%2e%2e%2f%2e%2e%2fetc", "desks%00", "%2Fetc%2Fpasswd"];
+    for (const directory of hostile) {
+      expect(await pageStatus(url, directory)).not.toBe(200);
+    }
+  });
+
+  it("rejects an absolute path in the directory segment", async () => {
+    const url = await startNewsroomViewer();
+    expect((await fetch(`${url}/api/page//etc/passwd`)).status).not.toBe(200);
+    expect((await fetch(`${url}/api/page/${encodeURIComponent("/etc")}/passwd`)).status).toBe(400);
   });
 });

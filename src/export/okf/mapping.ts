@@ -77,6 +77,11 @@ function buildXLlmwiki(page: ExportPage): XLlmwiki {
 // `okfPath` lives on the x-okf block, not here; re-export deliberately omits x-okf entirely.
 const RECONSTRUCT_STRIP = ["type", "title", "description", "tags", "timestamp", "x-llmwiki", "x-okf"];
 
+/** OKF `type` used when nothing better is known about a document. */
+const DEFAULT_OKF_TYPE = "concept";
+/** OKF `type` for a page living in `wiki/queries/` — a saved `llmwiki query` answer. */
+const QUERY_OKF_TYPE = "query";
+
 /** Overlay the OKF standard fields from the CURRENT page so local edits are always reflected. */
 function applyStandardFields(fm: Record<string, unknown>, page: ExportPage): void {
   if (page.title) fm.title = page.title;
@@ -97,7 +102,7 @@ function applyStandardFields(fm: Record<string, unknown>, page: ExportPage): voi
  */
 function reconstructForeignFrontmatter(page: ExportPage, x: XLlmwiki): OkfFrontmatter {
   const of = page.xOkf!.originalFrontmatter;
-  const rawType = typeof of.type === "string" && of.type.trim() ? of.type : (page.xOkf!.type ?? "concept");
+  const rawType = typeof of.type === "string" && of.type.trim() ? of.type : (page.xOkf!.type ?? DEFAULT_OKF_TYPE);
   const extras: Record<string, unknown> = { ...of };
   for (const k of RECONSTRUCT_STRIP) delete extras[k];
   const fm: Record<string, unknown> = { ...extras, type: rawType, "x-llmwiki": x };
@@ -105,11 +110,32 @@ function reconstructForeignFrontmatter(page: ExportPage, x: XLlmwiki): OkfFrontm
   return fm as unknown as OkfFrontmatter;
 }
 
+/**
+ * OKF `type` for a NATIVE page: its declared `kind`, else its directory.
+ *
+ * A saved query declares a top-level `type: "query"` and no `kind` (see
+ * `src/commands/query-save.ts`), so reading `kind` alone published every saved
+ * answer as a `concept` — an actively wrong document type, not a missing one.
+ * The directory is the right substitute rather than the frontmatter `type`:
+ * everything under `wiki/queries/` is a saved query, it is present on every
+ * page, and it is already the signal import treats as authoritative
+ * (`x-llmwiki.pageDirectory` decides the import target directory).
+ *
+ * OKF `type` is a free-form non-empty string — the profile export emits
+ * arbitrary entity-type ids there — so `"query"` is a legal value, and the
+ * importer preserves an unknown foreign `type` verbatim inside `x-okf`, so a
+ * saved query re-exports as a query on every subsequent round trip.
+ */
+function nativeOkfType(page: ExportPage): string {
+  if (page.kind) return page.kind;
+  return page.pageDirectory === "queries" ? QUERY_OKF_TYPE : DEFAULT_OKF_TYPE;
+}
+
 /** ExportPage -> OKF frontmatter. `type` is always non-empty (defaults to "concept"). */
 export function mapPageToOkfFrontmatter(page: ExportPage): OkfFrontmatter {
   const x = buildXLlmwiki(page);
   if (page.xOkf) return reconstructForeignFrontmatter(page, x);
-  const fm: Record<string, unknown> = { type: page.kind ?? "concept", "x-llmwiki": x };
+  const fm: Record<string, unknown> = { type: nativeOkfType(page), "x-llmwiki": x };
   applyStandardFields(fm, page);
   return fm as unknown as OkfFrontmatter;
 }

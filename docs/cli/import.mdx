@@ -148,4 +148,5 @@ Round-trip behavior is designed to be honest rather than magical:
 
 - Page content, citations, imported provenance, and foreign producer keys are preserved.
 - Current llmwiki standard fields (`title`, `description`, `tags`, `timestamp`) are used on re-export, so local edits are reflected.
+- An imported page's `createdAt` records when the page was created in the receiving project. Its `updatedAt` comes from the bundle's `timestamp`, and is left unset when the document carries none, so an import never invents an update time.
 - Safe original nested paths are restored on re-export. If the original path is unsafe, non-`.md`, URL-unsafe, reserved, or collides with another page, llmwiki falls back to slug paths such as `concepts/<slug>.md` or `queries/<slug>.md` and reports a warning.
