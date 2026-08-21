@@ -15,15 +15,24 @@
  *
  * It also pins the TOCTOU fix for the plan/apply split: `planRemoval` reads
  * state WITHOUT the lock (so `--dry-run` never has to take it), which leaves a
- * window where a concurrent compile can make a doomed slug shared before
- * `applyRemovalLocked` actually runs. The race test below applies a
- * deliberately STALE plan against state mutated after that plan was computed,
- * and asserts the newly-shared page survives — see `src/sources/removal.ts`.
- * It also asserts on the RETURNED `preserved`/`deleted` split (transcript-
- * truthfulness audit fix 2): the race-caught slug must be reported back to the
- * caller distinctly from what was actually deleted, since `rm`'s CLI report
- * (`src/commands/rm.ts`) is built from this return value, never from the
- * pre-lock plan — a page the removal preserved is not a page it deleted.
+ * window where a concurrent compile can move this source's concepts before
+ * `applyRemovalLocked` actually runs. The race tests below apply a deliberately
+ * STALE plan against state mutated after that plan was computed, and assert the
+ * removal REFUSES with nothing touched.
+ *
+ * Both DIRECTIONS are covered, which is the point of maintainer review item 1.
+ * The original re-check filtered the stale plan against a fresh shared set, so
+ * it could only ask "is a doomed slug now shared?" — the additive case. It was
+ * blind to a concept TRANSFERRED to another source, which drops out of this
+ * source's concept list entirely, never enters the shared set, and so kept its
+ * stale delete-verdict: a page a live source now owned exclusively, deleted.
+ * `applyRemovalLocked` recomputes ownership instead of filtering, so both
+ * directions surface as a changed world.
+ *
+ * The resume test pins maintainer review item 2: the source file is deleted
+ * before the fallible page batch, so an interrupted removal leaves the file
+ * gone and its state entry behind, and re-running `rm` must finish the job
+ * rather than reporting "no such source".
  *
  * Two more things are pinned here from a post-implementation audit (H1/H2):
  * a removal must FREEZE the concepts it still shares with a live source (so a
@@ -42,7 +51,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { writeFile, readFile } from "node:fs/promises";
+import { writeFile, readFile, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { planRemoval, applyRemovalLocked, regenerateDerivedLocked } from "../src/sources/removal.js";
@@ -65,6 +74,49 @@ async function raceProject(): Promise<string> {
 }
 
 /**
+ * Read `state.json`, hand it to `mutate`, and write it back — the "a concurrent
+ * compile landed" step every refusal test below needs, differing only in what
+ * it moves. Factored out so those tests read as the one drift they describe.
+ *
+ * @param root - Project root.
+ * @param mutate - Applied in place to the parsed state.
+ */
+async function mutateState(root: string, mutate: (state: WikiState) => void): Promise<void> {
+  const statePath = path.join(root, ".llmwiki/state.json");
+  const state = JSON.parse(await readFile(statePath, "utf-8")) as WikiState;
+  mutate(state);
+  await writeFile(statePath, JSON.stringify(state), "utf-8");
+}
+
+/**
+ * Assert a refused removal touched NOTHING. A refusal that still deleted the
+ * source file, or a page, would be worse than the bug it replaced: the user
+ * gets an error AND a half-removed project. `assertOwnershipUnchanged` runs
+ * before the first mutation precisely so this holds.
+ *
+ * @param root - Project root, built by {@link raceProject}.
+ */
+async function expectNothingRemoved(root: string): Promise<void> {
+  expect(existsSync(path.join(root, "sources/bad.md"))).toBe(true);
+  expect(existsSync(path.join(root, "wiki/concepts/junk.md"))).toBe(true);
+  expect(existsSync(path.join(root, "wiki/concepts/shared.md"))).toBe(true);
+}
+
+/**
+ * Assert the removal's core guarantee: the page `bad.md` owned ALONE is gone,
+ * and the page it co-owned with the still-live `good.md` is not. Several tests
+ * differ only in how they reach that outcome — an ordinary removal, a profile
+ * project, a resumed one — so the shared assertion pair lives here rather than
+ * as near-identical copies (which fallow's clone detector flags).
+ *
+ * @param root - Project root, built by {@link twoSourceRmProject}.
+ */
+function expectExclusiveGoneSharedKept(root: string): void {
+  expect(existsSync(path.join(root, "wiki/concepts/junk.md"))).toBe(false);
+  expect(existsSync(path.join(root, "wiki/concepts/shared.md"))).toBe(true); // still good.md's
+}
+
+/**
  * Apply the standard `bad.md` removal against `root` and return the
  * resulting persisted state. Several assertions below need exactly this
  * "apply, then re-read state.json" sequence; factored out once rather than
@@ -84,9 +136,8 @@ describe("llmwiki rm end to end", () => {
     await applyRemovalLocked(root, plan!);
 
     expect(existsSync(path.join(root, "sources/bad.md"))).toBe(false);
-    expect(existsSync(path.join(root, "wiki/concepts/junk.md"))).toBe(false);
-    expect(existsSync(path.join(root, "wiki/concepts/shared.md"))).toBe(true); // still owned by good.md
     expect(existsSync(path.join(root, "sources/good.md"))).toBe(true);
+    expectExclusiveGoneSharedKept(root);
   });
 
   it("drops the source from state and regenerates the index", async () => {
@@ -119,30 +170,60 @@ describe("llmwiki rm end to end", () => {
     expect(await planRemoval(root, "nope.md")).toBeNull();
   });
 
-  it("re-verifies sharedness under the lock, so a slug a concurrent compile just made shared survives a stale plan", async () => {
+  it("refuses a stale plan when a concurrent compile made a doomed slug shared", async () => {
     const root = await raceProject();
     const plan = await planRemoval(root, "bad.md");
     expect(plan!.deleteSlugs.slice().sort()).toEqual(["junk", "race"]); // both exclusive AT PLAN TIME
 
-    // Simulate a concurrent compile landing in the plan-to-lock window: it
-    // finishes and leaves `race` shared with good.md, exactly like a real
-    // compile that just extracted the same concept from good.md's content
-    // would. `plan` above is now STALE — it still says `race` is exclusive.
-    const state = JSON.parse(await readFile(path.join(root, ".llmwiki/state.json"), "utf-8")) as WikiState;
-    state.sources["good.md"].concepts.push("race");
-    await writeFile(path.join(root, ".llmwiki/state.json"), JSON.stringify(state), "utf-8");
+    // A concurrent compile lands in the plan-to-lock window and leaves `race`
+    // shared with good.md, exactly like one that just extracted the same
+    // concept from good.md's content. `plan` is now STALE.
+    await mutateState(root, (state) => state.sources["good.md"].concepts.push("race"));
 
-    const applied = await applyRemovalLocked(root, plan!); // apply the stale plan as-is
+    await expect(applyRemovalLocked(root, plan!)).rejects.toThrow(/re-run/);
+    await expectNothingRemoved(root);
+  });
 
-    expect(existsSync(path.join(root, "wiki/concepts/race.md"))).toBe(true); // now shared -- preserved
-    expect(existsSync(path.join(root, "wiki/concepts/junk.md"))).toBe(false); // still exclusive -- deleted
-    // Transcript-truthfulness audit fix 2: the return value, not just the
-    // filesystem, must distinguish the race-preserved slug from what was
-    // actually deleted — `printPlan` (src/commands/rm.ts) reports off this,
-    // never off the pre-lock `plan.deleteSlugs`.
-    expect(applied.preserved).toEqual(["race"]);
-    expect(applied.deleted).not.toContain("race");
-    expect(applied.deleted.slice().sort()).toEqual(["junk"]);
+  it("refuses a stale plan when a concurrent compile moved a doomed slug to another source", async () => {
+    const root = await raceProject();
+    const plan = await planRemoval(root, "bad.md");
+
+    // The direction a shared-set FILTER cannot see: `race` leaves bad.md's
+    // concept list entirely, so it is never "newly shared" — it is simply not
+    // ours any more, while good.md now owns it exclusively. Deleting it here
+    // would destroy a live source's only page.
+    await mutateState(root, (state) => {
+      state.sources["bad.md"].concepts = state.sources["bad.md"].concepts.filter((s) => s !== "race");
+      state.sources["good.md"].concepts.push("race");
+    });
+
+    await expect(applyRemovalLocked(root, plan!)).rejects.toThrow(/re-run/);
+    expect(existsSync(path.join(root, "wiki/concepts/race.md"))).toBe(true); // good.md's page, untouched
+    await expectNothingRemoved(root);
+  });
+
+  it("refuses a stale plan when a concurrent compile dropped the source's state entry entirely", async () => {
+    const root = await raceProject();
+    const plan = await planRemoval(root, "bad.md");
+
+    // The extreme case: with no entry, a shared-set filter finds nothing shared
+    // and so approves EVERY slug in the stale plan.
+    await mutateState(root, (state) => delete state.sources["bad.md"]);
+
+    await expect(applyRemovalLocked(root, plan!)).rejects.toThrow(/re-run/);
+    await expectNothingRemoved(root);
+  });
+
+  it("resumes an interrupted removal whose source file is already gone", async () => {
+    const root = await twoSourceRmProject();
+    await unlink(path.join(root, "sources/bad.md")); // as a failed page batch would leave it
+
+    const plan = await planRemoval(root, "bad.md");
+    expect(plan!.sourcePresent).toBe(false);
+    const applied = await applyRemovalLocked(root, plan!);
+
+    expect(applied.sourceDeleted).toBe(false); // nothing to unlink; must not claim otherwise
+    expectExclusiveGoneSharedKept(root); // and the job the failed run left is finished
   });
 
   it("freezes the source's still-shared concepts, so a later recompile can't silently drop its contribution", async () => {
@@ -213,7 +294,6 @@ describe("llmwiki rm end to end", () => {
     // that must warn about what this plan cannot see, not this apply step.
     await applyRemovalLocked(root, plan!);
 
-    expect(existsSync(path.join(root, "wiki/concepts/junk.md"))).toBe(false);
-    expect(existsSync(path.join(root, "wiki/concepts/shared.md"))).toBe(true); // still owned by good.md
+    expectExclusiveGoneSharedKept(root);
   });
 });

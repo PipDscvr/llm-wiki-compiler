@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`llmwiki rm <source>`** — Deletes a source and the concept pages derived exclusively from it, leaving pages another source also contributed to untouched. There is no confirmation flag; preview first with `--dry-run`, which takes no lock and changes nothing. `rm` refuses cleanly if another llmwiki process holds the project lock, and journals page deletes so a crash mid-removal recovers on the next `rm` or `compile` (#60).
 
+  The plan is computed before the lock is taken, so `rm` recomputes which pages the source owns from fresh state under the lock and refuses the whole removal if anything moved in between — a page became shared, became exclusive, moved to another source, or was added. Nothing is deleted on a refusal; re-running plans against current state. `llmwiki watch` recompiles on any change under `sources/`, so this window is an ordinary workflow rather than a rare schedule.
+
+  The source file is deleted before the pages, so a failed page batch leaves the file gone and its state entry behind. Re-running `rm` with the same name recognizes that pairing as an interrupted removal and finishes the job, rather than reporting "no source matches" while the pages are still on disk. A name occupied by something that is not a valid source — a symlink, a directory — is not treated as an interrupted removal.
+
+  A kept page's body still cites the removed source, which `llmwiki lint` reports as a `broken-citation` error. `rm` warns whenever it keeps a page so the lint failure is not a surprise; it does not edit the citations.
+
   `rm` is now a reserved core CLI verb, alongside llmwiki's other top-level commands. A profile that declares a workflow keyed `rm` now fails validation at load instead of installing; rename the workflow to use that profile.
 
 ### Fixed

@@ -9,10 +9,17 @@
  * project: surviving pages whose wikilinks would break, and pending candidates
  * that reference the removed source.
  *
- * The exclusive/shared split delegates to {@link findSharedConcepts} — the SAME
- * function compile's `markOrphaned` uses — so `rm` and `compile` cannot drift on
- * the one rule protecting multi-source pages from deletion. Reimplementing that
- * rule here would be the single most damaging duplication in this feature.
+ * The exclusive/shared split lives in {@link partitionConcepts}, which delegates
+ * to {@link findSharedConcepts} — the SAME function compile's `markOrphaned`
+ * uses — so `rm` and `compile` cannot drift on the one rule protecting
+ * multi-source pages from deletion. Reimplementing that rule here would be the
+ * single most damaging duplication in this feature.
+ *
+ * `partitionConcepts` is exported rather than inlined because the split is
+ * needed TWICE per removal, against two different reads of state: once here for
+ * the pre-lock plan, and once by `applyRemovalLocked` against freshly-read
+ * state under the lock. Those two must be computed the same way to be
+ * comparable at all.
  *
  * Also carries the active profile id straight from input to output (see
  * {@link RemovalPlanInput.profileId}) untouched — this module stays pure and
@@ -47,6 +54,49 @@ export interface BrokenLinkRef {
   target: string;
 }
 
+/**
+ * A source's concepts split by whether it owns them alone.
+ *
+ * Returned by {@link partitionConcepts} and used in TWO places that must never
+ * disagree: the pre-lock plan, and `applyRemovalLocked`'s under-lock re-check
+ * (`src/sources/removal.ts`). Sharing one shape and one function is the point
+ * — the two computing the split differently is precisely how a stale plan
+ * survived its own re-verification.
+ */
+export interface ConceptOwnership {
+  /** Slugs this source owns exclusively — safe to delete. */
+  deleteSlugs: string[];
+  /** Slugs a live source still contributes to — preserved. */
+  keptSlugs: string[];
+}
+
+/**
+ * Split `sourceFile`'s recorded concepts into the ones it owns exclusively and
+ * the ones a live source still contributes to.
+ *
+ * The shared half delegates to {@link findSharedConcepts} — the SAME function
+ * compile's `markOrphaned` uses — so `rm` and `compile` cannot drift on the one
+ * rule protecting multi-source pages from deletion.
+ *
+ * Total: a source with no state entry (never compiled) yields two empty lists
+ * rather than throwing, because deleting such a source is legitimate — there is
+ * simply nothing derived to clean up.
+ *
+ * @param sourceFile - Bare basename of the source, e.g. `"untitled.md"`.
+ * @param state - The state to read ownership from. Which state that is matters:
+ *   the pre-lock read for a plan, the under-lock read for the authority.
+ * @returns The exclusive/shared split. Both lists preserve `state`'s own
+ *   concept order.
+ */
+export function partitionConcepts(sourceFile: string, state: WikiState): ConceptOwnership {
+  const concepts = state.sources[sourceFile]?.concepts ?? [];
+  const shared = findSharedConcepts(sourceFile, state);
+  return {
+    deleteSlugs: concepts.filter((slug) => !shared.has(slug)),
+    keptSlugs: concepts.filter((slug) => shared.has(slug)),
+  };
+}
+
 /** Everything the planner needs, already read from disk by the caller. */
 export interface RemovalPlanInput {
   /** Bare basename of the source being removed, e.g. `"untitled.md"`. */
@@ -71,6 +121,19 @@ export interface RemovalPlanInput {
    * here is the only signal of that gap.
    */
   profileId: string | null;
+  /**
+   * Whether `sources/<sourceFile>` is actually on disk right now.
+   *
+   * Normally `true`. It is `false` on the RESUME path: a previous `rm` deleted
+   * the source file and then threw before finishing its pages and state, so
+   * the file is gone while `state.sources[sourceFile]` survives. Resolved by
+   * the caller (`planRemoval` in `removal.ts`) — this planner does no I/O.
+   *
+   * Carried through to {@link RemovalPlan.sourcePresent} for one reason: the
+   * CLI must not print "Would delete: sources/x.md" for a file that is already
+   * gone.
+   */
+  sourcePresent: boolean;
 }
 
 /** What a removal would delete, keep, and break. */
@@ -91,6 +154,12 @@ export interface RemovalPlan {
    * for deletion — see `printConsequences` in `src/commands/rm.ts`.
    */
   profileId: string | null;
+  /**
+   * Carried straight from {@link RemovalPlanInput.sourcePresent}. `false` means
+   * this removal is RESUMING one that already deleted the source file, so the
+   * CLI reports that file as already gone rather than claiming to delete it.
+   */
+  sourcePresent: boolean;
 }
 
 /**
@@ -98,23 +167,25 @@ export interface RemovalPlan {
  * compiled) yields an empty plan rather than throwing, because deleting such a
  * source is legitimate — there is simply nothing derived to clean up.
  *
+ * The delete/keep split is {@link partitionConcepts}, NOT an expression local
+ * to this function, so `applyRemovalLocked`'s under-lock re-check can compute
+ * the identical split from fresh state and compare the two directly.
+ *
  * @param input - State, pages and candidates already read by the caller.
  * @returns The plan; safe to print without applying (`--dry-run`).
  */
 export function computeRemovalPlan(input: RemovalPlanInput): RemovalPlan {
-  const { sourceFile, state, pages, candidates, profileId } = input;
-  const concepts = state.sources[sourceFile]?.concepts ?? [];
-  const shared = findSharedConcepts(sourceFile, state);
-
-  const deleteSlugs = concepts.filter((slug) => !shared.has(slug));
+  const { sourceFile, state, pages, candidates, profileId, sourcePresent } = input;
+  const { deleteSlugs, keptSlugs } = partitionConcepts(sourceFile, state);
 
   return {
     sourceFile,
     deleteSlugs,
-    keptSlugs: concepts.filter((slug) => shared.has(slug)),
+    keptSlugs,
     brokenLinks: findBrokenLinks(pages, deleteSlugs),
     candidateRefs: candidates.filter((c) => c.sources.includes(sourceFile)).map((c) => c.id),
     profileId,
+    sourcePresent,
   };
 }
 

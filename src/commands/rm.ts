@@ -28,6 +28,12 @@
  * a user sees is what they asked for, not `generateIndex`'s own "Generating
  * index..." progress chatter. Both still run inside the ONE lock acquired
  * below — this is a print-order choice, not a locking one.
+ *
+ * Two things that transcript must NOT overstate, both handled by
+ * `printDeleted`/`printSourceLine`: a source file that was already gone before
+ * this run (an interrupted removal being resumed) is never reported as
+ * "Deleted", and every page line comes from what `applyRemovalLocked` actually
+ * unlinked rather than from what the pre-lock plan proposed.
  */
 
 import {
@@ -85,8 +91,6 @@ export async function rmCommand(ref: string, options: RmOptions = {}): Promise<n
   } finally {
     await releaseLock(root);
   }
-  // applied.preserved is deliberately excluded here: it is the race protection
-  // working, not a failure, so it must never force a non-zero exit.
   return reportSkipped(applied.skipped);
 }
 
@@ -108,7 +112,7 @@ function reportSkipped(skipped: SkippedDelete[]): number {
 }
 
 /** {@link printPlan}'s default for `--dry-run`, which has no apply to report from — printing falls back to prospective wording straight off `plan`. */
-const EMPTY_APPLY_RESULT: RemovalApplyResult = { deleted: [], preserved: [], skipped: [] };
+const EMPTY_APPLY_RESULT: RemovalApplyResult = { deleted: [], skipped: [], sourceDeleted: false };
 
 /**
  * Print what the removal did, or would do.
@@ -121,7 +125,7 @@ const EMPTY_APPLY_RESULT: RemovalApplyResult = { deleted: [], preserved: [], ski
  */
 function printPlan(plan: RemovalPlan, prospective: boolean, applied: RemovalApplyResult = EMPTY_APPLY_RESULT): void {
   printDeleted(plan, prospective, applied);
-  printKept(plan, applied);
+  printKept(plan);
   printConsequences(plan);
 }
 
@@ -134,37 +138,80 @@ function printPlan(plan: RemovalPlan, prospective: boolean, applied: RemovalAppl
  *
  * Once applied, the list comes from `applied.deleted` — what
  * `applyRemovalLocked` actually unlinked — NEVER from `plan.deleteSlugs`,
- * which can overstate reality in two ways `applied.deleted` already excludes:
- * a slug the delete batch floor-skipped (reported separately by
- * `reportSkipped` as "Not deleted:", not here) and a slug the lock-time
- * re-verification found had become shared with a live source in the
- * plan-to-lock window (reported by {@link printKept} instead).
+ * which can overstate reality: a slug the delete batch floor-skipped is
+ * reported separately by `reportSkipped` as "Not deleted:", not here.
  *
  * Split from {@link printKept} — one concern each — to keep this file's
  * per-function complexity under `fallow`'s threshold.
  */
 function printDeleted(plan: RemovalPlan, prospective: boolean, applied: RemovalApplyResult): void {
-  const verb = prospective ? "Would delete" : "Deleted";
-  output.status("x", `${verb}: sources/${plan.sourceFile}`);
-  for (const slug of prospective ? plan.deleteSlugs : applied.deleted) {
+  const { verb, sourceRemoved, slugs } = deletionReport(plan, prospective, applied);
+  printSourceLine(plan.sourceFile, verb, sourceRemoved);
+  for (const slug of slugs) {
     output.status("x", `${verb}: wiki/concepts/${slug}.md`);
   }
 }
 
 /**
- * Print every "Kept:" line: ordinary plan-time shared pages
- * (`plan.keptSlugs`), then race-preserved ones (`applied.preserved`, `[]` for
- * `--dry-run`) with DISTINCT wording — becoming shared DURING the removal is a
- * rarer, more surprising thing than having been shared all along, and the
- * transcript — `rm`'s only record, since it has no confirmation prompt — must
- * say which one actually happened.
+ * Resolve the three things the delete lines need from whichever side is
+ * authoritative, ONCE, rather than re-deciding prospective-vs-applied at each
+ * of the three use sites. `--dry-run` has no apply to read from, so the plan is
+ * the whole story; once applied, every line must come from what
+ * {@link applyRemovalLocked} reported doing.
+ *
+ * @param plan - The computed plan.
+ * @param prospective - `true` for `--dry-run` wording, `false` once applied.
+ * @param applied - What the apply actually did.
+ * @returns The line verb, whether a source FILE was (or would be) removed, and
+ *   the page slugs to list.
  */
-function printKept(plan: RemovalPlan, applied: RemovalApplyResult): void {
+function deletionReport(
+  plan: RemovalPlan,
+  prospective: boolean,
+  applied: RemovalApplyResult,
+): { verb: string; sourceRemoved: boolean; slugs: string[] } {
+  if (prospective) {
+    return { verb: "Would delete", sourceRemoved: plan.sourcePresent, slugs: plan.deleteSlugs };
+  }
+  return { verb: "Deleted", sourceRemoved: applied.sourceDeleted, slugs: applied.deleted };
+}
+
+/**
+ * Print the one line about the source FILE, which is the only line whose
+ * subject may already have been gone before this command ran.
+ *
+ * `rm` resolves a ref whose source file is absent but whose state entry
+ * survives, because that pairing is an interrupted removal being resumed (see
+ * `planRemoval`, `src/sources/removal.ts`). Claiming "Deleted: sources/x.md"
+ * there would be false, and false in the one direction that matters: it would
+ * tell a user recovering from a failure that the step they are retrying just
+ * happened again. The fallback wording states only what is observably true —
+ * the file is gone, the rest is not — since `rm` cannot know whether a failed
+ * removal or the user unlinked it.
+ *
+ * @param sourceFile - Bare basename, e.g. `"research-notes.md"`.
+ * @param verb - "Would delete" or "Deleted", from {@link deletionReport}.
+ * @param removed - Whether a file was (or would be) unlinked at all.
+ */
+function printSourceLine(sourceFile: string, verb: string, removed: boolean): void {
+  if (removed) {
+    output.status("x", `${verb}: sources/${sourceFile}`);
+    return;
+  }
+  output.status("i", output.dim(`sources/${sourceFile} was already gone — only its pages and state entry remain`));
+}
+
+/**
+ * Print a "Kept:" line for every page a live source still contributes to.
+ *
+ * One list, not two: `applyRemovalLocked` REFUSES outright if ownership moved
+ * between the plan and the lock, so by the time anything is printed the plan's
+ * kept set is provably the current one. There is no second, race-preserved
+ * bucket to distinguish.
+ */
+function printKept(plan: RemovalPlan): void {
   for (const slug of plan.keptSlugs) {
     output.status("i", output.dim(`Kept: wiki/concepts/${slug}.md (shared with other sources)`));
-  }
-  for (const slug of applied.preserved) {
-    output.status("i", output.dim(`Kept: wiki/concepts/${slug}.md (became shared with another source during removal)`));
   }
 }
 
@@ -191,10 +238,9 @@ function printKept(plan: RemovalPlan, applied: RemovalApplyResult): void {
  * to report, so asserting those two is still accurate.
  *
  * Gated on `deletedCount`, not `plan.deleteSlugs.length`: the pre-lock plan
- * can overstate what actually happened (a race-preserved slug — see
- * `applyRemovalLocked`), so whether to print this line must come from what
- * was actually deleted, the same rule Fix 2 applies to the `Deleted:` lines
- * themselves.
+ * can overstate what actually happened (a floor-skipped slug is planned but
+ * never unlinked), so whether to print this line must come from what was
+ * actually deleted, the same rule the `Deleted:` lines themselves follow.
  *
  * @param deletedCount - `applied.deleted.length` from `applyRemovalLocked`.
  */
@@ -229,9 +275,35 @@ function printProfileWarning(plan: RemovalPlan): void {
   output.note("Any entity pages from this source remain and must be removed manually.");
 }
 
+/**
+ * Warn that a kept page can still CITE the source just deleted.
+ *
+ * `rm` names the two kinds of collateral it can see precisely — a surviving
+ * `[[wikilink]]` to a doomed page, and a pending candidate referencing the
+ * source. Provenance damage is the third kind and the one it cannot count: a
+ * kept page's body carries `^[<source>.md]` markers merged in from every
+ * contributor, so preserving the page correctly still leaves markers pointing
+ * at a file that no longer exists, and `broken-citation` is an ERROR-severity
+ * lint rule (`src/linter/rules-citations.ts`). Naming that in the transcript
+ * — the only record `rm` produces, since it has no confirmation prompt — is
+ * the difference between a lint failure the user was warned about and one that
+ * arrives from nowhere.
+ *
+ * A flat line, not a citation scan: parsing markers here would duplicate the
+ * linter's multi-source and span-suffix handling on a destructive path, to
+ * report something `llmwiki lint` already reports exactly. Gated on a kept page
+ * existing at all, because a page that was DELETED takes its citations with it.
+ */
+function printCitationWarning(plan: RemovalPlan): void {
+  if (plan.keptSlugs.length === 0) return;
+  output.status("!", output.warn("Kept page(s) may still cite this source."));
+  output.note("Run `llmwiki lint` to find any citations left pointing at it.");
+}
+
 /** Warn about what `rm` reports but deliberately does not repair, or cannot see at all. */
 function printConsequences(plan: RemovalPlan): void {
   printProfileWarning(plan);
+  printCitationWarning(plan);
   if (plan.brokenLinks.length > 0) {
     output.status("!", output.warn(`${plan.brokenLinks.length} surviving page(s) link to a deleted page:`));
     for (const link of plan.brokenLinks) output.note(`${link.file} -> [[${link.target}]]`);

@@ -31,10 +31,18 @@
  * equality here would make the test brittle against unrelated output changes
  * elsewhere in the regeneration step, when the one thing this test exists to
  * pin is which one comes first.
+ *
+ * Two more transcript guarantees are pinned from maintainer review. A kept page
+ * can still carry a `^[<source>.md]` citation into the next `llmwiki lint` as
+ * an ERROR, so the removal must say so — provenance is the third kind of
+ * collateral, alongside the wikilinks and candidates `rm` already reports
+ * (item 3). And a resumed removal, whose source file a previous failed run
+ * already unlinked, must not claim to have deleted that file again (item 2) —
+ * the one place a false "Deleted:" line would mislead a user mid-recovery.
  */
 
 import { describe, it, expect } from "vitest";
-import { writeFile } from "node:fs/promises";
+import { writeFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { exec, CLI, stripAnsi } from "../fixtures/cli-runner.js";
@@ -131,6 +139,36 @@ describe("llmwiki rm CLI", () => {
     // The user asked for the delete; regeneration is housekeeping that follows
     // it, not the other way round — see src/commands/rm.ts's header docstring.
     expect(deletedAt).toBeLessThan(regeneratingAt);
+  });
+
+  it("warns that kept pages may still cite the removed source", async () => {
+    const root = await twoSourceRmProject(); // shared.md survives, still citing bad.md
+
+    const { stdout, stderr } = await exec("node", [CLI, "rm", "bad.md", "--dry-run"], { cwd: root });
+    const lines = stripAnsi(stdout + stderr);
+
+    expect(lines).toContain("Kept page(s) may still cite this source.");
+    expect(lines).toContain("Run `llmwiki lint`");
+  });
+
+  it("does not warn about citations when nothing is kept", async () => {
+    const root = await oneSourceProject(); // every page is deleted with the source
+
+    const { stdout, stderr } = await exec("node", [CLI, "rm", "bad.md", "--dry-run"], { cwd: root });
+
+    expect(stripAnsi(stdout + stderr)).not.toContain("may still cite this source");
+  });
+
+  it("finishes an interrupted removal without claiming to delete the already-gone source file", async () => {
+    const root = await oneSourceProject();
+    await rm(path.join(root, "sources/bad.md")); // as a failed page batch would leave it
+
+    const { stdout } = await exec("node", [CLI, "rm", "bad.md"], { cwd: root });
+    const lines = stripAnsi(stdout);
+
+    expect(lines).toContain("sources/bad.md was already gone");
+    expect(lines).not.toContain("Deleted: sources/bad.md");
+    expect(existsSync(path.join(root, "wiki/concepts/junk.md"))).toBe(false); // job finished
   });
 
   it("reports every deleted page on an ordinary removal and exits 0", async () => {

@@ -30,10 +30,12 @@ No LLM provider credentials are required. `rm` never calls the chat model, and i
 |------|--------|
 | The file under `sources/` | Deleted |
 | Pages under `wiki/concepts/` derived only from that source | Deleted |
-| Pages under `wiki/concepts/` another live source also contributed to | Kept, untouched |
+| Pages under `wiki/concepts/` another live source also contributed to | Kept, and marked as having lost a contributor |
 | The source's entry in `.llmwiki/state.json` | Removed |
 | `wiki/index.md` and `wiki/MOC.md` | Regenerated |
 | Vectors for the deleted pages in `.llmwiki/embeddings.json` | Pruned |
+
+A kept page's body is a merge of contributions from every source that produced it, including the one just removed - the file itself carries no record of that. So `rm` records each kept slug in `state.json`'s `frozenSlugs`, the same marker `compile` already sets when it notices a deleted source. The mark is what tells the next `compile` that this page lost a contributor, instead of rebuilding it from the remaining sources as though nothing had been removed.
 
 ## Limitations
 
@@ -62,7 +64,7 @@ llmwiki rm research-notes
 
 To find the exact filename, look in the `sources/` directory of your project.
 
-`rm` matches on filename only. You cannot pass the original URL or local path you ingested. If `<source>` doesn't match a file under `sources/`, `rm` changes nothing and exits `1`.
+`rm` matches on filename only. You cannot pass the original URL or local path you ingested. If `<source>` matches neither a file under `sources/` nor an [interrupted removal](#resuming-an-interrupted-removal), `rm` changes nothing and exits `1`.
 
 ## Example
 
@@ -86,6 +88,8 @@ llmwiki rm research-notes.md
 x Deleted: sources/research-notes.md
 x Deleted: wiki/concepts/deprecated-api.md
 i Kept: wiki/concepts/authentication.md (shared with other sources)
+! Kept page(s) may still cite this source.
+Run `llmwiki lint` to find any citations left pointing at it.
 ~ Regenerated index and MOC
 ```
 
@@ -93,26 +97,63 @@ The embeddings refresh reports its own outcome separately - see [Embeddings afte
 
 ## What `rm` reports but doesn't fix
 
-Deleting a page can leave a surviving page's `[[wikilink]]` pointing at something that no longer exists, and can leave a pending review candidate referencing a source that's now gone. `rm` reports both without editing anything for you:
+A removal can damage three things elsewhere in the project. `rm` reports all three without editing anything for you:
 
-- A broken wikilink is reported as the surviving page's path and the doomed target. Run [`llmwiki lint`](/cli/lint-eval) for the full detail.
-- A pending candidate that references the removed source is reported by count. Run [`llmwiki review list`](/cli/review) to see it.
+- **A broken wikilink.** Deleting a page can leave a surviving page's `[[wikilink]]` pointing at something that no longer exists. Reported as the surviving page's path and the doomed target. Run [`llmwiki lint`](/cli/lint-eval) for the full detail.
+- **A pending review candidate** that references the removed source. Reported by count. Run [`llmwiki review list`](/cli/review) to see it.
+- **A stale citation.** A kept page's body is a merge of every contributing source, so it can still carry a `^[<source>.md]` marker pointing at the file just deleted. The page is correctly preserved, but `llmwiki lint` will raise `broken-citation` (severity `error`) on it. Whenever any page is kept, `rm` says so:
+
+```
+! Kept page(s) may still cite this source.
+Run `llmwiki lint` to find any citations left pointing at it.
+```
+
+`rm` doesn't scan the citations itself - `llmwiki lint` already reports exactly which markers broke, and re-implementing that parsing on a destructive path would be the wrong place for it.
 
 ## Safety boundaries
 
-A symlinked entry in `sources/` is never treated as a source - `rm` resolves it the same as a missing file. A concept slug that would escape `wiki/concepts/` fails a filename-safety floor: rather than deleting through it, `rm` leaves the page on disk, warns `Not deleted: <slug> (floor:unsafe-slug)`, and exits `1`. This floor is defense in depth; a normally-compiled slug never trips it.
+A symlinked entry in `sources/` is never treated as a source - `rm` resolves it the same as a missing file.
 
-Page deletes apply as one journalled batch. If the process is killed partway through, the next `rm`, the next `compile`, or `llmwiki recover` restores any pages from that batch that had already been removed. The source file itself is deleted first, outside that journal - if the process dies between deleting the source and deleting its pages, the source stays gone and the pages remain on disk, and the next `compile` treats them like any other pages whose owning source disappeared.
+A concept slug that would escape `wiki/concepts/` fails a filename-safety floor: rather than deleting through it, `rm` leaves the page on disk, warns `Not deleted: <slug> (floor:unsafe-slug)`, and exits `1`.
+
+<Note>
+That warning is unreachable by construction, and is kept only as defense in depth. Every slug `rm` can reach comes from `.llmwiki/state.json`, and reading that file already rejects an unsafe slug - the whole state is classified corrupt, and `rm` refuses before a plan exists. The floor exists so the deletion primitive is safe for any caller, not because this one can trip it.
+</Note>
+
+Page deletes apply as one journalled batch. If the process is killed partway through, the next `rm`, the next `compile`, or `llmwiki recover` restores any pages from that batch that had already been removed - see [resuming an interrupted removal](#resuming-an-interrupted-removal).
 
 `rm` runs under the project lock (`.llmwiki/lock`). If another llmwiki process already holds it, `rm` refuses cleanly and exits `1` rather than waiting or forcing. `--dry-run` never takes the lock at all.
 
-If a concurrent `compile` or `watch` makes a page `rm` was about to delete shared with a live source - in the brief window between computing the plan and acquiring the lock - `rm` re-verifies under the lock and preserves that page instead of deleting it. This is reported with wording distinct from an ordinary shared page, since becoming shared during the removal itself is rarer and worth naming separately:
+Within a single `rm`, the plan is computed *before* the project lock is acquired - deliberately, so `--dry-run` never has to take it. That leaves a window in which a concurrent `compile`, `watch` or `review approve` can change which pages this source owns. (`llmwiki watch` recompiles automatically on any change under `sources/`, so this is an ordinary workflow, not a rare schedule.)
+
+`rm` recomputes that ownership from fresh state under the lock. If it differs from the plan in any way - a page became shared, became exclusive, moved to another source, or was added - the removal **refuses outright**, before deleting anything:
 
 ```
-i Kept: wiki/concepts/deprecated-api.md (became shared with another source during removal)
+Error: The project changed while `llmwiki rm` was preparing: the pages derived from
+"research-notes.md" are no longer the ones this removal planned to act on. A concurrent
+`compile`, `watch` or `review approve` landed in between. Nothing has been removed —
+re-run `llmwiki rm research-notes.md` to plan against the current state.
 ```
 
-This is the protection working, not a failure - it does not affect the exit code.
+Nothing is removed: the source file, every page, and `state.json` are exactly as they were, and re-running plans against current state. `rm` refuses rather than silently re-planning because the plan you were shown is the only set the command is authorized to delete - quietly deleting a different one is the failure a command with no confirmation prompt cannot afford.
+
+## Resuming an interrupted removal
+
+`rm` deletes the source file first, then the pages. If the page batch fails - a page survives its unlink, the process is killed - the source file is already gone while its `.llmwiki/state.json` entry remains.
+
+Re-running `rm` with the same name finishes the job. That pairing of "file gone, state entry present" is what identifies an interrupted removal, and it's how `rm` tells the case apart from a name that was never there:
+
+```
+llmwiki rm research-notes.md
+```
+
+```
+i sources/research-notes.md was already gone — only its pages and state entry remain
+x Deleted: wiki/concepts/deprecated-api.md
+~ Regenerated index and MOC
+```
+
+The pending journal batch is replayed first, so any pages the failed run had already deleted are restored before being deleted again as one clean batch. A name occupied by something that isn't a valid source - a symlink, a directory - is *not* treated as an interrupted removal; that stays a plain "no source matches".
 
 ## Embeddings after a removal
 
@@ -134,10 +175,12 @@ Either way, the delete has already happened by the time embeddings run: the sour
 
 | Outcome | Exit code |
 |---------|-----------|
-| `<source>` doesn't match a file under `sources/` | `1` |
+| `<source>` matches neither a file under `sources/` nor an [interrupted removal](#resuming-an-interrupted-removal) | `1` |
 | `--dry-run` on a match | `0` |
 | Applied; no pages were skipped | `0` |
-| Applied; one or more pages were skipped (filename-safety floor) | `1` |
+| Applied; one or more pages were skipped (filename-safety floor - [unreachable by construction](#safety-boundaries)) | `1` |
+| The project changed between planning and the lock; nothing was removed | `1`, `Error:` - see [safety boundaries](#safety-boundaries) |
+| `.llmwiki/state.json` is corrupt or was written by a newer llmwiki; nothing was removed | `1`, `Error:` |
 | A page fails mid-delete (survives its unlink, or a symlinked/oversized page is refused by the pre-state check) | `1`, uncaught `Error:` - see [safety boundaries](#safety-boundaries) |
 | Another llmwiki process holds the project lock | `1` |
 | Embeddings refresh failed with `LLMWIKI_EMBED_STRICT` set | `1` |
