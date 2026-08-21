@@ -68,10 +68,27 @@ export interface ExportPage {
   sources: string[];
   /** Taxonomy tags (from frontmatter). */
   tags: string[];
-  /** ISO-8601 creation timestamp. */
-  createdAt: string;
-  /** ISO-8601 last-updated timestamp. */
-  updatedAt: string;
+  /**
+   * ISO-8601 creation timestamp, read verbatim from frontmatter. ABSENT when the
+   * page declares none — the export never substitutes its own run time, for the
+   * same reason it omits an unset {@link ExportPage.kind}: an invented value is
+   * indistinguishable from a recorded one once it reaches a consumer.
+   *
+   * Absent rather than `""` because every writer renders this field, and an
+   * empty string is not "no date" — it is an assertion that the date is the
+   * empty string. `"dateCreated": ""` is schema-invalid JSON-LD a consumer must
+   * special-case, and `created:  | updated:` in llms.txt reads as a rendering
+   * fault. A writer that cannot state a date declines to state one.
+   */
+  createdAt?: string;
+  /**
+   * ISO-8601 last-updated timestamp: the page's `updatedAt`, falling back to
+   * {@link ExportPage.createdAt} (a saved query declares only the latter, and
+   * `query --save` rewrites the whole file on every save, so there `createdAt`
+   * *is* the last-written time). ABSENT when the page declares neither, for the
+   * reason above.
+   */
+  updatedAt?: string;
   /** Slugs of other pages this page links to via [[wikilinks]]. */
   links: string[];
   /** Full markdown body (without frontmatter). */
@@ -150,6 +167,13 @@ export interface ExportPage {
    * stamped at compile time. Absent for pre-provenance pages.
    */
   promptVersion?: string;
+  /**
+   * Prompt modifiers the page was compiled under, as sorted `key=value` pairs
+   * (export provenance). Absent when the run selected none, and absent for
+   * pages compiled before this was stamped. `promptVersion` names the prompt
+   * implementation and is identical either way; this is what separates them.
+   */
+  promptModifiers?: string[];
 }
 
 /**

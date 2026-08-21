@@ -4,7 +4,7 @@
  * Mounts `src/viewer/assets/viewer.js` into a JSDOM instance via the
  * shared `mountViewerDom` fixture (which handles ES-module rewriting
  * for JSDOM's eval). Stubs `fetch` to return fixture envelopes and
- * asserts the script renders the sidebar groups, the home dashboard,
+ * asserts the script renders the sidebar nav, the home dashboard,
  * and the page-rendered HTML coming back from `/api/page/...`.
  */
 
@@ -13,11 +13,11 @@ import {
   flushMicrotasks,
   jsonResponse,
   mountViewerDom,
-  type EmbeddedPage,
+  type PageRow,
   type FetchResponder,
 } from "./fixtures/viewer-jsdom.js";
 
-function pagesEnvelope(pages: EmbeddedPage[]): Record<string, unknown> {
+function pagesEnvelope(pages: PageRow[]): Record<string, unknown> {
   return {
     project: { title: "demo-wiki", rootName: "demo-wiki" },
     counts: { concepts: 1, queries: 1, sourceFiles: 0, pendingReviews: 0 },
@@ -28,7 +28,7 @@ function pagesEnvelope(pages: EmbeddedPage[]): Record<string, unknown> {
   };
 }
 
-function pagePayload(page: EmbeddedPage, html: string): Record<string, unknown> {
+function pagePayload(page: PageRow, html: string): Record<string, unknown> {
   return {
     id: page.id,
     title: page.title,
@@ -46,7 +46,7 @@ function pagePayload(page: EmbeddedPage, html: string): Record<string, unknown> 
 }
 
 function pageAndIndexResponder(
-  pages: EmbeddedPage[],
+  pages: PageRow[],
   htmlBySlug: Record<string, string> = {},
 ): FetchResponder {
   return (url) => {
@@ -67,40 +67,57 @@ afterEach(() => {
 });
 
 describe("viewer.js — first paint + sidebar", () => {
-  it("renders the embedded page-index blob into sidebar groups before any fetch", async () => {
-    const pages: EmbeddedPage[] = [
+  it("renders the sidebar nav before any fetch settles", async () => {
+    const pages: PageRow[] = [
       { id: "concepts/alpha", pageDirectory: "concepts", slug: "alpha", title: "Alpha" },
       { id: "queries/q1", pageDirectory: "queries", slug: "q1", title: "Q1" },
     ];
-    const { dom } = await mountViewerDom(pages, pageAndIndexResponder(pages));
+    const { dom } = await mountViewerDom(pageAndIndexResponder(pages));
     const sidebar = dom.window.document.querySelector("[data-sidebar]")!;
-    expect(sidebar.textContent).toContain("Concepts");
-    expect(sidebar.textContent).toContain("Alpha");
-    expect(sidebar.textContent).toContain("Saved Queries");
-    expect(sidebar.textContent).toContain("Q1");
+    // Nav structure is data-independent (renderSidebar({}) paints it before
+    // /api/pages settles). The full label/route contract is pinned in
+    // viewer-sidebar-nav.test.ts; this only guards that this mount path
+    // reaches the real nav shell rather than the old page tree.
+    expect(sidebar.textContent).toContain("BROWSE");
+    expect(sidebar.textContent).toContain("MAINTAIN");
+    expect(sidebar.querySelector('a[data-route="concepts"]')).not.toBeNull();
+    expect(sidebar.querySelectorAll("a[data-route]").length).toBeGreaterThanOrEqual(6);
   });
 
   it("renders the home dashboard with project title from /api/pages", async () => {
-    const pages: EmbeddedPage[] = [
+    const pages: PageRow[] = [
       { id: "concepts/alpha", pageDirectory: "concepts", slug: "alpha", title: "Alpha" },
     ];
-    const { dom } = await mountViewerDom(pages, pageAndIndexResponder(pages));
+    const { dom } = await mountViewerDom(pageAndIndexResponder(pages));
     expect(dom.window.document.querySelector("[data-app-title]")!.textContent).toBe("demo-wiki");
-    const main = dom.window.document.querySelector("[data-main-pane]")!;
-    expect(main.textContent).toContain("demo-wiki");
+    // The project title also reaches the dashboard's compile receipt (its
+    // "Root" row reads envelope.project.rootName). The receipt now renders
+    // into the shared support rail, not inside main — see viewer-rail.js
+    // renderDashboardRail.
+    const rail = dom.window.document.querySelector("[data-support-rail]")!;
+    expect(rail.textContent).toContain("demo-wiki");
+  });
+
+  it("paints the nav shell even when the bootstrap fetch never resolves", async () => {
+    // Unlike pageAndIndexResponder (which always settles quickly), this proves
+    // first paint does not AWAIT /api/pages or /api/health — it only checks
+    // that painting happens to finish before mountViewerDom's fixed flush
+    // window, which a fetch-then-paint regression would still slip through.
+    const neverResolves: FetchResponder = () => new Promise(() => {});
+    const { dom } = await mountViewerDom(neverResolves);
+    const sidebar = dom.window.document.querySelector("[data-sidebar]")!;
+    expect(sidebar.textContent).toContain("BROWSE");
+    expect(sidebar.textContent).toContain("MAINTAIN");
   });
 });
 
 describe("viewer.js — hash router", () => {
   it("renders the server-sanitized HTML returned by /api/page", async () => {
-    const pages: EmbeddedPage[] = [
+    const pages: PageRow[] = [
       { id: "concepts/alpha", pageDirectory: "concepts", slug: "alpha", title: "Alpha" },
     ];
     const html = "<p>Body text for the <strong>alpha</strong> page.</p>";
-    const { dom } = await mountViewerDom(
-      pages,
-      pageAndIndexResponder(pages, { alpha: html }),
-    );
+    const { dom } = await mountViewerDom(pageAndIndexResponder(pages, { alpha: html }));
     dom.window.location.hash = "#/concepts/alpha";
     await flushMicrotasks();
     const main = dom.window.document.querySelector("[data-main-pane]")!;
@@ -110,10 +127,10 @@ describe("viewer.js — hash router", () => {
   });
 
   it("falls back to a generic 'No rendered content.' note when html is empty", async () => {
-    const pages: EmbeddedPage[] = [
+    const pages: PageRow[] = [
       { id: "concepts/empty", pageDirectory: "concepts", slug: "empty", title: "Empty" },
     ];
-    const { dom } = await mountViewerDom(pages, pageAndIndexResponder(pages));
+    const { dom } = await mountViewerDom(pageAndIndexResponder(pages));
     dom.window.location.hash = "#/concepts/empty";
     await flushMicrotasks();
     const main = dom.window.document.querySelector("[data-main-pane]")!;
@@ -124,16 +141,22 @@ describe("viewer.js — hash router", () => {
 
 describe("viewer.js — malformed hash routes", () => {
   it("treats a hash with malformed percent-encoding as the home route, without throwing", async () => {
-    const pages: EmbeddedPage[] = [
+    const pages: PageRow[] = [
       { id: "concepts/alpha", pageDirectory: "concepts", slug: "alpha", title: "Alpha" },
     ];
-    const { dom, fetchMock } = await mountViewerDom(pages, pageAndIndexResponder(pages));
+    const { dom, fetchMock } = await mountViewerDom(pageAndIndexResponder(pages));
     fetchMock.mockClear();
     dom.window.location.hash = "#/concepts/%E0%A4%A";
     await flushMicrotasks();
     const fetchedPaths = fetchMock.mock.calls.map((args) => String(args[0]));
     expect(fetchedPaths.some((p) => p.includes("/api/page/"))).toBe(false);
     const main = dom.window.document.querySelector("[data-main-pane]")!;
-    expect(main.textContent).toContain("demo-wiki");
+    // Dashboard-only copy (the hero, only built by renderDashboard) proves
+    // the fallback actually reached the home route rather than merely not
+    // throwing. "demo-wiki" is not used here: the project title now
+    // surfaces on the home route through the compile receipt in the
+    // shared support rail (see the test above), not inside main, so it is
+    // no longer a route-specific signal for this element.
+    expect(main.textContent).toContain("Your knowledge base is ready.");
   });
 });

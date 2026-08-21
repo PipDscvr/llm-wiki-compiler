@@ -5,61 +5,194 @@
  * route. Expects `globalThis.d3` to be set by the D3 IIFE bundle loaded
  * as a `<script>` tag in index.html before this module runs.
  *
- * Nodes are coloured by `nodeKind`/`kind`: typed entity nodes use the entity
- * palette (checked via `d.nodeKind === "entity"` before the `kind` fallback);
- * wikilink nodes use `kind`-keyed palettes (concept/comparison/overview). Node
- * size reflects total degree. Hovering saturates and highlights connected edges.
- * Clicking navigates to the page.
+ * Colour lives entirely in viewer-graph.css. D3 assigns semantic classes —
+ * `graph-node graph-node--<kind>` on nodes, `graph-edge`/`graph-edge--relation`
+ * on edges — rather than a hardcoded SVG fill/stroke presentation attribute,
+ * because presentation attributes cannot read CSS custom properties: a graph
+ * coloured that way would stay dark when the viewer switches to the light
+ * theme. `nodeClass()` resolves the design system's four node semantics —
+ * concept, entity, stale, dangling — in that priority order (a dangling
+ * target has no backing page at all; a stale page outranks its kind because
+ * "the source moved on" is the more urgent fact). `GraphNode` carries no
+ * freshness field, so `staleIdsFromEnvelope()` joins it client-side from the
+ * `/api/pages` envelope the caller already holds — both `#/graph` (viewer.js)
+ * and the dashboard's compact panel (viewer-dashboard.js) pass it in.
+ * `LEGEND_KINDS` is exported for the same reason: the dashboard panel
+ * renders its own compact legend row (compact mode suppresses this file's
+ * overlay legend — see `loadGraph`'s JSDoc) from the identical four-entry
+ * list `nodeClass()` resolves against, rather than a second copy that
+ * could silently drift out of sync.
  *
- * Typed relation edges render with a dashed green stroke and carry the
- * `relationType` as a tooltip title. Symmetric relation edges have no arrowhead;
- * directed and wikilink edges use the arrowhead marker.
+ * The canvas is deliberately label-free — no per-node `<text>` — because at
+ * 128 nodes the labels overlapped into noise. Identification lives in the
+ * hover tooltip (title, kind, connection count) and the legend (page
+ * header). Each node group holds two circles: a halo (`.graph-halo`, drawn
+ * first so it sits behind the node, invisible until hot) and the node
+ * itself (`.graph-node`). Node radius and stroke width stay data-driven
+ * `.attr()` calls because they come from degree and the active mode's
+ * settings, not from the theme.
+ *
+ * Typed relation edges get the `graph-edge--relation` class and carry the
+ * `relationType` as a tooltip title. Symmetric relation edges have no
+ * arrowhead; directed and wikilink edges use the arrowhead marker.
+ *
+ * `loadGraph()` is the one entry point for two callers — the full `#/graph`
+ * route and the dashboard's compact `[data-graph-panel]` — so the panel can
+ * never drift into a second, decorative renderer. `options.compact` selects
+ * full vs compact sizing (radius bounds, drag) and, for compact, derives its
+ * link distance/charge from the live panel size and node count rather than
+ * a fixed pair of numbers (see `resolveSettings`/`compactForces`) — the
+ * fetch call and the force-simulation builder stay single-instance in both
+ * modes regardless.
  */
 
-const MIN_RADIUS = 4;
-const MAX_RADIUS = 10;
+import { emptyState } from "./viewer-dom.js";
+import { plural } from "./viewer-format.js";
 
-const KIND_COLORS = {
-  concept:    { rest: '#1c3e67', restStroke: '#1565c0', fill: '#1565c0', stroke: '#4fc3f7', hot: '#1e88e5', strokeHot: '#82d9ff' },
-  entity:     { rest: '#143f44', restStroke: '#00695c', fill: '#00695c', stroke: '#80cbc4', hot: '#00897b', strokeHot: '#b2dfdb' },
-  comparison: { rest: '#653724', restStroke: '#e65100', fill: '#e65100', stroke: '#ffb74d', hot: '#f4511e', strokeHot: '#ffcc80' },
-  overview:   { rest: '#1e3c2f', restStroke: '#1b5e20', fill: '#1b5e20', stroke: '#81c784', hot: '#2e7d32', strokeHot: '#a5d6a7' },
+/**
+ * Force and sizing parameters per mode. Compact serves the dashboard's
+ * `[data-graph-panel]` — a small, fluid-width panel (roughly half the main
+ * column, collapsing to full width under 900px) about 296px tall. Its
+ * radius/drag stay fixed here; its linkDistance/charge are derived per
+ * render from the panel's live size and node count instead (`compactForces`
+ * below) — a fixed pair tuned for one viewport left an 8-node graph a tiny
+ * knot in a much bigger panel at every other size (see the fidelity audit).
+ */
+const MODE_SETTINGS = {
+  full:    { linkDistance: 80, charge: -200, minRadius: 4,   maxRadius: 10, drag: true },
+  compact: { minRadius: 2.5, maxRadius: 6, drag: false },
 };
-
-const ORPHAN_COLOR   = { fill: '#212121', stroke: '#424242', hot: '#37474f', strokeHot: '#607d8b' };
-const DANGLING_COLOR = { fill: '#0f172a', stroke: '#475569', hot: '#1e293b', strokeHot: '#94a3b8' };
-const DEFAULT_EDGE_STROKE   = '#374151';
-const RELATION_EDGE_STROKE  = '#2d5a3d';
-const HOT_EDGE_STROKE       = '#60a5fa';
 const ARROWHEAD_MARKER_ID   = 'llmwiki-arrowhead';
 const HIGH_DEGREE_THRESHOLD = 5;
-const RESTING_FILL   = '#374151';
-const RESTING_STROKE = '#4b5563';
+/** Zoom scale bounds, shared by the interactive zoom behaviour and the "Fit" action below. */
+const ZOOM_SCALE_EXTENT = [0.1, 4];
 
-/** Resolve the active color palette for a node — entity nodes bypass the kind lookup. */
-function paletteForNode(kind, nodeKind) {
-  if (nodeKind === 'entity') return KIND_COLORS.entity;
-  return KIND_COLORS[kind] || KIND_COLORS.concept;
+/**
+ * Compact-force tuning constants (used by `compactForces`, below).
+ * `COMPACT_REF_PER_NODE` is that function's `perNode` for the reference
+ * case this pass measured and tuned against — the demo wiki's 8-node graph
+ * in a ~443×304 panel (sqrt(443 * 296 / 8) ≈ 128). `COMPACT_LINK_DISTANCE_
+ * FACTOR` and `COMPACT_CHARGE_FACTOR` are calibrated at exactly that point;
+ * see `compactForces` for why that calibration holds regardless of
+ * `COMPACT_FALLOFF_EXPONENT`. That exponent steepens how fast the derived
+ * forces shrink for graphs bigger than the reference: exponent 1 (plain
+ * linear-in-perNode scaling) still left an 80-node graph overflowing the
+ * panel by up to ~195px; 2.65 was the smallest value that cleared it,
+ * checked with Playwright against 8/37/80/290-node fixtures (see the
+ * fidelity pass's probe2.mjs).
+ */
+const COMPACT_REF_PER_NODE = 128;
+const COMPACT_FALLOFF_EXPONENT = 2.65;
+const COMPACT_LINK_DISTANCE_FACTOR = 1.39;
+const COMPACT_CHARGE_FACTOR = 4.69;
+
+/**
+ * Derive compact mode's linkDistance/charge from the panel's actual size
+ * and node count, rather than the fixed pair of numbers this replaced (the
+ * root cause of the "tiny knot" bug — see the fidelity audit). `perNode` is
+ * the side of the square each node would own if the panel's area were split
+ * evenly across them: a per-node spacing budget that shrinks as the panel
+ * narrows or the graph grows, so the layout stays fluid instead of tuned to
+ * one viewport.
+ *
+ * Scaling `linkDistance`/`charge` directly off `perNode` (exponent 1) is
+ * not steep enough — a well-connected graph's on-screen footprint does not
+ * shrink linearly with reduced per-node spacing — so `COMPACT_FALLOFF_
+ * EXPONENT` steepens the falloff above the reference graph size. The
+ * exponent cannot move the reference case itself: at
+ * `perNode === COMPACT_REF_PER_NODE`, `(perNode / REF) ** (exponent - 1)`
+ * is always 1, so `scaled === perNode` no matter which exponent is chosen.
+ *
+ * @param {number} width - Panel width in the simulation's own units (the
+ *   container's `clientWidth` at mount).
+ * @param {number} height - Panel height, same units.
+ * @param {number} nodeCount - Node count of the graph being laid out.
+ * @returns {{linkDistance: number, charge: number}}
+ */
+function compactForces(width, height, nodeCount) {
+  const perNode = Math.sqrt((width * height) / Math.max(1, nodeCount));
+  const scaled = perNode * (perNode / COMPACT_REF_PER_NODE) ** (COMPACT_FALLOFF_EXPONENT - 1);
+  return {
+    linkDistance: scaled * COMPACT_LINK_DISTANCE_FACTOR,
+    charge: -scaled * COMPACT_CHARGE_FACTOR,
+  };
 }
 
-/** Return the hover color config for a node (kind + degree + nodeKind determine the palette). */
-function colorForNode(kind, degree, nodeKind) {
-  if (kind === 'dangling') return DANGLING_COLOR;
-  if (degree === 0) return ORPHAN_COLOR;
-  return paletteForNode(kind, nodeKind);
+/**
+ * Resolve the force/sizing settings for one render. Full mode's numbers are
+ * the fixed `MODE_SETTINGS.full` object, unchanged by this function
+ * (`test/viewer-graph-compact.test.ts` pins its literal source text).
+ * Compact mode keeps `MODE_SETTINGS.compact`'s radius/drag constants but
+ * replaces its old fixed linkDistance/charge with `compactForces`'s
+ * live-sized ones.
+ *
+ * @param {{compact?: boolean}} options - `loadGraph`'s own options.
+ * @param {number} width - Container width (simulation units).
+ * @param {number} height - Container height (simulation units).
+ * @param {number} nodeCount - Node count of the graph being laid out.
+ */
+function resolveSettings(options, width, height, nodeCount) {
+  if (!options.compact) return MODE_SETTINGS.full;
+  return { ...MODE_SETTINGS.compact, ...compactForces(width, height, nodeCount) };
 }
 
-/** Return the resting (non-hovered) fill and stroke for a node, tinted by kind. */
-function restColorsForNode(kind, nodeKind) {
-  if (kind === 'dangling') return { fill: RESTING_FILL, stroke: RESTING_STROKE };
-  const c = paletteForNode(kind, nodeKind);
-  return { fill: c.rest, stroke: c.restStroke };
+/**
+ * Freshness states that colour a node amber. `GraphNode` carries no freshness
+ * field, so the ids are joined from /api/pages — data the client already holds.
+ */
+const STALE_STATUSES = new Set(["stale", "orphaned"]);
+
+/** True for a ghost node with no backing page — a broken wikilink or relation target. */
+function isDanglingNode(d) {
+  return d.isDangling === true || d.kind === "dangling";
+}
+
+/**
+ * Resolve the semantic class for a node. Colour lives entirely in
+ * viewer-graph.css so both themes are handled by the stylesheet — SVG
+ * presentation attributes cannot read CSS custom properties.
+ *
+ * Order is deliberate: a dangling target has no page at all, and a stale page
+ * outranks its kind because "the source moved on" is the more urgent fact.
+ *
+ * @param {object} d - The node datum.
+ * @param {Set<string>} staleIds - Page ids whose freshness is stale or orphaned.
+ */
+function nodeClass(d, staleIds) {
+  if (isDanglingNode(d)) return "graph-node graph-node--dangling";
+  if (staleIds.has(d.id)) return "graph-node graph-node--stale";
+  if (d.nodeKind === "entity") return "graph-node graph-node--entity";
+  return "graph-node graph-node--concept";
+}
+
+/** The `pages` array of an /api/pages envelope, or `[]` when absent/malformed. */
+function pagesFromEnvelope(envelope) {
+  return Array.isArray(envelope?.pages) ? envelope.pages : [];
+}
+
+/** True when a page's computed freshness is stale or orphaned. */
+function isStalePage(page) {
+  return STALE_STATUSES.has(page.freshness?.freshnessStatus);
+}
+
+/**
+ * Build the stale-id set from an /api/pages envelope. Returns an empty set
+ * when the envelope is absent, so a failed page fetch degrades the graph to
+ * kind-only colouring rather than breaking it.
+ */
+export function staleIdsFromEnvelope(envelope) {
+  const ids = new Set();
+  for (const page of pagesFromEnvelope(envelope)) {
+    if (isStalePage(page)) ids.add(page.id);
+  }
+  return ids;
 }
 
 /** Map a node's degree to a circle radius using a linear scale. */
-function radiusForDegree(degree, maxDegree) {
-  if (maxDegree === 0) return MIN_RADIUS;
-  return MIN_RADIUS + (degree / maxDegree) * (MAX_RADIUS - MIN_RADIUS);
+function radiusForDegree(degree, maxDegree, settings) {
+  const { minRadius, maxRadius } = settings;
+  if (maxDegree === 0) return minRadius;
+  return minRadius + (degree / maxDegree) * (maxRadius - minRadius);
 }
 
 /** Build the tooltip DOM element and append it to the container. */
@@ -131,7 +264,7 @@ function initGraph(container) {
   const g = svg.append('g');
 
   const zoom = d3.zoom()
-    .scaleExtent([0.1, 4])
+    .scaleExtent(ZOOM_SCALE_EXTENT)
     .on('zoom', (event) => g.attr('transform', event.transform));
   svg.call(zoom);
 
@@ -149,44 +282,33 @@ function onTick(edgeSel, nodeSel) {
   nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
 }
 
+/**
+ * Dim everything, mark the hovered node and its edges hot. Each node group
+ * holds two circles (halo + node), so both are targeted by class rather than
+ * by tag — a bare `.select('circle')` would hit whichever circle comes
+ * first in document order (the halo), not the node.
+ */
+function applyHighlight(hoveredId, edgeSel, nodeSel) {
+  edgeSel.classed('is-dimmed', true).classed('is-hot', false);
+  nodeSel.select('.graph-node').classed('is-dimmed', true).classed('is-hot', false);
+  nodeSel.select('.graph-halo').classed('is-hot', false);
 
-/** Dim all nodes/edges, saturate the hovered node, highlight its edges only. */
-function applyHighlight(hoveredId, edgeSel, nodeSel, maxDegree) {
   edgeSel
-    .attr('stroke', '#1a2233')
-    .attr('stroke-opacity', 0.25)
-    .attr('stroke-width', 1.2);
+    .filter(d => d.source.id === hoveredId || d.target.id === hoveredId)
+    .classed('is-dimmed', false)
+    .classed('is-hot', true);
 
-  nodeSel.select('circle').style('filter', 'brightness(0.3)');
-
-  const hotEdges = edgeSel.filter(
-    d => d.source.id === hoveredId || d.target.id === hoveredId
-  );
-  hotEdges.attr('stroke', HOT_EDGE_STROKE).attr('stroke-opacity', 1).attr('stroke-width', 2);
-
-  const hoveredSel = nodeSel.filter(d => d.id === hoveredId);
-  hoveredSel.select('circle')
-    .attr('fill',   d => colorForNode(d.kind, d.degree, d.nodeKind).hot)
-    .attr('stroke', d => colorForNode(d.kind, d.degree, d.nodeKind).strokeHot)
-    .style('filter', 'brightness(1.5) saturate(2) drop-shadow(0 0 6px #60a5fa)');
-  hoveredSel.select('text')
-    .attr('y', d => radiusForDegree(d.degree, maxDegree) + 8);
+  const hovered = nodeSel.filter(d => d.id === hoveredId);
+  hovered.select('.graph-node').classed('is-dimmed', false).classed('is-hot', true);
+  hovered.select('.graph-halo').classed('is-hot', true);
 }
 
-/** Restore all edges and nodes to their default visual state. */
-function resetHighlight(edgeSel, nodeSel, maxDegree) {
-  edgeSel
-    .attr('stroke', DEFAULT_EDGE_STROKE)
-    .attr('stroke-opacity', 0.7)
-    .attr('stroke-width', 1.2);
-
-  nodeSel.select('circle')
-    .style('filter', null)
-    .attr('fill',   d => restColorsForNode(d.kind, d.nodeKind).fill)
-    .attr('stroke', d => restColorsForNode(d.kind, d.nodeKind).stroke);
-  nodeSel.select('text').attr('y', d => radiusForDegree(d.degree, maxDegree) + 3);
+/** Clear every highlight class, including the halo. */
+function resetHighlight(edgeSel, nodeSel) {
+  edgeSel.classed('is-dimmed', false).classed('is-hot', false);
+  nodeSel.select('.graph-node').classed('is-dimmed', false).classed('is-hot', false);
+  nodeSel.select('.graph-halo').classed('is-hot', false);
 }
-
 
 /** Attach drag behaviour to node groups so users can reposition nodes. */
 function attachDrag(nodeSel, sim) {
@@ -208,11 +330,6 @@ function attachDrag(nodeSel, sim) {
   );
 }
 
-/** Pluralize a noun by appending 's' when count !== 1. */
-function plural(count, noun) {
-  return count + ' ' + noun + (count !== 1 ? 's' : '');
-}
-
 /** Build the tooltip meta-line text for a node datum. */
 function nodeMetaText(d) {
   if (d.isDangling) return 'missing page · ' + plural(d.degree, 'reference');
@@ -221,10 +338,10 @@ function nodeMetaText(d) {
 }
 
 /** Wire hover and click interactions onto node groups. */
-function attachHover(nodeSel, edgeSel, tooltip, svg, maxDegree) {
+function attachHover(nodeSel, edgeSel, tooltip, svg) {
   nodeSel
     .on('mouseenter', function(event, d) {
-      applyHighlight(d.id, edgeSel, nodeSel, maxDegree);
+      applyHighlight(d.id, edgeSel, nodeSel);
       tooltip.querySelector('.tip-title').textContent = d.title;
       tooltip.querySelector('.tip-meta').textContent = nodeMetaText(d);
       positionTooltip(tooltip, event, svg.node());
@@ -233,117 +350,261 @@ function attachHover(nodeSel, edgeSel, tooltip, svg, maxDegree) {
       positionTooltip(tooltip, event, svg.node());
     })
     .on('mouseleave', function() {
-      resetHighlight(edgeSel, nodeSel, maxDegree);
+      resetHighlight(edgeSel, nodeSel);
       tooltip.style.display = 'none';
     })
     .on('click', function(_event, d) {
       if (d.isDangling) return;
-      location.hash = '#/' + encodeURIComponent(d.directory) + '/' + encodeURIComponent(d.slug);
+      const hash = nodeRouteHash(d);
+      if (hash !== null) location.hash = hash;
     });
 }
 
-/** Append circle and label children to each node group. */
-function appendNodeVisuals(nodeSel, maxDegree) {
-  nodeSel.append('circle')
-    .attr('r',                d => radiusForDegree(d.degree, maxDegree))
-    .attr('fill',             d => restColorsForNode(d.kind, d.nodeKind).fill)
-    .attr('stroke',           d => restColorsForNode(d.kind, d.nodeKind).stroke)
-    .attr('stroke-dasharray', d => d.isDangling ? '3,2' : null)
-    .attr('stroke-width',     d => d.degree > HIGH_DEGREE_THRESHOLD ? 2.5 : d.degree > 0 ? 2 : 1);
-
-  nodeSel.append('text')
-    .text(d => d.title)
-    .attr('class', 'node-label')
-    .attr('text-anchor', 'middle')
-    .attr('y',            d => radiusForDegree(d.degree, maxDegree) + 3)
-    .attr('dy',           '0.75em')
-    .attr('font-size',    d => Math.max(5, radiusForDegree(d.degree, maxDegree) * 0.4))
-    .attr('font-family',  'monospace')
-    .attr('pointer-events', 'none');
-}
-
-/** Append an arrowhead marker definition to the SVG defs block. */
-function appendArrowheadDef(svg) {
-  svg.append('defs').append('marker')
-    .attr('id',          ARROWHEAD_MARKER_ID)
-    .attr('viewBox',     '0 -4 8 8')
-    .attr('refX',        8)
-    .attr('refY',        0)
-    .attr('markerWidth', 6)
-    .attr('markerHeight', 6)
-    .attr('orient',      'auto')
-    .append('path')
-    .attr('d',    'M0,-4L8,0L0,4')
-    .attr('fill', DEFAULT_EDGE_STROKE);
+/**
+ * The `#/<directory>/<slug>` hash a node routes to, or null when it has no id.
+ *
+ * Built from `id`, NOT from `directory`, because that field means two different
+ * things depending on where the node came from: a default page reports its
+ * ROUTE segment (`concepts`), while a typed entity page reports its ON-DISK
+ * directory (`wiki/articles`, see `EntityPageNode.directory` in
+ * src/viewer/graph.ts). Encoding the latter turned the slash into `%2F`, so a
+ * click on any typed node navigated to `#/wiki%2Farticles/<slug>` and the page
+ * route answered 400 — the directory segment is matched against the profile's
+ * declared entity types, and `wiki%2Farticles` is not one of them.
+ *
+ * `id` is already `<routeDirectory>/<slug>` for BOTH kinds
+ * (`concepts/change-detection`, `articles/arena-deal-spiked`), so it is the one
+ * field that needs no per-kind branch. Split on the FIRST separator only: a
+ * dangling target's slug can itself contain one.
+ *
+ * @param {{id?: string}} node - A graph node datum.
+ * @returns {string|null}
+ */
+function nodeRouteHash(node) {
+  const id = typeof node.id === 'string' ? node.id : '';
+  const cut = id.indexOf('/');
+  if (cut <= 0 || cut === id.length - 1) return null;
+  const directory = id.slice(0, cut);
+  const slug = id.slice(cut + 1);
+  return '#/' + encodeURIComponent(directory) + '/' + encodeURIComponent(slug);
 }
 
 /**
- * Apply the typed edge styling to an edge selection: relation edges get the
- * distinct dashed stroke + relationType title; symmetric edges get NO arrowhead
- * (marker-end null), while directed relation + wikilink edges get the arrowhead.
+ * Append the circle for each node group. Labels are absent in both modes,
+ * per the design system's label-free canvas.
+ *
+ * @param {object} nodeSel - D3 selection of node groups.
+ * @param {{maxDegree: number, staleIds: Set<string>, settings: object}} ctx - Render context.
+ */
+function appendNodeVisuals(nodeSel, ctx) {
+  // Halo ring, drawn first so it sits behind the node. Invisible until the
+  // node is hot — the design system's "focus · halo ring" semantic.
+  nodeSel.append('circle')
+    .attr('class', 'graph-halo')
+    .attr('r',     d => radiusForDegree(d.degree, ctx.maxDegree, ctx.settings) + 9);
+
+  nodeSel.append('circle')
+    .attr('class',            d => nodeClass(d, ctx.staleIds))
+    .attr('r',                d => radiusForDegree(d.degree, ctx.maxDegree, ctx.settings))
+    .attr('stroke-dasharray', d => d.isDangling ? '3,2' : null)
+    .attr('stroke-width',     d => d.degree > HIGH_DEGREE_THRESHOLD ? 2.5 : d.degree > 0 ? 2 : 1);
+}
+
+/** Append the arrowhead marker definition; its fill comes from the stylesheet. */
+function appendArrowheadDef(svg) {
+  svg.append('defs').append('marker')
+    .attr('id',           ARROWHEAD_MARKER_ID)
+    .attr('viewBox',      '0 -4 8 8')
+    .attr('refX',         8)
+    .attr('refY',         0)
+    .attr('markerWidth',  6)
+    .attr('markerHeight', 6)
+    .attr('orient',       'auto')
+    .append('path')
+    .attr('class', 'graph-arrowhead')
+    .attr('d',     'M0,-4L8,0L0,4');
+}
+
+/**
+ * Apply structural edge styling. Colour comes from viewer-graph.css via the
+ * class; only the arrowhead decision and the relation tooltip are data-driven.
+ * Symmetric relations get no arrowhead; directed and wikilink edges do.
  *
  * @param {object} edgeSel - The D3 line selection bound to edge data.
  * @returns {object} The same selection (for chaining).
  */
 function styleEdges(edgeSel) {
   return edgeSel
-    .attr('stroke',         d => d.edgeKind === 'relation' ? RELATION_EDGE_STROKE : DEFAULT_EDGE_STROKE)
-    .attr('stroke-width',   d => d.edgeKind === 'relation' ? 1.5 : 1.2)
-    .attr('stroke-opacity', 0.7)
-    .attr('stroke-dasharray', d => d.edgeKind === 'relation' ? '5,3' : null)
-    .attr('title',          d => d.edgeKind === 'relation' ? d.relationType : null)
-    .attr('marker-end',     d => d.direction === 'symmetric' ? null : `url(#${ARROWHEAD_MARKER_ID})`);
+    .attr('class',      d => d.edgeKind === 'relation' ? 'graph-edge graph-edge--relation' : 'graph-edge')
+    .attr('title',      d => d.edgeKind === 'relation' ? d.relationType : null)
+    .attr('marker-end', d => d.direction === 'symmetric' ? null : `url(#${ARROWHEAD_MARKER_ID})`);
 }
 
-/** Build and run the D3 simulation; append edges, nodes, labels, and interactions. */
-function renderGraph(svg, g, data, tooltip, width, height) {
+/**
+ * Build and run the D3 simulation; append edges, nodes, and interactions.
+ *
+ * @param {{svg: object, g: object, width: number, height: number, tooltip: HTMLElement}} view -
+ *   The object `initGraph()` returns — collapsed into one argument rather than
+ *   five positional ones.
+ * @param {{nodes: object[], edges: object[]}} data - The `/api/graph` payload.
+ * @param {{compact?: boolean, staleIds?: Set<string>}} options - `compact` selects
+ *   full vs compact settings (see `resolveSettings`); `staleIds` feeds
+ *   `nodeClass()` via the render context.
+ */
+function renderGraph(view, data, options) {
   const d3 = globalThis.d3;
+  const settings = resolveSettings(options, view.width, view.height, data.nodes.length);
   const maxDegree = Math.max(0, ...data.nodes.map(n => n.degree));
+  const ctx = { maxDegree, staleIds: options.staleIds ?? new Set(), settings };
 
-  appendArrowheadDef(svg);
+  appendArrowheadDef(view.svg);
 
   const sim = d3.forceSimulation(data.nodes)
-    .force('link',   d3.forceLink(data.edges).id(d => d.id).distance(80))
-    .force('charge', d3.forceManyBody().strength(-200))
-    .force('center', d3.forceCenter(width / 2, height / 2));
+    .force('link',   d3.forceLink(data.edges).id(d => d.id).distance(settings.linkDistance))
+    .force('charge', d3.forceManyBody().strength(settings.charge))
+    .force('center', d3.forceCenter(view.width / 2, view.height / 2));
 
-  const edgeSel = styleEdges(g.append('g')
-    .selectAll('line')
-    .data(data.edges)
-    .join('line'));
+  const edgeSel = styleEdges(view.g.append('g').selectAll('line').data(data.edges).join('line'));
 
-  const nodeSel = g.append('g')
+  const nodeSel = view.g.append('g')
     .selectAll('g')
     .data(data.nodes)
     .join('g')
     .style('cursor', d => d.isDangling ? 'default' : 'pointer');
 
-  appendNodeVisuals(nodeSel, maxDegree);
-  attachDrag(nodeSel, sim);
-  attachHover(nodeSel, edgeSel, tooltip, svg, maxDegree);
+  appendNodeVisuals(nodeSel, ctx);
+  if (settings.drag) attachDrag(nodeSel, sim);
+  attachHover(nodeSel, edgeSel, view.tooltip, view.svg);
 
-  // Stop the simulation when the SVG is removed from the document (e.g. navigating away from #/graph).
+  // Stop the simulation when the SVG leaves the document (route change).
   sim.on('tick', () => {
-    if (!svg.node().isConnected) { sim.stop(); return; }
+    if (!view.svg.node().isConnected) { sim.stop(); return; }
     onTick(edgeSel, nodeSel);
   });
 
   return { sim, edgeSel, nodeSel };
 }
 
-/** Build the legend item for the relation edge kind (dashed line swatch + label). */
-function buildRelationLegendItem() {
+/** Duration (ms) of the "Fit" zoom transition; skipped under prefers-reduced-motion. */
+const FIT_TRANSITION_MS = 750;
+/** Breathing room (px) kept between the fitted node bounding box and the panel edge. */
+const FIT_PADDING_PX = 32;
+/** Smallest bounding-box span treated as non-zero, so a one-node graph cannot divide by zero. */
+const FIT_MIN_EXTENT = 1;
+
+/** True when the OS/browser requests reduced motion; the fit action skips its transition then. */
+function prefersReducedMotion() {
+  return Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+}
+
+/**
+ * Clamp a scale to the zoom behaviour's own scaleExtent, so "Fit" can never
+ * zoom past what the user's own scroll/pinch gestures are limited to.
+ */
+function clampZoomScale(scale) {
+  const [min, max] = ZOOM_SCALE_EXTENT;
+  return Math.min(Math.max(scale, min), max);
+}
+
+/**
+ * Compute the axis-aligned bounding box of each node's current simulation
+ * position. Reads live `.x`/`.y` (not a cached layout captured at render
+ * time) so "Fit" reflects wherever the simulation and any drag have
+ * actually settled the nodes by the time the user clicks it. Non-finite
+ * coordinates are filtered out first — `Math.min`/`Math.max` of zero
+ * arguments fall back to their `Infinity`/`-Infinity` identities, the same
+ * "nothing found" values a caller would seed a manual scan with.
+ *
+ * @param {object[]} nodes - Node data bound to the rendered node selection.
+ * @returns {{minX: number, minY: number, maxX: number, maxY: number}}
+ */
+function nodeBoundingBox(nodes) {
+  const xs = nodes.map((d) => d.x).filter(Number.isFinite);
+  const ys = nodes.map((d) => d.y).filter(Number.isFinite);
+  return {
+    minX: Math.min(...xs), maxX: Math.max(...xs),
+    minY: Math.min(...ys), maxY: Math.max(...ys),
+  };
+}
+
+/**
+ * Build the zoom transform that centres and scales a node bounding box to
+ * fill `width`×`height` with `FIT_PADDING_PX` of breathing room — the
+ * standard "translate to the viewport centre, scale, then translate back by
+ * the box's own centre" construction, clamped to the zoom behaviour's own
+ * scaleExtent.
+ *
+ * @param {{minX: number, minY: number, maxX: number, maxY: number}} box - From `nodeBoundingBox`.
+ * @param {number} width - Panel width (simulation units).
+ * @param {number} height - Panel height (simulation units).
+ */
+function fitTransform(box, width, height) {
+  const boxWidth  = Math.max(box.maxX - box.minX, FIT_MIN_EXTENT);
+  const boxHeight = Math.max(box.maxY - box.minY, FIT_MIN_EXTENT);
+  const scale = clampZoomScale(
+    Math.min((width - FIT_PADDING_PX * 2) / boxWidth, (height - FIT_PADDING_PX * 2) / boxHeight),
+  );
+  const centerX = (box.minX + box.maxX) / 2;
+  const centerY = (box.minY + box.maxY) / 2;
+  return globalThis.d3.zoomIdentity
+    .translate(width / 2, height / 2)
+    .scale(scale)
+    .translate(-centerX, -centerY);
+}
+
+/**
+ * Build the "Fit" control's action for one render. Recomputes the node
+ * bounding box from LIVE simulation positions on every call — not a
+ * snapshot taken when the graph first rendered — so it reflects panning or
+ * dragging that happened before the click. Applies the transform through
+ * the zoom behaviour itself (`zoom.transform`, the same one mouse/wheel/drag
+ * gestures drive) rather than writing the `<g>` transform attribute
+ * directly, so d3-zoom's own internal transform stays in sync — otherwise
+ * the next user pan would jump to wherever the zoom behaviour last thought
+ * it was.
+ *
+ * @param {{svg: object, zoom: object, width: number, height: number}} view - From `initGraph`.
+ * @param {object} nodeSel - The rendered node selection (from `renderGraph`).
+ * @returns {() => void} The `fit()` action.
+ */
+function makeFitAction(view, nodeSel) {
+  return function fit() {
+    const transform = fitTransform(nodeBoundingBox(nodeSel.data()), view.width, view.height);
+    const target = prefersReducedMotion()
+      ? view.svg
+      : view.svg.transition().duration(FIT_TRANSITION_MS);
+    target.call(view.zoom.transform, transform);
+  };
+}
+
+/**
+ * Legend entries: label plus the node class whose swatch it shows. Exported
+ * so the dashboard's compact panel (viewer-dashboard.js) can render its own
+ * inline legend row from the same four semantics `nodeClass()` resolves
+ * against, rather than hardcoding a second copy that could drift out of
+ * sync with this one.
+ */
+export const LEGEND_KINDS = [
+  { label: 'concept',  kind: 'concept' },
+  { label: 'entity',   kind: 'entity' },
+  { label: 'stale',    kind: 'stale' },
+  { label: 'dangling', kind: 'dangling' },
+];
+
+/** Build one legend row with a class-styled swatch. */
+function buildLegendItem(label, kindClass) {
   const item = document.createElement('div');
   item.className = 'graph-legend-item';
-
-  const swatch = document.createElement('div');
-  swatch.className = 'graph-legend-dot';
-  swatch.style.background = 'transparent';
-  swatch.style.border = `1px dashed ${RELATION_EDGE_STROKE}`;
-
-  item.appendChild(swatch);
-  item.appendChild(document.createTextNode('relation'));
+  const dot = document.createElement('div');
+  dot.className = `graph-legend-dot graph-legend-dot--${kindClass}`;
+  item.appendChild(dot);
+  item.appendChild(document.createTextNode(label));
   return item;
+}
+
+/** Build the legend item for the relation edge kind (dashed swatch + label). */
+function buildRelationLegendItem() {
+  return buildLegendItem('relation', 'relation');
 }
 
 /** Append the "Edge kind" heading + the relation-edge legend item to the legend. */
@@ -366,28 +627,8 @@ function buildLegend(container) {
   kindHeading.textContent = 'Node kind';
   legend.appendChild(kindHeading);
 
-  const LEGEND_KINDS = [
-    { label: 'concept',    dashed: false, ...KIND_COLORS.concept },
-    { label: 'entity',     dashed: false, ...KIND_COLORS.entity },
-    { label: 'comparison', dashed: false, ...KIND_COLORS.comparison },
-    { label: 'overview',   dashed: false, ...KIND_COLORS.overview },
-    { label: 'orphan',     dashed: false, ...ORPHAN_COLOR },
-    { label: 'missing',    dashed: true,  ...DANGLING_COLOR },
-  ];
-
-  for (const { label, dashed, fill, stroke } of LEGEND_KINDS) {
-    const item = document.createElement('div');
-    item.className = 'graph-legend-item';
-
-    const dot = document.createElement('div');
-    dot.className = 'graph-legend-dot';
-    dot.style.background = fill;
-    dot.style.border = `1px ${dashed ? 'dashed' : 'solid'} ${stroke}`;
-
-    const text = document.createTextNode(label);
-    item.appendChild(dot);
-    item.appendChild(text);
-    legend.appendChild(item);
+  for (const { label, kind } of LEGEND_KINDS) {
+    legend.appendChild(buildLegendItem(label, kind));
   }
 
   appendEdgeKindSection(legend);
@@ -405,30 +646,52 @@ function buildLegend(container) {
   container.appendChild(legend);
 }
 
-/** Show a placeholder message when the wiki has no pages yet. */
+/** True once `/api/graph` returned at least one node to draw. */
+function hasRenderableNodes(data) {
+  return Boolean(data?.nodes?.length);
+}
+
+/** Show the design system empty state when the wiki has no pages yet. */
 function renderEmptyState(container) {
-  const p = document.createElement('p');
-  p.className = 'placeholder';
-  p.textContent = 'No pages yet — run `llmwiki compile`.';
-  container.appendChild(p);
+  container.appendChild(
+    emptyState(
+      "Nothing to graph yet",
+      "The graph draws links between compiled pages. Compile at least two pages that reference each other to see structure here.",
+      "$ llmwiki compile",
+    ),
+  );
 }
 
 /**
- * Entry point called by viewer.js when the `#/graph` route is active.
- * Fetches `/api/graph`, builds the SVG, and starts the force simulation.
+ * Entry point for both the `#/graph` route (viewer.js) and the dashboard's
+ * compact panel (viewer-dashboard.js). Fetches `/api/graph`, builds the SVG,
+ * and starts the force simulation — the same fetch call and simulation
+ * builder run in both modes; only the resolved settings differ (see
+ * `resolveSettings`).
  *
- * @param {HTMLElement} container - The `.graph-pane` element to render into.
+ * @param {HTMLElement} container - Element to render into.
+ * @param {{compact?: boolean, staleIds?: Set<string>}} [options] - Compact mode
+ *   drops the legend and drag and tightens the forces for a small panel.
+ *   `staleIds` comes from `staleIdsFromEnvelope()` over the already-fetched
+ *   `/api/pages` envelope; a caller that omits it gets kind-only colouring
+ *   (no stale nodes highlighted).
+ * @returns {Promise<{fit: () => void}|null>} A control handle exposing
+ *   `fit()` (see `makeFitAction`), or `null` when nothing was rendered — no
+ *   data, an empty graph, or a failed fetch. Callers use the `null` case to
+ *   know a "Fit" affordance has nothing to act on (see viewer-dashboard.js's
+ *   `mountGraphPanel`).
  */
-export async function loadGraph(container) {
+export async function loadGraph(container, options = {}) {
   const data = await fetchGraphData(container);
-  if (!data) return;
-  if (!data.nodes || data.nodes.length === 0) {
+  if (!data) return null;
+  if (!hasRenderableNodes(data)) {
     renderEmptyState(container);
-    return;
+    return null;
   }
-  const { svg, g, width, height, tooltip } = initGraph(container);
-  renderGraph(svg, g, data, tooltip, width, height);
-  buildLegend(container);
+  const view = initGraph(container);
+  const { nodeSel } = renderGraph(view, data, options);
+  if (!options.compact) buildLegend(container);
+  return { fit: makeFitAction(view, nodeSel) };
 }
 
 /** Fetch /api/graph and parse JSON; render an inline error banner and return null on failure. */

@@ -11,8 +11,12 @@
  * `version`.
  */
 
-import type { GraphNodeId, PageId } from "../viewer/types.js";
-import type { PageDirectory } from "../export/types.js";
+import type {
+  GraphNodeId,
+  PageId,
+  ViewerPageDirectory,
+  ViewerPageId,
+} from "../viewer/types.js";
 import type { RecommendedAction } from "../project/recommendations.js";
 import type { FreshnessStatus } from "../freshness/types.js";
 
@@ -183,9 +187,16 @@ export interface ContextTier {
 
 /** One primary page entry. `reasons` is sorted alphabetically for stable output. */
 export interface ContextPrimary {
-  id: PageId;
+  /**
+   * A default page's `PageId`, or a typed entity page's `EntityId`. Typed pages
+   * have been rankable primaries since the pool started carrying them; the union
+   * only makes that honest at the type level. A DEFAULT pack still emits nothing
+   * but `PageId`s, so its wire shape is unchanged.
+   */
+  id: ViewerPageId;
   title: string;
-  pageDirectory: PageDirectory;
+  /** `concepts`/`queries`, or a typed page's entity type. See {@link ViewerPageDirectory}. */
+  pageDirectory: ViewerPageDirectory;
   score: number;
   reasons: PrimaryReason[];
   summary: string;

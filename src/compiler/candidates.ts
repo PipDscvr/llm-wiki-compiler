@@ -41,11 +41,13 @@ export {
   readCandidate,
   readCandidateBySlug,
   listCandidates,
+  listCandidatePage,
   countCandidates,
   listLinkResolvablePendingSlugs,
   loadCandidateOrFail,
   loadCandidateUnderLockOrFail,
 } from "./candidate-read.js";
+export type { CandidatePage } from "./candidate-read.js";
 export { UnsafeCandidateIdError } from "./candidate-paths.js";
 
 /** Length (bytes) of the random suffix appended to candidate ids. */
@@ -64,6 +66,12 @@ export interface CandidateDraft {
    * never need incremental tracking (legacy / tests) can omit it.
    */
   sourceStates?: Record<string, SourceState>;
+  /**
+   * Digest of the prompt modifiers this candidate was generated under, so
+   * compile can tell a candidate that already covers this run's work from one
+   * whose wording predates a modifier change.
+   */
+  promptModifiers?: string;
   /**
    * Schema lint violations for the candidate body detected at compile time.
    * Omit (or pass `undefined`) when the candidate body is clean.
@@ -188,6 +196,7 @@ function buildCandidate(draft: CandidateDraft, id: string): ReviewCandidate {
 /** Copy optional candidate fields while preserving the legacy omission rules. */
 function copyCandidateOptionalFields(candidate: ReviewCandidate, draft: CandidateDraft): void {
   setCandidateField(candidate, "sourceStates", draft.sourceStates, draft.sourceStates !== undefined);
+  setCandidateField(candidate, "promptModifiers", draft.promptModifiers, Boolean(draft.promptModifiers));
   setCandidateField(candidate, "schemaViolations", draft.schemaViolations, draft.schemaViolations !== undefined);
   setCandidateField(candidate, "provenanceViolations", draft.provenanceViolations, draft.provenanceViolations !== undefined);
   setCandidateField(candidate, "confidence", draft.confidence, draft.confidence !== undefined);

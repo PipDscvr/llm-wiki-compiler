@@ -1,332 +1,550 @@
 /**
- * llmwiki viewer — sidebar renderer.
+ * llmwiki viewer — sidebar navigation.
  *
- * Renders the standing project links first, then concept pages grouped
- * by frontmatter `kind` (defaulting to "concept" when absent — spec
- * line 347), then a "Saved Queries" group. Groups use native
- * `<details><summary>` so keyboard users get Enter/Space collapse for
- * free without bespoke ARIA wiring.
+ * The Nebula sidebar is pure navigation: a project block, a BROWSE section,
+ * a MAINTAIN section, and a docs card. The page tree and freshness filter
+ * that used to live here now belong to the #/concepts list route, so the
+ * sidebar stays a fixed height regardless of wiki size.
  *
- * First paint runs against the embedded page-index blob (which now
- * includes `kind` so the grouping is correct from the first byte);
- * the full `/api/pages` envelope replaces the contents once it
- * arrives.
+ * BROWSE keeps a fixed spine — Overview, Sources, Graph explorer — and varies
+ * only the type rows between them: they are whatever entity types the ACTIVE
+ * PROFILE declares. A default project declares none through
+ * `profilePipeline`, so its own Concepts and Queries rows stand and the sidebar
+ * is exactly what it was. See viewer-nav-types.js for the ordering and
+ * labelling rules the generated rows follow.
  *
- * A per-axis freshness filter (all / stale / orphaned / contradicted /
- * archived) narrows the page list client-side over the already-loaded
- * `/api/pages` rows. No new endpoint is needed — the filter is pure
- * DOM manipulation over the in-memory page list.
+ * Counts are advisory: every field of the render model is optional so first
+ * paint can render the nav before /api/pages settles, and a failed
+ * /api/health drops only the lint badge rather than blanking the nav.
+ *
+ * Entries whose surface does not exist in a read-only viewer (Settings,
+ * Compile & export) are deliberately absent — see the design spec §2.3.
  */
+
+import { el } from "./viewer-dom.js";
+import { lintTotal } from "./viewer-format.js";
+import { NAV_TYPE_CAP, typeNavItems } from "./viewer-nav-types.js";
+import { typeListHashType } from "./viewer-routes.js";
 
 const SIDEBAR_SELECTOR = "[data-sidebar]";
-const DEFAULT_KIND = "concept";
-const EMPTY_PLACEHOLDER_TEXT = "No pages yet — run `llmwiki compile`.";
+
+/** Rendered when a count is present and zero. */
+const EMPTY_COUNT = "—";
+
+/** `profileId` the envelope reports when no profile is installed (server.ts). */
+const DEFAULT_PROFILE_ID = "default";
 
 /**
- * CSS class on the standing "Project" section. Shared between
- * `buildProjectSection` (which sets it) and `reRenderSidebarGroups`
- * (whose keep-selector preserves it across filter re-renders) so a
- * rename can't silently break the re-render keep-list.
+ * Nav entries per section. `count` names the `counts` key whose value is
+ * shown; entries without one render no count. `route` doubles as the
+ * `data-route` value `markActive` matches on.
+ *
+ * `zeroCountDisplay` sets what a zero count reads as, per section (mockup
+ * tree lines 44/57): BROWSE has nothing to browse — an absence, shown as an
+ * em dash; MAINTAIN's "zero pending reviews" is a meaningful, reassuring
+ * fact rather than an absence, so it shows the literal digit instead.
  */
-const PROJECT_SECTION_CLASS = "sidebar-health";
-
-/** The active freshness filter. "all" means no narrowing. */
-let activeFreshnessFilter = "all";
-
-/** Available filter values and their human labels. */
-const FRESHNESS_FILTER_OPTIONS = [
-  { value: "all", label: "All" },
-  { value: "stale", label: "Stale" },
-  { value: "orphaned", label: "Orphaned" },
-  { value: "contradicted", label: "Contradicted" },
-  { value: "archived", label: "Archived" },
+const NAV_SECTIONS = [
+  {
+    label: "BROWSE",
+    zeroCountDisplay: "dash",
+    // BROWSE is the section the active profile's vocabulary projects into: it
+    // shows the profile name on its header and swaps its `profileTypeSlot`
+    // rows for the profile's declared types. MAINTAIN does neither.
+    showsProfileTypes: true,
+    items: [
+      { route: "home", href: "#/", label: "Overview" },
+      // `profileTypeSlot`: Concepts and Queries are not fixed labels — they are
+      // the two entity types the DEFAULT profile declares. On a project running
+      // another profile they are replaced, in place, by that profile's own
+      // types (see `sectionItems`). Overview, Sources and Graph explorer are
+      // the fixed spine and never vary.
+      { route: "concepts", href: "#/concepts", label: "Concepts", count: "concepts", profileTypeSlot: true },
+      { route: "sources", href: "#/sources", label: "Sources", collisionLabel: "Source files", count: "sourceFiles" },
+      { route: "queries", href: "#/queries", label: "Queries", count: "queries", profileTypeSlot: true },
+      { route: "graph", href: "#/graph", label: "Graph explorer" },
+    ],
+  },
+  {
+    label: "MAINTAIN",
+    zeroCountDisplay: "digit",
+    items: [
+      { route: "health", href: "#/health", label: "Health & lint", badge: "lint" },
+      { route: "reviews", href: "#/reviews", label: "Reviews", collisionLabel: "Review queue", count: "pendingReviews" },
+      // No count: workflow runs are not in the bootstrap envelope (they live
+      // outside the frozen snapshot and #/workflows fetches them per visit),
+      // so the sidebar has no number to show without a second startup request.
+      //
+      // `profileOnly`: workflows are declared BY a profile, so a default-profile
+      // project cannot have one — not "has none yet", but cannot. Showing the
+      // entry there would advertise a capability the project is structurally
+      // incapable of, and `llmwiki template init` refuses to add a profile to a
+      // project that already has pages, so the empty state would be permanent.
+      // The profile-vocabulary design gates it the same way: its default
+      // sidebar has no Pipeline row, only the two profile ones do.
+      { route: "workflows", href: "#/workflows", label: "Workflows", profileOnly: true },
+      // `profileOnly` for the same structural reason as Workflows: only a
+      // profile declares entity types and lifecycles, so a default project has
+      // no pipeline to draw — which is exactly what the design's default
+      // sidebar shows, and why its two profile sidebars are the only ones with
+      // a Pipeline row. The count is the number of entity types the profile
+      // declares (see `navCounts`, viewer.js) — the number of rows the panel
+      // will have, not a workload.
+      { route: "pipeline", href: "#/pipeline", label: "Pipeline", count: "pipelineTypes", profileOnly: true },
+    ],
+  },
 ];
 
 /**
- * Static (non-page) hash routes that have a dedicated sidebar link.
- * `markActive` highlights the entry via `a[data-route="<route>"]`
- * without needing to parse the route descriptor.
+ * Leading segment of a PAGE hash, `#/<segment>/<slug>`.
+ *
+ * A page route's leading segment is its parent nav entry, so `#/concepts/alpha`
+ * and `#/articles/alpha` both resolve to the entry that owns them without a
+ * table to keep in step — including the per-project typed entries the sidebar
+ * cannot enumerate here.
+ *
+ * The slug is REQUIRED. Every single-segment route the viewer has is in
+ * {@link STATIC_ROUTE_FOR_HASH}, and a typed list route is namespaced
+ * (`#/_type/articles`), so a bare `#/articles` routes nowhere — matching it here
+ * would light a nav row while the pane shows the home fallback, which is the
+ * highlight lying about where the reader is.
  */
-const STATIC_ROUTE_LINK_SELECTORS = new Map([
-  ["#/graph", 'a[data-route="graph"]'],
-  ["#/health", 'a[data-route="health"]'],
+const HASH_ROUTE_SEGMENT = /^#\/([^/]+)\/.+$/;
+
+/** Hashes that resolve to the home route. */
+const HOME_HASHES = new Set(["", "#", "#/"]);
+
+/**
+ * Exact-hash to nav route mapping for the static routes.
+ *
+ * The typed list routes are deliberately absent: they are per-project, and they
+ * are namespaced (`#/_type/<entity-type>`) precisely so a profile's `sources`
+ * type cannot claim the `#/sources` row above. {@link activeRouteName} resolves
+ * the namespace before consulting this table.
+ */
+const STATIC_ROUTE_FOR_HASH = new Map([
+  ["#/concepts", "concepts"],
+  ["#/queries", "queries"],
+  ["#/sources", "sources"],
+  ["#/graph", "graph"],
+  ["#/health", "health"],
+  ["#/reviews", "reviews"],
+  ["#/workflows", "workflows"],
+  ["#/pipeline", "pipeline"],
+  ["#/index", "home"],
 ]);
 
-/** Full page list captured at the last renderSidebar call for filter re-renders. */
-let lastPages = [];
-
-/** Render the sidebar groups + standing Health entry, then mark active. */
-export function renderSidebar(pages) {
-  lastPages = pages;
+/**
+ * Render the sidebar navigation.
+ *
+ * @param {{project?: {title?: string}, counts?: Record<string, number>,
+ *          lint?: {warnings?: number, errors?: number} | null, profileId?: string,
+ *          entityTypes?: {type: string, pageCount: number}[]}} model
+ */
+export function renderSidebar(model) {
   const sidebar = document.querySelector(SIDEBAR_SELECTOR);
   if (!sidebar) return;
   sidebar.innerHTML = "";
-  sidebar.appendChild(buildProjectSection());
-  sidebar.appendChild(buildFreshnessFilter());
-  renderFilteredGroups(sidebar, pages);
+  sidebar.appendChild(buildLockup());
+  sidebar.appendChild(buildProjectBlock(model?.project));
+  for (const section of NAV_SECTIONS) {
+    sidebar.appendChild(buildNavSection(section, model));
+  }
+  sidebar.appendChild(buildFooterGroup());
   markActive();
 }
 
-/** Re-render only the page groups using the stored lastPages + active filter. */
-function reRenderSidebarGroups() {
-  const sidebar = document.querySelector(SIDEBAR_SELECTOR);
-  if (!sidebar) return;
-  // Remove everything after the project section and filter control.
-  const keep = sidebar.querySelectorAll(`section.${PROJECT_SECTION_CLASS}, .freshness-filter`);
-  const keepSet = new Set(Array.from(keep));
-  Array.from(sidebar.children).forEach((child) => {
-    if (!keepSet.has(child)) child.remove();
-  });
-  renderFilteredGroups(sidebar, lastPages);
-  markActive();
-}
-
-/** Append the filtered concept/query groups and the empty placeholder if needed. */
-function renderFilteredGroups(sidebar, pages) {
-  const filtered = applyFreshnessFilter(pages, activeFreshnessFilter);
-  const concepts = filterByDirectory(filtered, "concepts");
-  const queries = filterByDirectory(filtered, "queries");
-  appendConceptGroups(sidebar, concepts);
-  appendQueryGroup(sidebar, queries);
-  appendEmptyPlaceholderIfNeeded(sidebar, concepts, queries);
-}
-
-/** Filter pages to those whose `pageDirectory` matches the given bucket. */
-function filterByDirectory(pages, directory) {
-  return pages.filter((p) => p.pageDirectory === directory);
-}
-
-/** Append one collapsible `<details>` group per concept kind. */
-function appendConceptGroups(sidebar, concepts) {
-  for (const [kind, groupPages] of groupConceptsByKind(concepts)) {
-    sidebar.appendChild(buildCollapsibleGroup(formatKindLabel(kind), groupPages, "kind", kind));
-  }
-}
-
-/** Append the Saved Queries group when at least one query page exists. */
-function appendQueryGroup(sidebar, queries) {
-  if (queries.length === 0) return;
-  sidebar.appendChild(buildCollapsibleGroup("Saved Queries", queries, "kind", "query"));
-}
-
-/** Render the "No pages yet" placeholder when both buckets are empty. */
-function appendEmptyPlaceholderIfNeeded(sidebar, concepts, queries) {
-  if (concepts.length > 0 || queries.length > 0) return;
-  const empty = document.createElement("p");
-  empty.className = "placeholder";
-  empty.textContent = EMPTY_PLACEHOLDER_TEXT;
-  sidebar.appendChild(empty);
-}
-
 /**
- * Mark the sidebar entry matching the current hash route as
- * `aria-current="page"` and clear it from every other entry. Exported
- * so `viewer.js` can call it after route changes without duplicating
- * the parsing logic. Reads `location.hash` directly so the call site
- * doesn't need to thread the route descriptor through.
+ * Build the product lockup: the 34px mark beside the product name and tagline.
+ * The design system requires the mark never sit on a coloured plate, so this
+ * renders directly on the sidebar surface with no background of its own.
  */
-export function markActive() {
-  const hash = location.hash;
-  const links = document.querySelectorAll(`${SIDEBAR_SELECTOR} a`);
-  clearCurrentAttribute(links);
-  if (markStaticRoute(hash)) return;
-  markPageRoute(links, parseExpectedPageId(hash));
-}
-
-/** Remove `aria-current` from every sidebar link in `links`. */
-function clearCurrentAttribute(links) {
-  for (const link of links) link.removeAttribute("aria-current");
-}
-
-/**
- * Apply `aria-current="page"` to the static-route link for `hash`,
- * if the hash names a known static route. Returns true when handled
- * so the page-route fallback can be skipped.
- */
-function markStaticRoute(hash) {
-  const selector = STATIC_ROUTE_LINK_SELECTORS.get(hash);
-  if (!selector) return false;
-  document.querySelector(selector)?.setAttribute("aria-current", "page");
-  return true;
-}
-
-/** Apply `aria-current="page"` to the link whose pageId matches `expectedId`. */
-function markPageRoute(links, expectedId) {
-  if (!expectedId) return;
-  for (const link of links) {
-    if (link.dataset.pageId === expectedId) {
-      link.setAttribute("aria-current", "page");
-      return;
-    }
-  }
-}
-
-/**
- * Group concept pages by their `kind` field. Missing/non-string kinds
- * fall back to `"concept"` per spec §Sidebar. Group order is stable
- * by kind name (locale-aware), with the default `concept` bucket
- * floated to the top so a typical wiki shows "Concept" first.
- */
-function groupConceptsByKind(concepts) {
-  const byKind = new Map();
-  for (const page of concepts) {
-    addPageToKindBucket(byKind, page);
-  }
-  const kinds = Array.from(byKind.keys()).sort(compareKinds);
-  return kinds.map((kind) => /** @type {[string, Array]} */ ([kind, byKind.get(kind)]));
-}
-
-/** Push `page` onto the bucket for its resolved kind, creating it if needed. */
-function addPageToKindBucket(byKind, page) {
-  const kind = resolveKind(page);
-  if (!byKind.has(kind)) byKind.set(kind, []);
-  byKind.get(kind).push(page);
-}
-
-/** Read `page.kind` defensively, falling back to DEFAULT_KIND when absent. */
-function resolveKind(page) {
-  if (typeof page.kind === "string" && page.kind.length > 0) return page.kind;
-  return DEFAULT_KIND;
-}
-
-/** Sort comparator that floats DEFAULT_KIND first, then locale-orders the rest. */
-function compareKinds(a, b) {
-  if (a === DEFAULT_KIND) return -1;
-  if (b === DEFAULT_KIND) return 1;
-  return a.localeCompare(b);
-}
-
-/** Title-case a kind for the group heading. */
-function formatKindLabel(kind) {
-  if (kind === DEFAULT_KIND) return "Concepts";
-  return kind.charAt(0).toUpperCase() + kind.slice(1);
-}
-
-/** Build a collapsible `<details>` group with a flat link list of pages. */
-function buildCollapsibleGroup(label, pages, datasetKey, datasetValue) {
-  const wrap = document.createElement("details");
-  wrap.open = true;
-  if (datasetKey) wrap.dataset[datasetKey] = datasetValue;
-  const summary = document.createElement("summary");
-  summary.textContent = label;
-  wrap.appendChild(summary);
-  const list = document.createElement("ul");
-  for (const page of pages) list.appendChild(buildPageListItem(page));
-  wrap.appendChild(list);
+function buildLockup() {
+  const wrap = el("div", "sidebar-lockup");
+  const mark = document.createElement("img");
+  mark.className = "sidebar-lockup-mark";
+  mark.src = "/assets/llmwiki-logo-64.png";
+  mark.width = 34;
+  mark.height = 34;
+  mark.alt = "";
+  mark.setAttribute("aria-hidden", "true");
+  wrap.appendChild(mark);
+  const text = el("div", "sidebar-lockup-text");
+  text.appendChild(el("div", "sidebar-lockup-name", "LLM Wiki Compiler"));
+  text.appendChild(el("div", "sidebar-lockup-tagline", "compile once · reuse forever"));
+  wrap.appendChild(text);
   return wrap;
 }
 
-/** Build one `<li><a>` entry for a sidebar page list. */
-function buildPageListItem(page) {
-  const li = document.createElement("li");
-  const a = document.createElement("a");
-  a.href = `#/${encodeURIComponent(page.pageDirectory)}/${encodeURIComponent(page.slug)}`;
-  a.dataset.pageId = page.id;
-  a.textContent = page.title || page.slug;
-  li.appendChild(a);
+/** Build the PROJECT block: name plus the local/read-only marker. */
+function buildProjectBlock(project) {
+  const wrap = el("div", "project-block");
+  // PROJECT gets its own label class, not `.nav-section-label` — the
+  // mockup gives it a different colour, margin, and no horizontal padding
+  // compared to the BROWSE/MAINTAIN eyebrows (see viewer-chrome.css).
+  wrap.appendChild(el("div", "project-label", "PROJECT"));
+  const name = el("div", "project-name", project?.title || "llmwiki");
+  name.dataset.projectName = "";
+  wrap.appendChild(name);
+  const status = el("div", "project-status");
+  status.appendChild(el("span", "status-dot"));
+  status.appendChild(el("span", undefined, "LOCAL · READ ONLY"));
+  wrap.appendChild(status);
+  return wrap;
+}
+
+/** Build one labelled nav section with the entries this project can actually use. */
+function buildNavSection(section, model) {
+  const typeItems = section.showsProfileTypes === true ? typeNavItems(model?.entityTypes) : [];
+  const wrap = el("section", "nav-section");
+  wrap.appendChild(buildSectionHead(section, model, typeItems));
+  wrap.appendChild(buildNavList(section, model, typeItems));
+  return wrap;
+}
+
+/**
+ * The section's eyebrow row. BROWSE carries the active profile's name on it,
+ * right-aligned — the vocabulary in play is a property of the whole section, so
+ * it belongs on the header rather than costing a row of its own.
+ */
+function buildSectionHead(section, model, typeItems) {
+  const head = el("div", "nav-section-head");
+  head.appendChild(el("div", "nav-section-label", section.label));
+  const name = profileHeaderName(model?.profileId, typeItems);
+  if (name !== null) head.appendChild(el("span", "nav-section-profile", name));
+  return head;
+}
+
+/**
+ * What the BROWSE header says about the active profile, or null when there is
+ * nothing to say (a default project, or a section that shows no types).
+ *
+ * A CAPPED list appends the true total: the rows no longer add up to it, so the
+ * header is the only place left that can state how many types the profile
+ * actually declares. An uncapped list is countable by eye and gets the bare
+ * name — one word, no arithmetic (mockup: "newsroom" versus "research · 12").
+ */
+function profileHeaderName(profileId, typeItems) {
+  if (typeItems.length === 0) return null;
+  if (typeof profileId !== "string") return null;
+  return typeItems.length > NAV_TYPE_CAP ? `${profileId} · ${typeItems.length}` : profileId;
+}
+
+/** Build the section's `<ul>`, expanding the type-group marker where it appears. */
+function buildNavList(section, model, typeItems) {
+  const list = el("ul", "nav-list");
+  const taken = typeLabelsInPlay(model);
+  for (const item of sectionItems(section, typeItems)) {
+    if (item === TYPE_GROUP) {
+      appendTypeGroup(list, typeItems, section.zeroCountDisplay, model);
+      continue;
+    }
+    if (!isNavItemApplicable(item, model)) continue;
+    list.appendChild(buildNavItem(disambiguated(item, taken), section.zeroCountDisplay, model));
+  }
+  return list;
+}
+
+/**
+ * Every label the active profile's type rows occupy, across the whole sidebar.
+ *
+ * Gathered once per render and passed to both sections, because a collision can
+ * straddle them: a `reviews` entity type sits in BROWSE while the review queue
+ * sits in MAINTAIN, and two rows reading "Reviews" are no less ambiguous for
+ * being in different groups.
+ */
+function typeLabelsInPlay(model) {
+  return new Set(typeNavItems(model?.entityTypes).map((item) => item.label));
+}
+
+/**
+ * A fixed row, relabelled when a profile type has taken its name.
+ *
+ * The shipped `autosci` template declares entity types called `sources` and
+ * `reviews`, so its sidebar rendered two rows reading "Sources" and two reading
+ * "Reviews" — same accessible name, different destinations. Namespacing the
+ * typed routes fixed where those rows GO; this fixes what they SAY.
+ *
+ * The fixed row yields, never the type row: an entity type's name is the
+ * reader's own data and renaming it would misreport their profile, whereas
+ * these labels are ours and the longer forms are the more precise ones anyway
+ * — "Source files" is what that route lists, and "Review queue" is what that
+ * one holds. A project whose profile takes neither name (every default project,
+ * and `newsroom`) is untouched, which is what keeps the default sidebar
+ * byte-identical.
+ */
+function disambiguated(item, takenLabels) {
+  if (typeof item.collisionLabel !== "string") return item;
+  if (!takenLabels.has(item.label)) return item;
+  return { ...item, label: item.collisionLabel };
+}
+
+/** Marker standing in for the generated type rows inside a section's item list. */
+const TYPE_GROUP = Object.freeze({ typeGroup: true });
+
+/** True when an item is one of the default profile's own type rows. */
+function isProfileTypeSlot(item) {
+  return item.profileTypeSlot === true;
+}
+
+/**
+ * The section's entries with the profile's types spliced into the slot the
+ * default profile's first type row occupies — so a newsroom's Articles/Desks/
+ * Bylines land exactly where Concepts sat, between Overview and Sources, and
+ * the remaining default type row (Queries) drops out rather than duplicating
+ * the same pages under a second vocabulary.
+ *
+ * With no declared types the items are returned untouched, which is the whole
+ * default-project guarantee: one code path, and nothing to diff.
+ */
+function sectionItems(section, typeItems) {
+  if (typeItems.length === 0) return section.items;
+  const slot = section.items.findIndex(isProfileTypeSlot);
+  // Nothing before the FIRST slot is itself a slot, so the head needs no filter.
+  return [
+    ...section.items.slice(0, slot),
+    TYPE_GROUP,
+    ...section.items.slice(slot + 1).filter((item) => !isProfileTypeSlot(item)),
+  ];
+}
+
+/**
+ * Append the type rows, plus the overflow footer when there are more of them
+ * than {@link NAV_TYPE_CAP} keeps in view.
+ *
+ * Every declared type is rendered whatever the count: the cap is a scroll, not
+ * a truncation, so a type is never absent from the nav — only out of view, with
+ * the residual count saying how many and "All types" offering the screen that
+ * lists the full set.
+ */
+function appendTypeGroup(list, typeItems, zeroCountDisplay, model) {
+  list.appendChild(buildTypeGroup(typeItems, zeroCountDisplay, model));
+  if (typeItems.length > NAV_TYPE_CAP) list.appendChild(buildTypeOverflow(typeItems.length));
+}
+
+/**
+ * The type rows as one `<li>` holding a nested list, so BROWSE stays a single
+ * `<ul>` and the fixed spine rows either side stay its direct siblings. Past
+ * the cap the group also carries the bottom fade, which lives OUTSIDE the
+ * scrolling list so it stays pinned to the edge instead of travelling with the
+ * rows (see viewer-chrome.css).
+ */
+function buildTypeGroup(typeItems, zeroCountDisplay, model) {
+  const isCapped = typeItems.length > NAV_TYPE_CAP;
+  const group = el("li", isCapped ? "nav-type-group is-capped" : "nav-type-group");
+  const inner = el("ul", "nav-type-list");
+  for (const item of typeItems) inner.appendChild(buildNavItem(item, zeroCountDisplay, model));
+  group.appendChild(inner);
+  if (isCapped) group.appendChild(el("span", "nav-type-fade"));
+  return group;
+}
+
+/**
+ * The footer under a capped list: how many rows sit below the fold, and a link
+ * to the screen that lists every type.
+ *
+ * The link deliberately carries NO `data-route`. It shares the Pipeline entry's
+ * destination, and a second element claiming that route would take the
+ * highlight from the real MAINTAIN entry.
+ */
+function buildTypeOverflow(total) {
+  const li = el("li", "nav-type-overflow");
+  li.appendChild(el("span", "nav-type-residual", `${total - NAV_TYPE_CAP} more · scroll`));
+  const all = el("a", "nav-type-all", "All types");
+  all.href = "#/pipeline";
+  li.appendChild(all);
   return li;
 }
 
-/** Build the standing "Project" sidebar section with Health and Graph links. */
-function buildProjectSection() {
-  const wrap = document.createElement("section");
-  wrap.className = PROJECT_SECTION_CLASS;
-  const heading = document.createElement("h2");
-  heading.textContent = "Project";
-  wrap.appendChild(heading);
-  const list = document.createElement("ul");
-  list.appendChild(buildProjectRouteItem("#/health", "health", "Health"));
-  list.appendChild(buildProjectRouteItem("#/graph", "graph", "Graph"));
-  wrap.appendChild(list);
-  return wrap;
-}
-
-/** Build one `<li><a>` entry for the standing Project section. */
-function buildProjectRouteItem(href, route, label) {
-  const item = document.createElement("li");
-  const link = document.createElement("a");
-  link.href = href;
-  link.dataset.route = route;
-  link.textContent = label;
-  item.appendChild(link);
-  return item;
+/**
+ * Whether an entry's surface can exist in THIS project.
+ *
+ * Only `profileOnly` entries can be inapplicable, and the test is deliberately
+ * "can this project ever have one", not "does it have one now" — an empty
+ * Reviews queue still earns its row because a candidate can appear at any time,
+ * whereas a default-profile project can never declare a workflow.
+ *
+ * Absent `profileId` (first paint, before /api/pages settles) hides the entry
+ * rather than showing one that may vanish a moment later: appearing late is
+ * quieter than flickering away, and the nav is re-rendered once the envelope
+ * lands.
+ */
+function isNavItemApplicable(item, model) {
+  if (item.profileOnly !== true) return true;
+  const profileId = model?.profileId;
+  return typeof profileId === "string" && profileId !== DEFAULT_PROFILE_ID;
 }
 
 /**
- * Read `location.hash` and return the namespaced `<dir>/<slug>` that
- * should carry `aria-current` — or null if the route is not a page
- * route. Malformed percent-encoding falls through to null rather than
- * throwing.
+ * Build one nav `<li><a>` with its optional count or badge.
+ *
+ * A `title` marks the item as a generated type row: its label truncates with an
+ * ellipsis (`.nav-link-type`, viewer-chrome.css) and keeps its full text on
+ * hover, while the count never truncates because the count is what the eye
+ * scans for. Fixed rows carry neither.
  */
-function parseExpectedPageId(hash) {
-  const match = hash.match(/^#\/(concepts|queries)\/(.+)$/);
-  if (!match) return null;
-  let slug;
-  try {
-    slug = decodeURIComponent(match[2]);
-  } catch {
-    return null;
+function buildNavItem(item, zeroCountDisplay, model) {
+  const li = el("li");
+  const link = el("a", item.isType ? "nav-link nav-link-type" : "nav-link");
+  link.href = item.href;
+  link.dataset.route = item.route;
+  if (item.isType) link.dataset.navType = "";
+  const label = el("span", "nav-label", item.label);
+  if (item.title) label.title = item.title;
+  link.appendChild(label);
+  appendNavMetric(link, item, zeroCountDisplay, model);
+  li.appendChild(link);
+  return li;
+}
+
+/**
+ * Append the count or lint badge to a nav link, when one applies.
+ *
+ * `countValue` is the count a generated type row already carries; `count` names
+ * a key in the shared `counts` map, which is how the fixed rows get theirs.
+ */
+// Optional chaining in the delegated lookups inflates cyclomatic count for what
+// is a three-way dispatch (cognitive complexity: 3).
+// fallow-ignore-next-line complexity
+function appendNavMetric(link, item, zeroCountDisplay, model) {
+  if (item.countValue !== undefined) {
+    appendNavCount(link, item.countValue, zeroCountDisplay);
+    return;
   }
-  return `${match[1]}/${slug}`;
-}
-
-/**
- * Build the freshness-filter `<div>` with a `<select>` control. The
- * filter is client-side over the already-loaded page rows — no new
- * endpoint, no query params.
- */
-function buildFreshnessFilter() {
-  const wrap = document.createElement("div");
-  wrap.className = "freshness-filter";
-  const label = document.createElement("label");
-  label.className = "freshness-filter-label";
-  label.setAttribute("for", "freshness-filter-select");
-  label.textContent = "Filter by freshness";
-  const select = document.createElement("select");
-  select.id = "freshness-filter-select";
-  select.className = "freshness-filter-select";
-  for (const { value, label: optLabel } of FRESHNESS_FILTER_OPTIONS) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = optLabel;
-    if (value === activeFreshnessFilter) option.selected = true;
-    select.appendChild(option);
+  if (item.count) {
+    appendNavCount(link, model?.counts?.[item.count], zeroCountDisplay);
+    return;
   }
-  select.addEventListener("change", onFreshnessFilterChange);
-  wrap.appendChild(label);
-  wrap.appendChild(select);
-  return wrap;
-}
-
-/** Handle freshness filter selection change — update state and re-render. */
-function onFreshnessFilterChange(event) {
-  activeFreshnessFilter = event.target.value;
-  reRenderSidebarGroups();
+  if (item.badge === "lint") appendLintBadge(link, model?.lint);
 }
 
 /**
- * Lookup table: filter value → predicate over a freshness object.
- * Keeps `matchesFreshnessFilter` branch-free.
+ * Append the count span, when the model actually carries a value for this
+ * item. Zero-valued counts always get the `nav-count-zero` modifier, which
+ * maps to `--fg-disabled` (viewer-chrome.css); the TEXT a zero renders as
+ * depends on the section's `zeroCountDisplay` (see NAV_SECTIONS above) —
+ * an em dash for BROWSE, the literal digit for MAINTAIN.
  */
-const FRESHNESS_PREDICATES = {
-  stale:       (f) => f.freshnessStatus === "stale",
-  orphaned:    (f) => f.freshnessStatus === "orphaned",
-  contradicted:(f) => f.contradicted === true,
-  archived:    (f) => f.archived === true,
-};
-
-/**
- * Apply the active freshness filter to the page list. "all" returns all
- * pages; other values match the corresponding freshness flag on each page.
- */
-function applyFreshnessFilter(pages, filter) {
-  if (filter === "all") return pages;
-  return pages.filter((page) => matchesFreshnessFilter(page, filter));
+function appendNavCount(link, value, zeroCountDisplay) {
+  if (value === undefined) return;
+  const isZero = !(value > 0);
+  const className = isZero ? "nav-count nav-count-zero" : "nav-count";
+  link.appendChild(el("span", className, navCountText(value, isZero, zeroCountDisplay)));
 }
 
-/** True when the page's freshness satisfies the active filter. */
-function matchesFreshnessFilter(page, filter) {
-  const f = page.freshness;
-  const predicate = FRESHNESS_PREDICATES[filter];
-  return f != null && predicate != null && predicate(f);
+/** A zero's text is an em dash unless its section prefers the literal digit
+ * (MAINTAIN); a non-zero count always renders as its number. */
+function navCountText(value, isZero, zeroCountDisplay) {
+  const zeroReadsAsDash = isZero && zeroCountDisplay !== "digit";
+  return zeroReadsAsDash ? EMPTY_COUNT : String(value);
+}
+
+/** Append the lint badge, omitting it entirely when lint has never run (see lintTotal). */
+function appendLintBadge(link, lint) {
+  const total = lintTotal(lint);
+  if (total === null) return;
+  link.appendChild(el("span", "nav-badge", String(total)));
+}
+
+/**
+ * Build the sidebar footer: a bottom-pinned column of standing cards
+ * (mockup tree line 59). Only "Read the docs" ships — the mockup's
+ * "Design system ↗" card links between design documents, not a product
+ * surface, so it is deliberately absent (see the fidelity audit). The
+ * group wrapper still exists on its own, matching the mockup's structure,
+ * so a second card would space correctly if this ever grows one.
+ */
+function buildFooterGroup() {
+  const group = el("div", "sidebar-footer");
+  group.appendChild(buildDocsCard());
+  return group;
+}
+
+/** The published documentation site. The repository README is a summary; this
+ *  is the full reference the card's subtitle describes. */
+const DOCS_URL = "https://llmwiki.atomicstrata.ai/introduction";
+
+/** Build the standing "Read the docs" card pinned to the sidebar footer. */
+function buildDocsCard() {
+  const card = el("a", "docs-card");
+  card.href = DOCS_URL;
+  card.target = "_blank";
+  card.rel = "noopener noreferrer";
+  card.appendChild(el("div", "docs-card-title", "Read the docs"));
+  card.appendChild(el("div", "docs-card-body", "Profiles, lint rules, export formats."));
+  return card;
+}
+
+/**
+ * Mark the nav entry matching the current hash as `aria-current="page"`.
+ * Exported so viewer.js can call it after route changes without
+ * duplicating the hash-parsing rules.
+ */
+export function markActive() {
+  // Compared in JS rather than composed into a selector: a type route's name
+  // comes from the hash, and a quoted attribute selector built from it would be
+  // a syntax error (or worse) for a hand-edited URL.
+  const links = Array.from(document.querySelectorAll(`${SIDEBAR_SELECTOR} a[data-route]`));
+  for (const link of links) link.removeAttribute("aria-current");
+  const active = activeRouteName(location.hash);
+  if (!active) return;
+  const match = markableLinks(links, location.hash).find((link) => link.dataset.route === active);
+  match?.setAttribute("aria-current", "page");
+}
+
+/** True when a nav link is one of the generated entity-type rows. */
+function isTypeLink(link) {
+  return link.dataset.navType !== undefined;
+}
+
+/**
+ * The links a hash is allowed to mark.
+ *
+ * Nothing stops a profile declaring an entity type named after a route the
+ * viewer already owns — the built-in `autosci` template declares both `sources`
+ * and `reviews` — and that type gets a BROWSE row carrying the same
+ * `data-route` as the fixed entry. Which of the two lights up is decided by
+ * WHICH HASH is being resolved, never by document order:
+ *
+ *   `#/_type/sources`  the type's own list route → only a type row may light
+ *   `#/sources`        the viewer's own surface  → only a fixed row may light
+ *   `#/sources/alpha`  a typed page, whose directory IS its entity type, so the
+ *                      type row owns it; a default project has no type rows and
+ *                      falls through to its fixed entry unchanged.
+ */
+function markableLinks(links, hash) {
+  if (typeListHashType(hash) !== null) return links.filter(isTypeLink);
+  if (STATIC_ROUTE_FOR_HASH.has(hash ?? "")) return links.filter((link) => !isTypeLink(link));
+  return [...links.filter(isTypeLink), ...links.filter((link) => !isTypeLink(link))];
+}
+
+/**
+ * Resolve a hash to the nav route that should be marked current.
+ *
+ * The namespace is consulted FIRST: a typed list hash names its type in its
+ * SECOND segment (`#/_type/articles`), so the leading-segment rule below would
+ * read it as the meaningless route `_type`.
+ *
+ * The static map comes next because one of its hashes does not name its own
+ * segment either (`#/index` belongs to Overview). Everything else falls back to
+ * the leading segment, which is the route name for the fixed list routes and the
+ * parent entry for page routes alike — including the per-project typed pages the
+ * sidebar cannot enumerate here.
+ */
+function activeRouteName(hash) {
+  const key = hash ?? "";
+  if (HOME_HASHES.has(key)) return "home";
+  return typeListHashType(key) ?? fixedRouteName(key);
+}
+
+/** The nav route a hash outside the namespace names: the static table, then the
+ *  page route's parent entry. */
+function fixedRouteName(key) {
+  return STATIC_ROUTE_FOR_HASH.get(key) ?? hashRouteSegment(key);
+}
+
+/** The leading segment of a hash route, or null when it has none. */
+function hashRouteSegment(key) {
+  const match = key.match(HASH_ROUTE_SEGMENT);
+  return match ? match[1] : null;
 }

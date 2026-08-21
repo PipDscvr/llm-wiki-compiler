@@ -21,6 +21,13 @@
  * a legacy page with no provenance metadata shows a compact rail
  * rather than a wall of `(none)` rows. Labels mirror `review show`
  * where practical.
+ *
+ * `[data-support-rail]` is a single shared element (one rail column in
+ * the mockup, see viewer-chrome.css `.content-grid`) — every renderer
+ * below targets the same `SUPPORT_SELECTOR` and replaces whatever was
+ * there before, so only one of them "owns" the rail at a time. The
+ * dashboard route calls `renderDashboardRail`; page routes call
+ * `renderSupportRail`; every other route calls `clearSupportRail`.
  */
 
 const SUPPORT_SELECTOR = "[data-support-rail]";
@@ -48,16 +55,17 @@ const RAIL_VALUE_RENDERERS = {
   contradictedBy: renderContradictionList,
 };
 
-/** Render project-level metadata for the dashboard route. */
-export function renderProjectRail(envelope) {
+/**
+ * Render the dashboard's rail panels — compile receipt, next actions,
+ * snapshot note — into the shared support rail. The dashboard is the only
+ * caller that places more than one panel at once, so this takes a list of
+ * built nodes rather than a single payload like `renderSupportRail` does.
+ */
+export function renderDashboardRail(panels) {
   const support = document.querySelector(SUPPORT_SELECTOR);
   if (!support) return;
   support.innerHTML = "";
-  const dl = document.createElement("dl");
-  for (const { label, value } of buildProjectRailFields(envelope)) {
-    appendPlainRailField(dl, label, value);
-  }
-  support.appendChild(dl);
+  for (const panel of panels) support.appendChild(panel);
 }
 
 /**
@@ -79,36 +87,6 @@ export function renderSupportRail(payload) {
 export function clearSupportRail() {
   const support = document.querySelector(SUPPORT_SELECTOR);
   if (support) support.innerHTML = "";
-}
-
-/** Assemble the project-rail field list, appending the optional Index row. */
-function buildProjectRailFields(envelope) {
-  const fields = baseProjectFields(envelope);
-  if (envelope.index && envelope.index.available) {
-    fields.push({ label: "Index", value: "Available" });
-  }
-  return fields;
-}
-
-/** Always-present project-rail rows (project title, root, generated, pages). */
-function baseProjectFields(envelope) {
-  const project = projectInfo(envelope.project);
-  const pages = envelope.pages || [];
-  return [
-    { label: "Project", value: project.title },
-    { label: "Root", value: project.rootName },
-    { label: "Generated", value: envelope.generatedAt || "" },
-    { label: "Pages", value: String(pages.length) },
-  ];
-}
-
-/** Normalize the envelope's `project` object with display-ready defaults. */
-function projectInfo(project) {
-  const safe = project || {};
-  return {
-    title: safe.title || "llmwiki",
-    rootName: safe.rootName || "",
-  };
 }
 
 /** Pull the frontmatter object out of a page payload, defaulting to `{}`. */
@@ -135,12 +113,6 @@ function appendRailField(dl, field, value) {
   const dd = renderRailValue(field.type, value);
   if (!dd) return;
   appendDtDd(dl, field.label, dd);
-}
-
-/** Append a plain text rail field when `value` is non-empty. */
-function appendPlainRailField(dl, label, value) {
-  if (typeof value !== "string" || value.length === 0) return;
-  appendDtDd(dl, label, buildPlainDd(value));
 }
 
 /** Append a complete rail definition row. */

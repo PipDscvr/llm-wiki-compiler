@@ -5,11 +5,14 @@
  * live-watch the filesystem, so post-startup mutations are intentionally
  * invisible to the running viewer until it restarts.
  *
- * The snapshot consolidates five data sources:
- *   - `collectViewerPages` for the decorated page list AND the
+ * The snapshot consolidates six data sources:
+ *   - `collectViewerPages` for the decorated DEFAULT page list AND the
  *     concept/query counts (deriving counts from the already-confined
  *     page list means symlinked entries dropped by the collector
  *     cannot quietly inflate the counts via a second unconfined scan)
+ *   - `collectTypedViewerInputs` for a non-default profile's typed entity
+ *     pages, in all three shapes they are needed in (page records, graph
+ *     nodes/edges, route allowlist); `undefined` for the default profile
  *   - `readStateClassified` (read-only, never writes a `.bak`) for the
  *     compiled-source count AND as the input to the freshness snapshot
  *   - `buildFreshnessSnapshot` for per-page freshness and the aggregate
@@ -23,19 +26,20 @@ import path from "path";
 import { SOURCES_DIR } from "../utils/constants.js";
 import { countCandidates } from "../compiler/candidates.js";
 import { readStateClassified, isPlainObject } from "../utils/state.js";
-import { collectViewerPages, resolveBareSlugList } from "./collect.js";
+import type { ClassifiedState } from "../utils/state.js";
+import { collectViewerPages, decorateEntityPages, resolveBareSlugList } from "./collect.js";
 import { extractWikilinkSlugs } from "../wiki/collect.js";
 import { isMalformedCitationEntry, splitCitationMarker } from "../utils/markdown.js";
 import { buildGraphData } from "./graph.js";
-import type { EntityPageNode, GraphBuildOptions, RelationEdge } from "./graph.js";
+import { pageTimestamp } from "./page-fields.js";
 import { buildFreshnessSnapshot, computeFreshness } from "../freshness/index.js";
-import { collectProfileSummary, loadNonDefaultProfile } from "../profile/block.js";
+import { collectProfileSummary } from "../profile/block.js";
 import { journalHealthWarning } from "../trust/journal-health-warning.js";
-import { collectEntityPages, invalidEntityPagePaths } from "../profile/collect.js";
-import { readLiveValidRelations } from "../relations/live-valid.js";
-import type { ProfilePack } from "../profile/types.js";
+import { collectTypedViewerInputs } from "./typed-pages.js";
 import type { FreshnessSnapshot } from "../freshness/types.js";
+import { UNRESOLVED_CITATION_CODE } from "./types.js";
 import type {
+  DefaultViewerPage,
   ViewerCounts,
   ViewerIndex,
   ViewerPage,
@@ -56,117 +60,81 @@ const INDEX_HREF = "/#/index";
  * `readLintCache` in `src/viewer/health.ts` is the sole exception.
  */
 export async function buildViewerSnapshot(root: string): Promise<ViewerSnapshot> {
-  const [pages, classified, pendingReviews, sourceFilenames, index] = await Promise.all([
-    collectViewerPages(root),
-    readStateClassified(root),
-    countCandidates(root),
-    listSourceFiles(root),
-    readIndexFile(root),
-  ]);
+  const [defaultPages, classified, pendingReviews, sourceFilenames, index, typed] =
+    await Promise.all([
+      collectViewerPages(root),
+      readStateClassified(root),
+      countCandidates(root),
+      listSourceFiles(root),
+      readIndexFile(root),
+      collectTypedViewerInputs(root),
+    ]);
   const freshnessSnapshot = await buildFreshnessSnapshot(root, classified);
-  const project = buildProject(root);
-  const fullIndex: ViewerIndex = {
-    available: index.available,
-    href: INDEX_HREF,
-    body: index.body,
-    outgoingLinks: resolveBareSlugList(extractWikilinkSlugs(index.body), pages),
-  };
-  const sourceFileSet = new Set(sourceFilenames);
-  // Concept/query counts are derived from `pages`, the already-confined
-  // viewer page list, NOT from a second unconfined directory scan.
-  // Anything the collector dropped for path-safety reasons (symlinked
-  // file or directory) is therefore also excluded from the counts.
-  const annotatedPages = pages
-    .map((page) => annotateCitationWarnings(page, sourceFileSet))
-    .map((page) => attachFreshness(page, freshnessSnapshot));
-  // A too-new/corrupt state carries the RAW parsed object, which need not be
-  // v1-shaped (its `sources` may be absent). Feed buildCounts an empty map for
-  // any non-ok state so `compiledSources` fails closed instead of crashing.
-  const countableState = classified.status === "ok" ? classified.state : { sources: {} };
-  const counts = buildCounts(annotatedPages, sourceFilenames, pendingReviews, countableState);
-  const graph = buildGraphData(annotatedPages, await collectTypedGraphInputs(root));
-  const profile = await collectProfileSummary(root);
+  const decorate = buildPageDecorator(sourceFilenames, freshnessSnapshot);
+  const annotatedDefault = defaultPages.map(decorate);
+  const annotatedTyped = decorateEntityPages(typed?.pages ?? [], defaultPages).map(decorate);
+  const pages = [...annotatedDefault, ...annotatedTyped];
   // Surface a pending/unavailable compile journal so the viewer never renders
   // partial post-crash or tampered state as silently healthy. ABSENT when the
   // journal is ok, so the default snapshot is byte-identical (parity-safe).
   const journalWarning = await journalHealthWarning(root);
+  const profile = await collectProfileSummary(root);
   return {
     root,
     generatedAt: new Date().toISOString(),
     stateStatus: classified.status,
-    project,
-    counts,
-    index: fullIndex,
-    recentPages: buildRecentPages(annotatedPages),
-    pages: annotatedPages,
+    project: buildProject(root),
+    counts: buildCounts(annotatedDefault, sourceFilenames, pendingReviews, countableState(classified)),
+    index: buildFullIndex(index, defaultPages),
+    recentPages: buildRecentPages(pages),
+    pages,
     sourceFilenames,
-    graph,
+    // Typed pages reach the graph through `typed.graph` as entity nodes and
+    // relation edges, NOT through this page list — passing them both ways would
+    // mint two nodes for one page under the same id.
+    graph: buildGraphData(annotatedDefault, typed?.graph),
     ...(journalWarning ? { warnings: [journalWarning] } : {}),
     ...(profile ? { profile } : {}),
+    ...(typed ? { entityTypes: typed.entityTypes, pipeline: typed.pipeline } : {}),
   };
 }
 
 /**
- * Collect the ADDITIVE typed-graph inputs (entity-page nodes + relation edges)
- * for a NON-DEFAULT profile, so {@link buildGraphData} surfaces typed pages and
- * relations in the snapshot graph (which also feeds agent context expansion).
- *
- * Returns `undefined` for the built-in DEFAULT profile, so the default path
- * passes no opts and the snapshot graph stays byte-identical. Fail-closed and
- * path-safe like the `status`/profile-summary surfaces: a corrupt / too-new /
- * symlinked relation store (or any read error) drops the relation edges rather
- * than crashing the snapshot — those problems are already surfaced through the
- * `profile` summary block. The entity collector never throws on page data, so a
- * bad page is simply skipped.
- *
- * Profile-INVALID typed pages are EXCLUDED as graph NODES (mirroring T5a's
- * context-pool exclusion, via the SHARED {@link invalidEntityPagePaths}): an
- * invalid page that is a relation endpoint is NOT promoted to a real node, so it
- * becomes a relation-ghost → a `dangling-relation` gap, consistent with the
- * context pool rather than appearing as a clean `reason:"relation"` neighbor.
+ * The per-page decoration every page in the snapshot receives, default and typed
+ * alike: citation warnings resolved against the project's source files, then
+ * computed freshness. Returned as a closure so the source-file set is built once
+ * and both page lists provably get the SAME treatment.
  */
-async function collectTypedGraphInputs(root: string): Promise<GraphBuildOptions | undefined> {
-  const loaded = await loadNonDefaultProfile(root);
-  if (loaded === undefined) return undefined;
-  const { pages, problems } = await collectEntityPages(root, loaded.profile);
-  const invalid = invalidEntityPagePaths(problems);
-  const entityPages: EntityPageNode[] = pages
-    .filter((page) => !invalid.has(page.filePath))
-    .map((page) => ({
-      id: page.id,
-      entityType: page.entityType,
-      slug: page.slug,
-      directory: page.directory,
-      ...(page.title !== undefined ? { title: page.title } : {}),
-    }));
-  const relations = await readTypedRelations(root, loaded.profile);
-  return { entityPages, relations };
+function buildPageDecorator(
+  sourceFilenames: string[],
+  freshness: FreshnessSnapshot,
+): <T extends ViewerPage>(page: T) => T {
+  const sourceFileSet = new Set(sourceFilenames);
+  return <T extends ViewerPage>(page: T): T =>
+    attachFreshness(annotateCitationWarnings(page, sourceFileSet), freshness);
 }
 
 /**
- * Read the live relations as graph edges, fail-closed AND profile-filtered: a
- * corrupt / too-new / symlinked-leaf store (or any read error) yields an empty
- * edge list rather than crashing the snapshot. The live + profile-valid filtering
- * runs through the SHARED {@link readLiveValidRelations} (FIX F4), so a relation
- * whose type/endpoints/attributes the profile has outgrown is EXCLUDED from the
- * graph and the graph agrees with status/export/lint (which exclude the same
- * profile-invalid relations) instead of reanimating stale edges.
+ * The `sources` map `buildCounts` may safely tally. A too-new/corrupt state
+ * carries the RAW parsed object, which need not be v1-shaped (its `sources` may
+ * be absent), so any non-ok state yields an empty map and `compiledSources`
+ * fails closed instead of crashing.
  */
-async function readTypedRelations(root: string, profile: ProfilePack): Promise<RelationEdge[]> {
-  try {
-    const valid = await readLiveValidRelations(root, profile);
-    return valid.map((rel) => {
-      const def = profile.relations?.[rel.type];
-      return {
-        type: rel.type,
-        from: rel.from,
-        to: rel.to,
-        ...(def?.direction !== undefined ? { direction: def.direction } : {}),
-      };
-    });
-  } catch {
-    return [];
-  }
+function countableState(classified: ClassifiedState): { sources: Record<string, unknown> } {
+  return classified.status === "ok" ? classified.state : { sources: {} };
+}
+
+/** The captured `wiki/index.md` state plus its wikilinks resolved against the default pages. */
+function buildFullIndex(
+  index: { available: boolean; body: string },
+  defaultPages: DefaultViewerPage[],
+): ViewerIndex {
+  return {
+    available: index.available,
+    href: INDEX_HREF,
+    body: index.body,
+    outgoingLinks: resolveBareSlugList(extractWikilinkSlugs(index.body), defaultPages),
+  };
 }
 
 /**
@@ -181,8 +149,15 @@ async function readTypedRelations(root: string, profile: ProfilePack): Promise<R
  * whose ONLY entry has an invalid line range — but those still need a
  * `malformed_citation` warning. Scanning the body gives every marker a
  * chance to be classified.
+ *
+ * Applies equally to typed entity pages: a citation marker's resolvability is a
+ * property of the body and the project's sources, not of the profile a page was
+ * written under. Generic over the page type so a `DefaultViewerPage` stays one.
  */
-function annotateCitationWarnings(page: ViewerPage, sourceFiles: ReadonlySet<string>): ViewerPage {
+function annotateCitationWarnings<T extends ViewerPage>(
+  page: T,
+  sourceFiles: ReadonlySet<string>,
+): T {
   const extra: ViewerWarning[] = [];
   const markerPattern = /\^\[([^\]\n]+)\]/g;
   let match: RegExpExecArray | null;
@@ -194,15 +169,23 @@ function annotateCitationWarnings(page: ViewerPage, sourceFiles: ReadonlySet<str
 }
 
 /**
- * Derive the frozen counts from the annotated page list, source filenames,
- * candidates count, and state. Concept/query counts are derived from pages
- * (the already-confined collector list) so symlinked drops don't inflate them.
+ * Derive the frozen counts from the annotated DEFAULT page list, source
+ * filenames, candidates count, and state. Concept/query counts are derived from
+ * pages (the already-confined collector list) so symlinked drops don't inflate
+ * them.
+ *
+ * Typed entity pages are deliberately not counted here. `concepts`/`queries`
+ * are documented as scoped to the literal `wiki/concepts` + `wiki/queries` dirs
+ * and would exclude a typed page anyway; `stale`/`orphaned` are the freshness
+ * tally OVER those same pages, and mixing in a corpus that has no source
+ * ownership at all (see `classify` in src/freshness/index.ts) would put two
+ * different populations behind one number with no way to tell them apart.
  *
  * Belt-and-suspenders: a non-plain-object `state.sources` (e.g. a too-new state
  * with no v1-shaped map) is coerced to `{}` so `compiledSources` cannot crash.
  */
 function buildCounts(
-  pages: ViewerPage[],
+  pages: DefaultViewerPage[],
   sourceFilenames: string[],
   pendingReviews: number,
   state: { sources: Record<string, unknown> },
@@ -223,8 +206,14 @@ function buildCounts(
  * Attach computed source-freshness to a page. Called once per page during
  * snapshot build so freshness is frozen at startup alongside all other
  * snapshot data.
+ *
+ * Typed entity pages go through the SAME computation rather than being handed a
+ * default: source ownership is recorded only for default concepts, so a typed
+ * page finds no owners and lands on `unverified` by the path `classify` already
+ * documents — while still picking up the `contradicted`/`archived` frontmatter
+ * signals if it declares them.
  */
-function attachFreshness(page: ViewerPage, snapshot: FreshnessSnapshot): ViewerPage {
+function attachFreshness<T extends ViewerPage>(page: T, snapshot: FreshnessSnapshot): T {
   return {
     ...page,
     freshness: computeFreshness(
@@ -253,7 +242,7 @@ function appendCitationWarningsForMarker(
     const file = trimmed.split(/[:#]/)[0];
     if (file.length > 0 && !sourceFiles.has(file)) {
       into.push({
-        code: "unresolved_citation",
+        code: UNRESOLVED_CITATION_CODE,
         message: `Source not found: ${file}`,
       });
     }
@@ -343,9 +332,12 @@ async function readIndexFile(root: string): Promise<{ available: boolean; body: 
 }
 
 /**
- * Top-N recently updated pages for the dashboard. Pages without an
- * `updatedAt` frontmatter field sort to the end with an empty string so
- * the list remains deterministic.
+ * Top-N recently updated pages for the dashboard, ranked by each page's
+ * EFFECTIVE timestamp (see {@link pageTimestamp}) — so a saved query, which
+ * carries `createdAt` and no `updatedAt`, ranks by when it was actually
+ * written instead of being pinned below every dated concept. Pages declaring
+ * no timestamp at all still sort to the end with an empty string, keeping the
+ * list deterministic.
  */
 function buildRecentPages(pages: ViewerPage[]): ViewerRecentPage[] {
   const rows: ViewerRecentPage[] = pages.map((page) => ({
@@ -353,8 +345,8 @@ function buildRecentPages(pages: ViewerPage[]): ViewerRecentPage[] {
     pageDirectory: page.pageDirectory,
     slug: page.slug,
     title: page.title,
-    updatedAt:
-      typeof page.frontmatter.updatedAt === "string" ? (page.frontmatter.updatedAt as string) : "",
+    updatedAt: pageTimestamp(page.frontmatter),
+    ...(page.entityType !== undefined ? { entityType: page.entityType } : {}),
   }));
   rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return rows.slice(0, RECENT_PAGES_LIMIT);

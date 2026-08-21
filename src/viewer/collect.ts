@@ -12,17 +12,29 @@
  * Unlike the export collector, this layer never drops a page: pages with
  * missing or malformed frontmatter are retained with a warning so users
  * can navigate to them and see what is wrong.
+ *
+ * A NON-DEFAULT profile's typed entity pages go through
+ * {@link decorateEntityPages} instead, which reuses the SAME decoration
+ * primitives over the shared `collectEntityPages` output rather than opening a
+ * second collector.
  */
 
 import { collectRawWikiPages, extractWikilinkSlugs, extractWikilinkTargets } from "../wiki/collect.js";
 import type { RawWikiPage } from "../wiki/collect.js";
 import { extractClaimCitations, slugify } from "../utils/markdown.js";
-import type { PageId, ViewerPage, ViewerWarning } from "./types.js";
+import type { DefaultViewerPage, PageId, ViewerPage, ViewerPageId, ViewerWarning } from "./types.js";
+import type { PageDirectory } from "../export/types.js";
+import type { EntityPage } from "../profile/types.js";
 import type { PageFreshness } from "../freshness/types.js";
 
-/** Minimal page shape `resolveBareSlug` needs to find a target. */
+/**
+ * Minimal page shape `resolveBareSlug` needs to find a target. Accepts the
+ * widened `ViewerPageId`/directory so the whole snapshot page list can be passed
+ * without filtering; only `concepts`/`queries` entries are ever matched, and
+ * {@link defaultPageId} re-narrows a match to its concrete `PageId`.
+ */
 type PageIndexEntry = {
-  id: PageId;
+  id: ViewerPageId;
   pageDirectory: ViewerPage["pageDirectory"];
   slug: string;
   /** Declared frontmatter aliases, used as a resolution fallback after exact slug. */
@@ -35,9 +47,36 @@ type PageIndexEntry = {
  * `ViewerWarning` objects derived from the underlying `parseStatus` flags.
  * Returns pages in collector order (concepts then queries).
  */
-export async function collectViewerPages(root: string): Promise<ViewerPage[]> {
+export async function collectViewerPages(root: string): Promise<DefaultViewerPage[]> {
   const raw = await collectRawWikiPages(root);
   return decoratePages(raw);
+}
+
+/**
+ * Decorate a NON-DEFAULT profile's typed entity pages into `ViewerPage`s, so the
+ * envelope, `/api/page/<entityType>/<slug>` and search see them the way they see
+ * default pages. Input comes from the SHARED `collectEntityPages` (already
+ * filtered to the profile-VALID pages by the caller) — this layer adds only the
+ * decoration, never a second read of disk.
+ *
+ * Outgoing wikilinks resolve against `defaultPages` alone, which is complete
+ * rather than a shortcut: {@link resolveBareSlug} matches `concepts`/`queries`
+ * targets only, so a typed page can never BE a wikilink target and widening the
+ * index would resolve nothing extra.
+ *
+ * @param entityPages - Profile-valid typed entity pages, with their content.
+ * @param defaultPages - The default page list, used as the wikilink index.
+ * @returns One decorated `ViewerPage` per typed entity page, in input order.
+ */
+export function decorateEntityPages(
+  entityPages: ReadonlyArray<EntityPage>,
+  defaultPages: ReadonlyArray<PageIndexEntry>,
+): ViewerPage[] {
+  return entityPages.map((entity) => {
+    const page = buildEntityPageShell(entity);
+    page.outgoingLinks = resolveBareSlugList(extractWikilinkSlugs(page.body), defaultPages);
+    return page;
+  });
 }
 
 /**
@@ -53,17 +92,27 @@ export function resolveBareSlug(
 ): PageId | null {
   if (slug.length === 0) return null;
   const concept = pages.find((p) => p.pageDirectory === "concepts" && p.slug === slug);
-  if (concept) return concept.id;
+  if (concept) return defaultPageId("concepts", concept);
   const query = pages.find((p) => p.pageDirectory === "queries" && p.slug === slug);
-  if (query) return query.id;
+  if (query) return defaultPageId("queries", query);
   // Alias fallback: a page whose declared aliases slugify to this target. An
   // exact slug match always wins (above) so a real page is never shadowed by
   // another page's alias; concepts still take precedence over queries.
   const conceptAlias = pages.find((p) => p.pageDirectory === "concepts" && hasAliasSlug(p, slug));
-  if (conceptAlias) return conceptAlias.id;
+  if (conceptAlias) return defaultPageId("concepts", conceptAlias);
   const queryAlias = pages.find((p) => p.pageDirectory === "queries" && hasAliasSlug(p, slug));
-  if (queryAlias) return queryAlias.id;
+  if (queryAlias) return defaultPageId("queries", queryAlias);
   return null;
+}
+
+/**
+ * The concrete `PageId` of a matched DEFAULT page. `directory` is the literal
+ * the caller just matched on, so this composes the SAME string
+ * {@link buildPageShell} minted for `entry.id` — it just carries the narrow
+ * `PageId` type that the widened index entry has given up.
+ */
+function defaultPageId(directory: PageDirectory, entry: PageIndexEntry): PageId {
+  return `${directory}/${entry.slug}`;
 }
 
 /** True when any of the page's declared aliases slugifies to `slug`. */
@@ -98,7 +147,7 @@ export function resolveBareSlugList(
  * shell. Single-pass would let a page miss links to pages later in the
  * list; the index has to be complete before resolution begins.
  */
-function decoratePages(raw: RawWikiPage[]): ViewerPage[] {
+function decoratePages(raw: RawWikiPage[]): DefaultViewerPage[] {
   const shells = raw.map(buildPageShell);
   for (const page of shells) {
     const slugTargets = extractWikilinkSlugs(page.body);
@@ -133,7 +182,7 @@ function collectDanglingLinks(
  * (id, title, citations, warnings). `outgoingLinks` starts empty and is
  * filled in once every shell is built.
  */
-function buildPageShell(page: RawWikiPage): ViewerPage {
+function buildPageShell(page: RawWikiPage): DefaultViewerPage {
   const id: PageId = `${page.pageDirectory}/${page.slug}`;
   return {
     id,
@@ -147,6 +196,48 @@ function buildPageShell(page: RawWikiPage): ViewerPage {
     outgoingLinks: [],
     citations: extractClaimCitations(page.body),
     warnings: warningsFromParseStatus(page),
+    // Placeholder: overwritten by attachFreshness() in buildViewerSnapshot.
+    freshness: UNVERIFIED_FRESHNESS,
+  };
+}
+
+/**
+ * Build the `ViewerPage` shell for one typed entity page. `outgoingLinks` starts
+ * empty and is filled by {@link decorateEntityPages} once the index is known.
+ *
+ * Three decorations a default page gets are deliberately NOT emitted here, in
+ * each case because the underlying signal does not exist for a typed page rather
+ * than because it was overlooked:
+ *
+ *   - `aliases` — a typed page is never a wikilink resolution target (see
+ *     {@link resolveBareSlug}), so declaring aliases on it would resolve
+ *     nothing; emitting the field would imply a path that does not exist.
+ *   - `warnings` from `parseStatus` — `missing_frontmatter` / `missing_title`
+ *     ask whether the page met the DEFAULT profile's frontmatter expectations.
+ *     A typed page is bound by its profile's declared field contract instead,
+ *     and a violation of THAT is already surfaced authoritatively as a
+ *     `field-violation` problem (which also excludes the page). Re-deriving the
+ *     default expectation would report a contract the page was never under.
+ *     Body-level citation warnings ARE still appended, in `snapshot.ts`, since
+ *     those are contract-independent. The starting list is empty rather than
+ *     absent so every page carries the same array shape.
+ *   - `danglingLinks` — that field exists only to synthesise wikilink ghost
+ *     nodes, and typed pages reach the graph as typed nodes/relation edges, not
+ *     through the wikilink graph.
+ */
+function buildEntityPageShell(page: EntityPage): ViewerPage {
+  return {
+    id: page.id,
+    slug: page.slug,
+    pageDirectory: page.entityType,
+    entityType: page.entityType,
+    title: page.title ?? page.slug,
+    filePath: page.filePath,
+    frontmatter: page.frontmatter,
+    body: page.body,
+    outgoingLinks: [],
+    citations: extractClaimCitations(page.body),
+    warnings: [],
     // Placeholder: overwritten by attachFreshness() in buildViewerSnapshot.
     freshness: UNVERIFIED_FRESHNESS,
   };

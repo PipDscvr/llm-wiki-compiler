@@ -4,7 +4,7 @@ sidebarTitle: "View"
 description: "llmwiki view starts a private local web server for browsing, searching, and inspecting your compiled wiki with provenance chips and a graph view."
 ---
 
-After compiling your wiki, `llmwiki view` gives you a private local web interface for browsing, searching, and inspecting what was generated. The viewer renders your compiled Markdown pages with their frontmatter metadata, shows citation and provenance chips for each claim, provides a full-text search across all pages, and includes a force-directed graph at `#/graph` for exploring how concepts link to each other. Everything runs locally - no data leaves your machine.
+After compiling your wiki, `llmwiki view` gives you a private local web interface for browsing, searching, and inspecting what was generated. The viewer renders your compiled Markdown pages with their frontmatter metadata, shows citation and provenance chips for each claim, provides a full-text search across your compiled pages, and includes a force-directed graph at `#/graph` for exploring how concepts link to each other. Everything runs locally - no data leaves your machine.
 
 ## Starting the viewer
 
@@ -33,23 +33,109 @@ Press `Ctrl+C` to stop the server.
 | `--host <host>` | Bind to a specific network interface IP (e.g. `192.168.1.10`). **Must be used together with `--allow-lan`.** See the security note below. |
 | `--allow-lan` | Permit binding beyond the loopback interface. **Must be used together with `--host <host>`.** |
 
+## Routes
+
+Every view in the viewer has its own hash route, so you can bookmark or reload any of them directly:
+
+| Route | Shows |
+|---|---|
+| `#/` | Overview dashboard |
+| `#/concepts` | Concept pages, with the freshness filter |
+| `#/queries` | Saved query pages |
+| `#/_type/<entity-type>` | Pages of one entity type your profile declares, such as `#/_type/articles` |
+| `#/sources` | Source files, and how many are compiled |
+| `#/index` | The compiled `wiki/index.md` |
+| `#/health` | Wiki health: lint findings by rule, profile problems, freshness, and traceability |
+| `#/reviews` | Review candidates awaiting approval, and why each is held |
+| `#/workflows` | Workflow runs, and which of them are parked waiting on you |
+| `#/pipeline` | Each entity type's lifecycle, where its pages sit, and which of them failed validation |
+| `#/graph` | Full graph explorer |
+
+Individual pages open at `#/concepts/<slug>`, `#/queries/<slug>`, or `#/<entity-type>/<slug>`.
+
+`#/_type/<entity-type>` accepts only the entity types your active profile actually declares - anything else falls back to the Overview dashboard. On a project running the built-in default profile, no entity type is declared and no such route exists.
+
+The `_type/` prefix keeps your vocabulary out of the viewer's own URL space. Profiles are free to name an entity type after a screen the viewer already has - the built-in `autosci` template declares types called `sources` and `reviews` - so a list route at the bare name would have opened the viewer's source list or review queue instead of your pages. No profile can declare a type called `_type`, because entity type names must be lowercase letters, digits, and hyphens, which is what makes the prefix safe to reserve. Page routes need no prefix: `#/articles/<slug>` is already checked against your declared types before a page is looked up.
+
+`#/pipeline` appears only on a project running a non-default profile. The built-in default profile declares no entity types and no lifecycles, so there is nothing for the route to draw and the sidebar omits its entry entirely.
+
+### Typed entity pages
+
+If your project runs a non-default profile, the viewer also reads the entity pages that profile declares - a newsroom profile's `wiki/articles`, a research profile's `wiki/papers`. They appear in the viewer's page data alongside your concepts and queries, tagged with the entity type they belong to, and search matches their titles and bodies.
+
+Each one is addressable by its **entity type**, not by its directory on disk: an article in `wiki/articles` is served at `/api/page/articles/<slug>`. The entity type is the only directory name the viewer accepts, and it accepts only the types your active profile actually declares - anything else is rejected before a page is looked up. Entity types can never collide with `concepts` or `queries`, because `llmwiki profile` refuses to load a profile that names one of them.
+
+An entity page that violates its profile's field contract - a missing required field, a value outside a declared enum - is left out. That is the same page the graph leaves out and `llmwiki status` counts as a problem, so every surface describes the same set of pages. The violation itself is listed on `#/health` under **Profile problems**, so a page that has been dropped is never silently missing.
+
+Typed entity pages carry the same citation chips and provenance as compiled pages. They do not carry a freshness verdict: freshness is derived from the sources a page was compiled from, and entity pages are authored rather than compiled, so they always read as unverified rather than being labelled fresh on no evidence.
+
+Each entity type your profile declares gets a row in the sidebar's **BROWSE** section and a list route of its own at `#/_type/<entity-type>`, and every page on it opens at `#/<entity-type>/<slug>`. See **Sidebar navigation** below for how BROWSE is built.
+
 ## What the viewer includes
 
-**Sidebar navigation.** All compiled pages are listed in the sidebar, grouped by kind (`concept`, `entity`, `comparison`, `overview`) and sorted alphabetically. Click any page to navigate to it instantly.
+**Overview dashboard.** The `#/` route opens on a dashboard: four counters (concepts, sources, needs attention, and awaiting review), your most recently compiled pages, a compact version of the knowledge graph, a compile receipt (root, profile, state, index availability, lint status, and the percentage of citations that resolve to a source file), and a list of suggested next actions. The needs-attention counter is dangling links plus unresolved citations, not lint findings, so it always has a value even when lint has never run.
 
-**Full-text search.** The search bar queries page titles and summaries across your entire compiled wiki. Results appear inline as you type.
+The first counter names what your project actually holds. On the built-in default profile it counts your concept pages and is headed **Concepts**, and the recently-compiled panel links to `#/concepts`. On a project running another profile there are no concepts to count - your pages live in the types that profile declares - so the counter is headed **Entity pages**, counts every page across those types, and says how many types they span. It reports the same figures the sidebar's type rows add up to, and the panel below links to `#/pipeline`, the screen that lists every declared type. The other three counters mean the same thing on both, and there are always four: a profile can declare a dozen entity types, and per-type counts belong to the sidebar and `#/pipeline`.
+
+Next actions are informational - the viewer is read-only and cannot act on them for you - so each row names a CLI command where one applies (`llmwiki compile` for stale pages, `llmwiki lint` if lint has never run, `llmwiki export` to export for agents) or the manual fix otherwise, such as creating the missing pages or correcting the targets behind dangling links.
+
+**Health screen.** The `#/health` route opens on a whole-wiki verdict - `NEEDS ATTENTION` when lint reports errors, any page is stale or orphaned, or the profile collector found a problem, and `ALL CLEAR` otherwise - beside the time of the last lint run. Below it, a CONTENTS strip counts what the wiki holds (concepts, sources, citations, saved queries, and pages awaiting review); a count of zero renders as a dim dash rather than a bold `0`, so an empty column does not read as a figure worth acting on.
+
+The Lint panel breaks the cached findings down by rule: the error and warning totals, a stacked bar showing each rule's share of the problems, and a table naming each rule, where its findings land, and how many there are. The four highest-count rules get a row and a colour each; everything below them folds into a single `other` row that carries their combined count and says how many rules it covers, so the bar and its legend stay readable however many rules fired. The FIX column links to the most affected page when that file is one the viewer can open - lint rules that flag files which are not wiki pages have nowhere to navigate, and show a dash instead. The footer names the rule with the most leverage and offers the destination that rule implies: the graph explorer for rules about the link graph (where dangling link targets render as ghost nodes), the most affected page otherwise, and no button at all when neither is reachable. If lint has never run, the panel says so instead of showing an empty table; run `llmwiki lint` and reload the page to populate it.
+
+Alongside it, **Profile problems** lists what the entity collector found in a project running a non-default profile: one row per problem, naming the kind of problem, the project-relative page path it applies to - or the entity type, for a problem about a whole entity directory - and the collector's own message. Typical entries are a required frontmatter field missing from an entity page, a filename that is not slug-safe, and an entity directory that could not be read. The panel is not rendered at all when the collector found nothing, and never appears for a project on the built-in default profile. The list it carries is capped; when there are more problems than that, the panel says how many it is showing out of how many exist. `llmwiki status` applies the same cap; `llmwiki export` carries the complete list.
+
+Alongside those, **Freshness** draws one bar per concept page coloured by that page's status, and **Traceability** reports the share of citations that resolve to a real source span. The viewer is read-only, so nothing on this screen changes your wiki - re-run `llmwiki lint` and reload the page to refresh the cached findings. The lint cache is the one file the viewer re-reads on every request, so no restart is needed for it; page and graph data are still frozen at startup.
+
+**Review queue.** The `#/reviews` route lists the review candidates under `.llmwiki/candidates/` that are still waiting for you: each one's proposed title, its summary, the source files behind it, how long it has waited, where approval would write it, and one chip per reason it is held - low confidence, contradictions, a schema or citation problem, a manual `--review` request, an Open Knowledge Format (OKF) import, or a connector fetch. Hover a chip for the specific detail behind it, such as the confidence score that fell short. When nothing is pending, the route says so and names the command that fills the queue.
+
+The route shows at most 200 candidates at a time. A review policy that holds every page (`heldReasons: all`) can queue one candidate per compiled page, and this route re-reads them from disk on every visit, so the cap keeps a large queue from turning each visit into a full re-read. When the queue is longer than that, the pane says so above the list - `Showing 200 of 5000 pending candidates` - and points you at `llmwiki review list`, which is not capped. Candidates are shown in candidate-id order, which is alphabetical by the slug each one would be written to, rather than the oldest-first order `llmwiki review list` uses: the generation time lives inside each candidate file, so ordering by it would mean opening every file to decide which 200 to show.
+
+This is the one route that re-reads disk on every visit rather than serving the startup snapshot, because candidates are written and cleared by the CLI while the viewer runs - so approving or rejecting one and revisiting `#/reviews` shows the new queue without a restart. It is read-only like the rest of the viewer: use `llmwiki review approve <id>` or `llmwiki review reject <id>` to act on a candidate. The route reads a local `/api/reviews` endpoint that serves only these list fields - never the candidate's generated page body, and never a filesystem path from your machine. Its response carries the candidates it serves plus a `total` count of everything pending, which is where the "showing N of M" line comes from.
+
+**Pipeline.** The `#/pipeline` route shows one row per entity type your active profile declares: the type's valid page count, the state chain its lifecycle moves pages through, a proportional bar of where those pages currently sit, and what the tally adds up to.
+
+The chain is read from the profile's own `initial` and `transitions`, never from the order the lifecycle field's enum happens to list its values in, and colour follows reachability rather than decoration. A state still moving takes the violet ramp in chain order. A state the profile declares `terminal` takes teal. A state no declared transition can reach from `initial` - or a value that is not a declared state at all - is drawn dashed and red, labelled `unreachable`, with a line naming it and saying why. A type that declares no terminal state and no transitions has no derivable order, so every one of its states stays neutral and the row says so instead of implying a sequence.
+
+The right-hand column reports a finding, not a warning. Two collectors walk the same directory with different filters: the page count validates each page against its field contract, the state tally does not. So the tally sum minus the page count is exactly the pages that failed profile validation and still declare a lifecycle state - `2 rejected pages counted here`, or `every page valid` when the two agree. A rejected page that omits the lifecycle field entirely appears in no tally at all, which the footer band says explicitly so the number is never read as the whole set of rejects. Those pages are the same ones listed on `#/health` under **Profile problems**.
+
+A relation band below the rows names each declared relation type with its endpoints, its direction, and how many live relations of that type the graph store holds - `filed-under · articles → desks · 6`.
+
+The route serves the startup snapshot like the rest of the viewer, so a profile edited while the viewer runs needs a restart to appear. Time-in-state is deliberately absent: nothing records when a page entered its current state, and a file's modification time answers a different question.
+
+**Workflow runs.** The `#/workflows` route lists every workflow run under `.llmwiki/workflows/runs/`: which workflow each run belongs to, its run id, its lifecycle status, and the stage it currently sits on. Workflows are declared by a profile, so a project on the built-in default profile has none - run `llmwiki workflow list` to see what your active profile declares.
+
+The route exists for the **parked** runs. A run stops and waits whenever it needs a human: a gate to approve, or a stage output to submit. Those rows are marked with an accent rail and one chip per thing they wait on - `Awaiting stage output`, `Awaiting gate · <gate-id>` - so they stand out from runs that are merely running or already finished. Because a stage output must land before the gate guarding that stage can clear, a run parked on both lists them in that order. Runs that no longer match the active profile carry a chip saying so: `Needs adaptation` when the workflow definition changed under them, `Blocked by config` when the stage they sit on no longer exists, and `History` for a run that is terminal or whose workflow was removed.
+
+The viewer cannot move a run, so each parked row names the CLI command that does - `llmwiki workflow submit <run-id>` or `llmwiki workflow gate approve <run-id> <gate-id>` - as text you copy, never as a button. If the run store itself is unreadable, the route says so as a red problem row rather than reporting an empty list, so a broken store never reads as "no runs".
+
+Like `#/reviews`, this route re-reads disk on every visit rather than serving the startup snapshot, because the CLI advances runs while the viewer is open - approve a gate and revisit `#/workflows` to see the run move without a restart. It reads a local `/api/workflow-runs` endpoint that serves only these status fields: run id, classification, status, current stage, workflow id, the two parked flags, and the problem reason. Never the run record itself, and never a filesystem path from your machine.
+
+**Sidebar navigation.** The sidebar no longer lists every compiled page - that listing grew with the size of the wiki, so it moved to `#/concepts`, beside the freshness filter that narrows it. What's left is links in two sections: **BROWSE** and **MAINTAIN** (Health & lint, which carries a badge once a lint run exists; Reviews, which carries the pending-review count; Workflows, which carries no count because runs are not part of the startup snapshot; and Pipeline, on a profile project only). Click any entry to navigate instantly.
+
+**BROWSE is your profile's vocabulary.** Overview, Sources, and Graph explorer are fixed, and between them sit one row per entity type. On the built-in default profile those are Concepts and Queries - the two types it declares - so a default project's sidebar reads Overview, Concepts, Sources, Queries, Graph explorer. On a project running another profile, that profile's own types take their place: a newsroom profile reads Overview, Articles, Desks, Bylines, Sources, Graph explorer, and the profile's name sits on the BROWSE header.
+
+Each type row links to that type's own list route at `#/_type/<entity-type>`, so a type sharing a name with one of the viewer's own screens still opens your pages and highlights your row. The viewer's `#/sources` and `#/reviews` rows keep their own screens.
+
+Type rows are ordered by page count, highest first, with ties falling back to the order your profile declares them - never alphabetically, so you can predict the result from your own profile file. A type with no pages still gets a row, showing a dim dash: its absence is worth knowing. Long names truncate with an ellipsis and show their full text on hover; the count never truncates. Past eleven rows the list scrolls - every type stays reachable - with a count of how many are below the fold and an **All types** link to `#/pipeline`, which lists the full set.
+
+**Header verdict pill.** The header carries one verdict for the whole wiki, on every route. It reads `NEEDS ATTENTION` when lint has any findings, any page is stale or orphaned, or the profile collector reported a problem, and `ALL CLEAR` when everything was checked and nothing is wrong. When a check couldn't run at all, the pill names what it doesn't know rather than claiming health it didn't measure: `FRESHNESS UNVERIFIED` when `.llmwiki/state.json` is missing or unreadable, `LINT NEVER RUN` when no lint run has completed, or both. A wiki with real problems reads `NEEDS ATTENTION` even when something else couldn't be checked.
+
+For the per-count detail behind the verdict, open `#/health`. To narrow the concept list by freshness (stale, orphaned, contradicted, or archived), use the filter on `#/concepts`, beside the list it narrows.
+
+**Light and dark themes.** A toggle in the header switches between light and dark and remembers your choice for the next visit. Until you pick one, the viewer follows your operating system's colour scheme, defaulting to dark if that preference isn't available.
+
+**Full-text search.** The search field lives in the header next to the theme toggle rather than in the sidebar, so it reads as a global action rather than page navigation. It matches page titles and body text across your compiled concept and query pages, and across the typed entity pages of a non-default profile - the compiled `wiki/index.md` is not included - and results appear inline as you type. Press `⌘K` on macOS or `Ctrl+K` on Windows and Linux to jump to the field from anywhere in the viewer.
 
 **Markdown rendering.** Pages are rendered with full Markdown formatting, including headers, code blocks, tables, and `[[wikilink]]` resolution. Wikilinks are clickable and resolve to any page that matches either the linked title or an entry in the page's `aliases` frontmatter.
 
-**Page metadata.** Each page shows its frontmatter fields - kind, contributing sources, confidence score, provenance state, creation and update timestamps - in a collapsible metadata panel.
-
-**Health counts.** The sidebar header shows the current count of `STALE`, `ORPHANED`, `CONTRADICTED`, and `ARCHIVED` pages from the most recent lint run, giving you an at-a-glance freshness signal without leaving the viewer.
+**Page metadata.** Each page shows its frontmatter fields - kind, contributing sources, confidence score, provenance state, creation and update timestamps - in the metadata rail on the right of the page.
 
 **Freshness badges.** Pages whose underlying sources have changed since the last compile are labelled `STALE`. Pages whose sources were all deleted are labelled `ORPHANED`. Pages that declare contradictions in their frontmatter are labelled `CONTRADICTED`. Archived candidates show an `ARCHIVED` badge.
 
 **Provenance and citation chips.** Each paragraph's `^[source.md]` citation renders as a clickable chip. On loopback (`127.0.0.1`), citation chips include an editor link that opens the source file at the relevant line range directly in your default editor. Specific claim citations (`^[source.md:42-58]`) pin to the exact line range.
 
-**Force-directed graph.** Navigate to `#/graph` to see a live, interactive force-directed graph of all your wiki pages and the `[[wikilink]]` edges between them. Hover over a node to highlight its connections; click to navigate to that page.
+**Force-directed graph.** The full explorer lives at `#/graph`; a compact version of the same graph sits on the Overview dashboard. The canvas is label-free - hover a node for a tooltip with its title, kind, and connection count, and click a node to open that page. Node colour reflects one property at a time: **dangling** for a linked page that doesn't exist yet, **stale** for a page whose source has changed since the last compile (stale takes priority over kind), and otherwise **concept** or **entity** by kind. The hovered node takes a halo ring so it stays visible while everything else dims - colouring nodes by staleness is new, since earlier versions of the graph carried no freshness signal at all. Scroll to zoom and drag to pan; the full explorer also lets you drag individual nodes and shows a legend for colours, edge types, and node size.
 
 ## Security model
 
@@ -93,9 +179,10 @@ llmwiki lint
 # Repair stale pages
 llmwiki refresh --stale
 
-# Reload the viewer - it serves the latest compiled state on each page load
+# The viewer's snapshot is frozen at startup - stop it (Ctrl+C) and run
+# llmwiki view --open again to see the refreshed pages
 ```
 
 <Note>
-The viewer is read-only. If you want to add sources, compile new pages, approve review candidates, or run queries, use the CLI commands or the MCP server. The viewer reflects the current state of `wiki/` on disk; there is no "save" or "edit" function inside the browser UI.
+The viewer is read-only. If you want to add sources, compile new pages, approve review candidates, or run queries, use the CLI commands or the MCP server. It serves a frozen snapshot of `wiki/` taken when it started, not a live view of disk - restart `llmwiki view` to pick up pages compiled since, and there is no "save" or "edit" function inside the browser UI.
 </Note>

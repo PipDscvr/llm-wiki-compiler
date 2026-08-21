@@ -168,3 +168,200 @@ describe("freshness counts", () => {
     expect(await readLintCache(tmpDir)).toBeNull();
   });
 });
+
+describe("rule aggregates", () => {
+  it("produces correctly counted, correctly sorted rows across several rules", async () => {
+    await writeLintCache(tmpDir, {
+      errors: 2,
+      warnings: 3,
+      info: 0,
+      results: [
+        { rule: "broken-wikilink", severity: "error", file: "a.md", message: "" },
+        { rule: "broken-wikilink", severity: "error", file: "a.md", message: "" },
+        { rule: "missing-summary", severity: "warning", file: "a.md", message: "" },
+        { rule: "missing-summary", severity: "warning", file: "b.md", message: "" },
+        { rule: "empty-page", severity: "warning", file: "c.md", message: "" },
+      ],
+    });
+    const entry = await readLintCache(tmpDir);
+    // Tied counts (broken-wikilink vs missing-summary, both 2) break by rule
+    // name ascending, so the order is deterministic without a client re-sort.
+    expect(entry?.rules).toEqual([
+      { rule: "broken-wikilink", severity: "error", count: 2, fileCount: 1, topFile: "a.md", topFileCount: 2 },
+      { rule: "missing-summary", severity: "warning", count: 2, fileCount: 2, topFile: "a.md", topFileCount: 1 },
+      { rule: "empty-page", severity: "warning", count: 1, fileCount: 1, topFile: "c.md", topFileCount: 1 },
+    ]);
+  });
+
+  it("stores topFile relative to the project root, never as an absolute filesystem path", async () => {
+    // Most rules derive `file` from `path.join(root, ...)` (collectAllPages),
+    // so it arrives absolute. /api/health has no loopback-gating for this
+    // field (unlike /api/page and /api/index), so the cache itself must
+    // never hold a raw local path.
+    const absoluteFile = path.join(tmpDir, "wiki", "concepts", "andrej-karpathy.md");
+    await writeLintCache(tmpDir, {
+      errors: 1,
+      warnings: 0,
+      info: 0,
+      results: [{ rule: "broken-wikilink", severity: "error", file: absoluteFile, message: "" }],
+    });
+    const entry = await readLintCache(tmpDir);
+    const topFile = entry!.rules![0].topFile;
+    expect(topFile).toBe(path.join("wiki", "concepts", "andrej-karpathy.md"));
+    expect(path.isAbsolute(topFile)).toBe(false);
+  });
+
+  it("passes an already-relative file path (infra rules) through unchanged", async () => {
+    await writeLintCache(tmpDir, {
+      errors: 0,
+      warnings: 1,
+      info: 0,
+      results: [{ rule: "journal-health", severity: "warning", file: ".llmwiki/journal", message: "" }],
+    });
+    const entry = await readLintCache(tmpDir);
+    expect(entry?.rules?.[0].topFile).toBe(".llmwiki/journal");
+  });
+
+  it("counts distinct files for fileCount and identifies the worst file as topFile", async () => {
+    await writeLintCache(tmpDir, {
+      errors: 0,
+      warnings: 4,
+      info: 0,
+      results: [
+        { rule: "missing-summary", severity: "warning", file: "a.md", message: "" },
+        { rule: "missing-summary", severity: "warning", file: "b.md", message: "" },
+        { rule: "missing-summary", severity: "warning", file: "b.md", message: "" },
+        { rule: "missing-summary", severity: "warning", file: "b.md", message: "" },
+      ],
+    });
+    const entry = await readLintCache(tmpDir);
+    const row = entry?.rules?.find((r) => r.rule === "missing-summary");
+    expect(row).toEqual({
+      rule: "missing-summary",
+      severity: "warning",
+      count: 4,
+      fileCount: 2,
+      topFile: "b.md",
+      topFileCount: 3,
+    });
+  });
+
+  it("excludes info-severity findings from the rows", async () => {
+    await writeLintCache(tmpDir, {
+      errors: 0,
+      warnings: 0,
+      info: 2,
+      results: [
+        { rule: "pending-target", severity: "info", file: "a.md", message: "" },
+        { rule: "pending-target", severity: "info", file: "b.md", message: "" },
+      ],
+    });
+    const entry = await readLintCache(tmpDir);
+    expect(entry?.rules).toBeUndefined();
+  });
+
+  it("reports a rule that emits both severities as error", async () => {
+    await writeLintCache(tmpDir, {
+      errors: 1,
+      warnings: 1,
+      info: 0,
+      results: [
+        { rule: "mixed-rule", severity: "error", file: "a.md", message: "" },
+        { rule: "mixed-rule", severity: "warning", file: "b.md", message: "" },
+      ],
+    });
+    const entry = await readLintCache(tmpDir);
+    expect(entry?.rules?.[0]).toMatchObject({ rule: "mixed-rule", severity: "error", count: 2 });
+  });
+
+  it("reconciles aggregate counts with the headline errors + warnings totals", async () => {
+    const summary: LintSummary = {
+      errors: 1,
+      warnings: 2,
+      info: 3,
+      results: [
+        { rule: "broken-wikilink", severity: "error", file: "a.md", message: "" },
+        { rule: "missing-summary", severity: "warning", file: "a.md", message: "" },
+        { rule: "missing-summary", severity: "warning", file: "b.md", message: "" },
+        { rule: "pending-target", severity: "info", file: "a.md", message: "" },
+        { rule: "pending-target", severity: "info", file: "b.md", message: "" },
+        { rule: "pending-target", severity: "info", file: "c.md", message: "" },
+      ],
+    };
+    await writeLintCache(tmpDir, summary);
+    const entry = await readLintCache(tmpDir);
+    const total = entry!.rules!.reduce((sum, r) => sum + r.count, 0);
+    expect(total).toBe(summary.errors + summary.warnings);
+  });
+
+  it("omits the rules field entirely for a clean run", async () => {
+    await writeLintCache(tmpDir, makeSummary(0, 0));
+    const parsed = JSON.parse(await readRawCache()) as Record<string, unknown>;
+    expect("rules" in parsed).toBe(false);
+    const entry = await readLintCache(tmpDir);
+    expect(entry?.rules).toBeUndefined();
+  });
+
+  it("reads a pre-upgrade cache with no rules field as undefined", async () => {
+    await writeRawCache(JSON.stringify({ warnings: 1, errors: 0, at: "2026-06-05T00:00:00.000Z" }));
+    const entry = await readLintCache(tmpDir);
+    expect(entry).not.toBeNull();
+    expect(entry?.rules).toBeUndefined();
+  });
+
+  it("rejects the whole entry when rules is present but malformed", async () => {
+    const at = "2026-06-05T00:00:00.000Z";
+    const base = { rule: "x", severity: "warning", count: 1, fileCount: 1, topFile: "a.md", topFileCount: 1 };
+    await writeRawCache(JSON.stringify({ warnings: 1, errors: 0, at, rules: [{ ...base, rule: "" }] }));
+    expect(await readLintCache(tmpDir)).toBeNull();
+    await writeRawCache(JSON.stringify({ warnings: 1, errors: 0, at, rules: [{ ...base, severity: "info" }] }));
+    expect(await readLintCache(tmpDir)).toBeNull();
+    await writeRawCache(JSON.stringify({ warnings: 1, errors: 0, at, rules: [{ ...base, count: -1 }] }));
+    expect(await readLintCache(tmpDir)).toBeNull();
+    await writeRawCache(JSON.stringify({ warnings: 1, errors: 0, at, rules: [{ ...base, topFile: 5 }] }));
+    expect(await readLintCache(tmpDir)).toBeNull();
+    await writeRawCache(JSON.stringify({ warnings: 1, errors: 0, at, rules: "not-an-array" }));
+    expect(await readLintCache(tmpDir)).toBeNull();
+  });
+});
+
+/**
+ * A schema-valid breakdown can still contradict the totals it was derived
+ * from. The viewer's Lint panel reads both at once — the chip from
+ * `errors + warnings`, the bar's proportions from the rows — so an
+ * unreconciled cache renders an impossible sentence beside a bar that
+ * disagrees with it. The reader drops only the rows, never the totals.
+ */
+describe("rule-aggregate invariants", () => {
+  const at = "2026-06-05T00:00:00.000Z";
+  const row = { rule: "broken-wikilink", severity: "warning", count: 5, fileCount: 2, topFile: "a.md", topFileCount: 3 };
+
+  it("drops rows that do not sum back to errors + warnings, keeping the totals", async () => {
+    await writeRawCache(JSON.stringify({ warnings: 4, errors: 6, at, rules: [{ ...row, count: 65 }] }));
+    const entry = await readLintCache(tmpDir);
+    expect(entry?.rules).toBeUndefined();
+    expect(entry).toMatchObject({ warnings: 4, errors: 6, at });
+  });
+
+  it("drops rows whose worst file carries more findings than the rule produced", async () => {
+    await writeRawCache(JSON.stringify({ warnings: 0, errors: 5, at, rules: [{ ...row, topFileCount: 99 }] }));
+    expect((await readLintCache(tmpDir))?.rules).toBeUndefined();
+  });
+
+  it("drops rows flagging more distinct files than the rule has findings", async () => {
+    await writeRawCache(JSON.stringify({ warnings: 0, errors: 5, at, rules: [{ ...row, fileCount: 9 }] }));
+    expect((await readLintCache(tmpDir))?.rules).toBeUndefined();
+  });
+
+  it("keeps a breakdown that reconciles with the totals", async () => {
+    await writeRawCache(JSON.stringify({ warnings: 1, errors: 4, at, rules: [row] }));
+    expect((await readLintCache(tmpDir))?.rules).toEqual([row]);
+  });
+
+  it("keeps the freshness counts a dropped breakdown sat beside", async () => {
+    const freshness = { stalePages: 1, orphanedPages: 0 };
+    const rules = [{ ...row, count: 65 }];
+    await writeRawCache(JSON.stringify({ warnings: 4, errors: 6, at, rules, freshness }));
+    expect(await readLintCache(tmpDir)).toEqual({ warnings: 4, errors: 6, at, freshness });
+  });
+});

@@ -1,106 +1,71 @@
 /**
  * @file src/context/typed-pages.ts
- * @description FIX F3: include a NON-DEFAULT profile's typed ENTITY PAGES in the
- * `llmwiki context` page POOL so they are LEXICALLY rankable (by prompt match —
- * no embeddings needed), selectable as primaries (body included), and reachable
- * through the snapshot graph's relation edges. The context builder ranks
- * `snapshot.pages` (legacy concept/query pages); a typed-only project would
- * otherwise rank an EMPTY pool. Here we read the profile's entity pages and
- * splice them into a COPY of the snapshot's page list keyed by EntityId, so they
- * participate in ranking + primary selection + graph expansion.
+ * @description The context pool's OWN policy over a non-default profile's typed
+ * entity pages: `retrieval.includeInContext`.
  *
- * DEFAULT project → no typed pages added → the augmented snapshot IS the original
- * snapshot (byte-identical context). Typed pages are lexically rankable,
- * graph-reachable, and (after the v3 embedding index is built) semantically
- * searchable under their qualified `<entityType>/<slug>` id.
+ * The viewer snapshot already carries every profile-VALID typed entity page in
+ * `snapshot.pages` — that is what makes them lexically rankable (by prompt match,
+ * no embeddings needed), selectable as primaries with their body, and reachable
+ * through the snapshot graph's relation edges. This module used to splice them in
+ * itself, from a second `collectEntityPages` read; doing that on top of a snapshot
+ * that already has them would list every typed page twice, so the job here is now
+ * the one thing the SNAPSHOT must not do — apply a retrieval policy.
  *
- * Task C1: `augmentSnapshotWithTypedPages` now honors `retrieval.includeInContext`
- * on each entity type's definition. An explicit `false` drops that type's pages from
- * the lexical pool entirely; omitted or `true` keeps them (tri-state — only an
- * explicit `false` excludes). This filter applies AFTER the validity filter so that
- * both a profile-invalid page and an explicitly-excluded type are independently gated.
+ * That separation is the point. A page an entity type keeps out of CONTEXT is
+ * still a page a user can open in the viewer, so the exclusion belongs to the
+ * context pool, not to the shared page list.
+ *
+ * `includeInContext` is tri-state: an explicit `false` drops that type's pages
+ * from the pool; omitted or `true` keeps them. A DEFAULT project has no typed
+ * pages at all, so the pool is the snapshot's own list and the default context
+ * pack is byte-identical. Profile-INVALID pages were already excluded upstream by
+ * the SHARED `invalidEntityPagePaths`, so an unvalidated page is never promoted
+ * as clean primary evidence.
  */
 
 import { resolveNonDefaultProfile, type PreloadedProfile } from "../profile/block.js";
-import { collectEntityPages, invalidEntityPagePaths } from "../profile/collect.js";
-import type { EntityPage } from "../profile/types.js";
-import type { PageDirectory } from "../export/types.js";
-import type { ClaimCitation } from "../utils/types.js";
-import type { PageFreshness } from "../freshness/types.js";
-import type { PageId, ViewerPage, ViewerSnapshot } from "../viewer/types.js";
-
-/** Neutral freshness for a synthetic typed page (never source-tracked → unverified, never stale/contradicted). */
-const NEUTRAL_FRESHNESS: PageFreshness = {
-  freshnessStatus: "unverified",
-  contradicted: false,
-  archived: false,
-};
+import type { ProfilePack } from "../profile/types.js";
+import type { ViewerPage, ViewerSnapshot } from "../viewer/types.js";
 
 /**
- * Project one collected {@link EntityPage} into a {@link ViewerPage}-shaped pool
- * entry keyed by its branded `EntityId`. The id IS the EntityId (so a relation
- * edge endpoint resolves to this page in the graph); `slug` keeps the validated
- * stem; `title` falls back to the slug; `body` carries the page prose so the
- * lexical ranker can match on it and the primary entry can include it. The
- * `pageDirectory` carries the entity TYPE (cast at this single boundary — typed
- * pages live only in the context pool, never the viewer's concept/query routes).
- * No wikilinks/citations/warnings — typed pages reach neighbors via relation edges.
- */
-function entityPageToViewerPage(page: EntityPage): ViewerPage {
-  return {
-    id: page.id as unknown as PageId,
-    slug: page.slug,
-    pageDirectory: page.entityType as PageDirectory,
-    title: page.title ?? page.slug,
-    filePath: page.filePath,
-    frontmatter: page.frontmatter,
-    body: page.body,
-    outgoingLinks: [] as PageId[],
-    citations: [] as ClaimCitation[],
-    warnings: [],
-    freshness: NEUTRAL_FRESHNESS,
-  };
-}
-
-/**
- * Return a snapshot whose `pages` pool ADDITIVELY includes the active non-default
- * profile's typed entity pages (FIX F3). For the built-in DEFAULT profile (or any
- * read error) the ORIGINAL snapshot is returned UNCHANGED, so the default context
- * pack is byte-identical. The typed pages are APPENDED after the legacy pages so
- * the legacy-page order — and thus the default ranking — is untouched.
+ * Return a snapshot whose `pages` pool honours each entity type's
+ * `retrieval.includeInContext`.
  *
- * Profile-INVALID typed pages are EXCLUDED from the context pool: a page that the
- * collector flags with a field-contract problem (matched to the page by its
- * absolute `filePath`) is never promoted as clean primary evidence to the agent.
- * The violation is still surfaced to the user through status/lint — context
- * simply must not rank an unvalidated/invalid page as evidence.
- *
- * Task C1: typed pages whose entity type declares `retrieval.includeInContext: false`
- * are ALSO excluded from the pool. Omitted or `true` → included (tri-state). This
- * filter runs AFTER the validity filter so both gates are independently enforced.
+ * The ORIGINAL snapshot object is returned unchanged whenever nothing is
+ * excluded (the built-in default profile, a read error, or a profile that opts
+ * nothing out), so the common path allocates nothing and the default context
+ * pack is byte-identical.
  *
  * @param root - Absolute project root.
- * @param snapshot - The frozen viewer snapshot to augment.
- * @returns The snapshot, possibly with valid typed entity pages appended to `pages`.
+ * @param snapshot - The frozen viewer snapshot to scope.
+ * @param preloaded - A profile the caller already resolved, threaded through so
+ *   one pack is never assembled against two mid-swapped profiles.
+ * @returns The snapshot, minus any typed page its entity type keeps out of context.
  */
-export async function augmentSnapshotWithTypedPages(
+export async function narrowSnapshotToContextPool(
   root: string,
   snapshot: ViewerSnapshot,
   preloaded?: PreloadedProfile,
 ): Promise<ViewerSnapshot> {
-  const loaded = await resolveNonDefaultProfile(root, preloaded);
-  if (loaded === undefined) return snapshot; // default profile → byte-identical pool
-  let typed: ViewerPage[];
+  let profile: ProfilePack;
   try {
-    const { pages, problems } = await collectEntityPages(root, loaded.profile);
-    const invalid = invalidEntityPagePaths(problems);
-    typed = pages
-      .filter((page) => !invalid.has(page.filePath))
-      .filter((page) => loaded.profile.entities[page.entityType]?.retrieval?.includeInContext !== false)
-      .map(entityPageToViewerPage);
+    const loaded = await resolveNonDefaultProfile(root, preloaded);
+    if (loaded === undefined) return snapshot; // default profile → byte-identical pool
+    profile = loaded.profile;
   } catch {
-    return snapshot; // a collector failure must not break context — fall back to the legacy pool
+    return snapshot; // a profile-load failure must not break context
   }
-  if (typed.length === 0) return snapshot;
-  return { ...snapshot, pages: [...snapshot.pages, ...typed] };
+  const pages = snapshot.pages.filter((page) => !isExcludedFromContext(page, profile));
+  if (pages.length === snapshot.pages.length) return snapshot;
+  return { ...snapshot, pages };
+}
+
+/**
+ * True when `page` is a typed entity page whose type declares
+ * `retrieval.includeInContext: false`. Default pages are never excluded — the
+ * flag lives on an entity type definition, and they have none.
+ */
+function isExcludedFromContext(page: ViewerPage, profile: ProfilePack): boolean {
+  if (page.entityType === undefined) return false;
+  return profile.entities[page.entityType]?.retrieval?.includeInContext === false;
 }

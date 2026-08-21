@@ -178,13 +178,60 @@ function validateScan(
 }
 
 /**
+ * The page's display title, read from the type's DECLARED title field.
+ *
+ * `EntityTypeDef.titleField` names the frontmatter key a type carries its
+ * display name under. It had been in the schema since the profile format
+ * shipped and was read by nothing, so a type whose name lives under another key
+ * (AutoSci's `people`, keyed `name`) had no title at all and every surface fell
+ * back to its slug.
+ *
+ * Resolved HERE rather than in any one reader, so every surface that renders a
+ * display title reads one declaration one way: the viewer, context packs, index
+ * generation and the JSON export. A reader-local fix would give a single
+ * declaration two meanings.
+ *
+ * Two surfaces deliberately do NOT consume it, and both say so at their own
+ * call site: `empty-page` in lint.ts judges the LITERAL `title` key, because a
+ * frontmatter-only record type is not an empty page; and the OKF export carries
+ * the literal key too, because publishing the resolved title would ship one
+ * value under two keys. `status` reads neither — it counts pages.
+ *
+ * `undefined` — never `""` — is the answer for anything unusable, because every
+ * downstream surface already falls back to the slug on undefined and a blank
+ * string would replace that fallback with an empty line.
+ *
+ * A type declaring NO `titleField` keeps the previous behaviour byte-for-byte,
+ * down to `parseStatus.hasTitle`'s non-empty (untrimmed) test. The declared path
+ * trims: `"   "` reads as absent rather than as a blank heading, and `"  Ada  "`
+ * resolves to `"Ada"` rather than carrying padding into every surface that
+ * renders it. The asymmetry is deliberate; the existing path was left as it was.
+ *
+ * The `string` test is also what confines an inherited name. `titleField` is
+ * validated to name a declared own field, but this indexes user-authored
+ * frontmatter with a profile-supplied key, and an unvalidated profile reaching
+ * here (the SDK, a test) could name `constructor` or `toString` — which resolve
+ * off `Object.prototype` to FUNCTIONS, never strings, and so fall out here as
+ * absent. An own-property guard would be redundant with it, and no test could
+ * tell the two apart.
+ */
+function pageTitle(def: EntityTypeDef, scan: RawEntityScan): string | undefined {
+  if (def.titleField === undefined) {
+    return scan.parseStatus.hasTitle ? (scan.frontmatter.title as string) : undefined;
+  }
+  const declared = scan.frontmatter[def.titleField];
+  if (typeof declared !== "string") return undefined;
+  const trimmed = declared.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
  * Build a content-carrying `EntityPage` (identity PLUS the scan's
  * `frontmatter`/`body`/`title`) for a valid page, or `null` (with a problem)
  * for an invalid identity. Field-contract violations are surfaced but the page
  * is still produced. Shares all validation with {@link validateScan}.
  *
- * The `title` is the frontmatter title only when the scan flagged one present
- * (`parseStatus.hasTitle`); otherwise it is `undefined`.
+ * The `title` comes from the type's declared title field — see {@link pageTitle}.
  */
 function pageFromScan(
   def: EntityTypeDef,
@@ -194,7 +241,7 @@ function pageFromScan(
 ): EntityPage | null {
   const stem = validateScan(def, entityType, scan, problems);
   if (stem === null) return null;
-  const title = scan.parseStatus.hasTitle ? (scan.frontmatter.title as string) : undefined;
+  const title = pageTitle(def, scan);
   return {
     entityType,
     directory: def.directory,
